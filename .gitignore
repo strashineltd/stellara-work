@@ -7,7 +7,15 @@ dist/
 out/
 build/
 release/
-*.tsbuildinfo
+electron/dist/**
+electron/**/*.js
+electron/**/*.js.map
+shared/**/*.js
+shared/**/*.js.map
+**/*.tsbuildinfo
+# tsx-generated temporary files (e.g. scripts/verify-w1.js)
+scripts/**/*.js
+scripts/**/*.js.map
 
 # Electron
 src-tauri/
