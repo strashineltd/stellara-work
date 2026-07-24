@@ -68,7 +68,6 @@ async function main() {
 
   // 3. 直接验证 5 个 tool（不需要 LLM）
   console.log('▶ 验证 5 个 tool（不通过 LLM）');
-  const readmePath = path.join(cwd, 'README.md');
   const readResult = await invokeTool('read_file', { path: 'README.md' }, cwd);
   console.log(`  read_file: ${readResult.ok ? '✓' : '✗'} (${readResult.output.length} 字符)`);
 
@@ -130,7 +129,8 @@ async function main() {
       console.log(`\n  [tool_call ${toolCalls}] ${tc.function.name}(${tc.function.arguments.slice(0, 80)}...)`);
     } else if (event.type === 'tool_result') {
       const tr = event.toolResult!;
-      console.log(`  [tool_result] ${tr.name}: ${tr.result.ok ? 'OK' : 'FAIL'}`);
+      const r = tr.result as { ok: boolean; error?: string };
+      console.log(`  [tool_result] ${tr.name}: ${r.ok ? 'OK' : 'FAIL'}`);
     } else if (event.type === 'error') {
       console.error(`\n  [error] ${event.error}`);
     } else if (event.type === 'done') {

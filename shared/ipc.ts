@@ -84,6 +84,19 @@ export interface ChatStreamEvent {
 // Tool 相关
 // ============================================
 
+/**
+ * OpenAI 兼容协议的 function calling tool 定义
+ * 主进程和渲染进程都引用，作为 IPC 契约的一部分
+ */
+export interface OpenAITool {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
 export type ToolName =
   | 'read_file'
   | 'write_file'

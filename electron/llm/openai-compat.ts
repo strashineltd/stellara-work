@@ -1,24 +1,21 @@
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { buildChatCompletionsUrl } from './endpoint';
-import type { ModelConfig, ChatMessage, ToolCall, ChatStreamEvent } from '../../shared/ipc';
+import type {
+  ModelConfig,
+  ChatMessage,
+  ToolCall,
+  ChatStreamEvent,
+  OpenAITool,
+} from '../../shared/ipc';
 
 export interface ChatCompletionRequest {
   model: string;
   messages: ChatMessage[];
   tools?: OpenAITool[];
   tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
-  stream: true;
+  stream: boolean;
   temperature?: number;
   max_tokens?: number;
-}
-
-export interface OpenAITool {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
 }
 
 /**

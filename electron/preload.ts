@@ -19,7 +19,6 @@ const api: ElectronAPI = {
   chat: {
     send: async (request: ChatRequest): Promise<AsyncIterable<ChatStreamEvent>> => {
       // 返回一个 async iterable，渲染进程 for await 消费
-      const channel = `chat:stream:${Date.now()}:${Math.random()}`;
       return (async function* () {
         // 一次性拿到所有事件（v0.9 简化：W1 不做实时流推送）
         // 等 W2 接 WebSocket / EventEmitter 改成真正的流

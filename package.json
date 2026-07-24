@@ -2,7 +2,7 @@
   "name": "stellara-work",
   "version": "0.9.0",
   "description": "数据本地的 Codex 风格 Windows 桌面 Agent（GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型）",
-  "main": "electron/dist/main.js",
+  "main": "electron/dist/electron/main.js",
   "author": "Stellara Work",
   "license": "UNLICENSED",
   "private": true,
@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify:w1": "tsx scripts/verify-w1.ts",
+    "verify:w1": "vitest run scripts/verify-w1.test.ts",
     "package": "npm run build && electron-builder --win nsis",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
@@ -28,8 +28,8 @@
     "electron-log": "^5.2.0",
     "electron-updater": "^6.3.9",
     "eventsource-parser": "^3.0.0",
-    "execa": "^9.5.1",
-    "fast-glob": "^3.3.2",
+    "execa": "^8.0.1",
+    "fast-glob": "^3.3.3",
     "pino": "^9.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -42,14 +42,14 @@
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/parser": "^8.15.0",
     "@vitejs/plugin-react": "^4.3.3",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^32.2.5",
     "electron-builder": "^25.1.8",
     "eslint": "^9.15.0",
-    "@typescript-eslint/eslint-plugin": "^8.15.0",
-    "@typescript-eslint/parser": "^8.15.0",
     "prettier": "^3.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
@@ -73,7 +73,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico",

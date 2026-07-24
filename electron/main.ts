@@ -32,7 +32,7 @@ function createWindow(): void {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    show: false,
+    show: true,
     autoHideMenuBar: true,
     backgroundColor: '#FFFFFF',
     icon: path.join(__dirname, '..', '..', 'assets', 'icon.ico'),
@@ -51,8 +51,33 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '..', '..', 'dist', 'index.html'));
   }
 
+  // 兜底：5 秒后还没显示就强制 show
   mainWindow.once('ready-to-show', () => {
+    log.info('Window ready to show');
     mainWindow?.show();
+  });
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      log.warn('Forcing window show after 5s timeout');
+      mainWindow.show();
+    }
+  }, 5000);
+
+  // Debug: log renderer errors to console
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+    const msg = `Renderer failed to load: ${errorCode} ${errorDescription} (URL: ${validatedURL})`;
+    console.error(msg);
+    log.error(msg);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    const msg = `Render process gone: ${JSON.stringify(details)}`;
+    console.error(msg);
+    log.error(msg);
+  });
+  mainWindow.webContents.on('console-message', (_e, _level, message, line, source) => {
+    const msg = `[renderer] ${message} (${source}:${line})`;
+    console.log(msg);
+    log.info(msg);
   });
 
   // 外链走系统浏览器
