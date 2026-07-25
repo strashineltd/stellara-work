@@ -221,16 +221,27 @@ export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
           {tab === 'providers' && (
             <div className="providers-list">
               <div className="providers-actions">
-                {!showAdd && (
-                  <button className="btn btn-primary" onClick={() => setShowAdd(true)} type="button">
-                    ➕ 添加模型
-                  </button>
-                )}
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setShowAdd((v) => !v)}
+                  type="button"
+                  aria-expanded={showAdd}
+                >
+                  {showAdd ? '▲ 收起' : '▼ 添加模型'}
+                </button>
               </div>
 
               {showAdd && (
                 <div className="add-model-form">
-                  <h4>添加新模型</h4>
+                  <div className="add-model-form-header">
+                    <h4>添加新模型</h4>
+                    <button
+                      className="btn-icon btn-icon-small"
+                      onClick={resetAddForm}
+                      type="button"
+                      title="收起"
+                    >×</button>
+                  </div>
                   <div className="model-grid">
                     {presets.map((p) => (
                       <ModelCard
