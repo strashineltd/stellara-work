@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { ModelListItem, AppSettings, SessionSummary, ModelConfig } from '../../shared/ipc';
+import type {
+  ModelListItem, AppSettings, SessionSummary, ModelConfig,
+  ModelPreset, PresetModelId,
+} from '../../shared/ipc';
+import { ModelCard } from './ModelCard';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -11,13 +15,14 @@ type Tab = 'providers' | 'sessions' | 'app';
 
 /**
  * 设置 Modal（3 tab：Providers / Sessions / App）
- * - Providers：列出 model、编辑 key、设活跃、删除
+ * - Providers：列出 model、添加、编辑 key、设活跃、删除
  * - Sessions：列出所有会话、删除、清空全部
  * - App：默认 workDir、数据目录、日志、清空所有数据（危险区）
  */
 export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
   const [tab, setTab] = useState<Tab>('providers');
   const [models, setModels] = useState<ModelListItem[]>([]);
+  const [presets, setPresets] = useState<ModelPreset[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [settings, setSettings] = useState<AppSettings>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -25,22 +30,58 @@ export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
   const [confirmClear, setConfirmClear] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  // 添加 model 的子表单
+  const [showAdd, setShowAdd] = useState(false);
+  const [addPresetId, setAddPresetId] = useState<PresetModelId>('deepseek-v4-pro');
+  const [addApiKey, setAddApiKey] = useState('');
+  const [addBaseUrl, setAddBaseUrl] = useState('');
+  const [addModelName, setAddModelName] = useState('');
+  const [addWorkDir, setAddWorkDir] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
+  const [addTest, setAddTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [addError, setAddError] = useState<string | null>(null);
+
   useEffect(() => {
     void (async () => {
       try {
-        const [m, s, st] = await Promise.all([
+        const [m, list, s, st] = await Promise.all([
           window.electronAPI.models.getAll(),
+          window.electronAPI.models.list(),
           window.electronAPI.sessions.list(),
           window.electronAPI.settings.get(),
         ]);
         setModels(m);
+        setPresets(list.presets);
         setSessions(s);
         setSettings(st);
+        setAddWorkDir(st.workDirDefault ?? '');
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
   }, []);
+
+  // 切预设时，自动填 baseUrl + model（custom 不动）
+  useEffect(() => {
+    if (!showAdd) return;
+    const p = presets.find((x) => x.id === addPresetId);
+    if (p && !p.isCustom) {
+      setAddBaseUrl(p.baseUrl);
+      setAddModelName(p.model);
+    }
+  }, [addPresetId, presets, showAdd]);
+
+  function resetAddForm() {
+    setShowAdd(false);
+    setAddPresetId('deepseek-v4-pro');
+    setAddApiKey('');
+    setAddBaseUrl('');
+    setAddModelName('');
+    setAddWorkDir(settings.workDirDefault ?? '');
+    setAddBusy(false);
+    setAddTest('idle');
+    setAddError(null);
+  }
 
   async function refreshModels() {
     setModels(await window.electronAPI.models.getAll());
@@ -97,6 +138,56 @@ export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
     }
   }
 
+  async function handlePickAddWorkDir() {
+    const dir = await window.electronAPI.dialog.openDirectory();
+    if (dir) setAddWorkDir(dir);
+  }
+
+  async function handleTestAdd() {
+    const p = presets.find((x) => x.id === addPresetId);
+    if (!p) return;
+    setAddTest('testing');
+    setAddError(null);
+    const config: ModelConfig = {
+      id: p.id,
+      label: p.label,
+      baseUrl: addBaseUrl || p.baseUrl,
+      model: addModelName || p.model,
+      apiKey: addApiKey,
+      isCustom: p.isCustom,
+    };
+    const r = await window.electronAPI.models.test(config);
+    if (r.ok) setAddTest('ok');
+    else { setAddTest('fail'); setAddError(r.error ?? '未知错误'); }
+  }
+
+  async function handleSaveAdd() {
+    const p = presets.find((x) => x.id === addPresetId);
+    if (!p) return;
+    if (!addApiKey) { setAddError('请填 API key'); setAddTest('fail'); return; }
+    if (!addWorkDir) { setAddError('请选工作目录'); setAddTest('fail'); return; }
+    setAddBusy(true);
+    setAddError(null);
+    const config: ModelConfig = {
+      id: p.id,
+      label: p.label,
+      baseUrl: addBaseUrl || p.baseUrl,
+      model: addModelName || p.model,
+      apiKey: addApiKey,
+      isCustom: p.isCustom,
+      workDir: addWorkDir,
+    };
+    const r = await window.electronAPI.models.configure(config);
+    setAddBusy(false);
+    if (r.ok) {
+      await refreshModels();
+      resetAddForm();
+    } else {
+      setAddError(r.error ?? '保存失败');
+      setAddTest('fail');
+    }
+  }
+
   async function handleDeleteSession(id: string) {
     if (!confirm('删除该会话？')) return;
     try {
@@ -129,7 +220,97 @@ export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
           {error && <div className="error-banner"><span className="error-icon">⚠</span><span className="error-text">{error}</span></div>}
           {tab === 'providers' && (
             <div className="providers-list">
-              {models.length === 0 && <p className="empty-hint">还没有 model。点 ⋯ → ⚙️ 重新配置加一个</p>}
+              <div className="providers-actions">
+                {!showAdd && (
+                  <button className="btn btn-primary" onClick={() => setShowAdd(true)} type="button">
+                    ➕ 添加模型
+                  </button>
+                )}
+              </div>
+
+              {showAdd && (
+                <div className="add-model-form">
+                  <h4>添加新模型</h4>
+                  <div className="model-grid">
+                    {presets.map((p) => (
+                      <ModelCard
+                        key={p.id}
+                        preset={p}
+                        selected={p.id === addPresetId}
+                        onSelect={() => setAddPresetId(p.id)}
+                      />
+                    ))}
+                  </div>
+                  <div className="settings-row">
+                    <label>API key</label>
+                    <input
+                      type="password"
+                      placeholder="sk-xxx 或对应厂商的 key"
+                      value={addApiKey}
+                      onChange={(e) => setAddApiKey(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+                  {addPresetId === 'custom' ? (
+                    <>
+                      <div className="settings-row">
+                        <label>Base URL</label>
+                        <input
+                          type="text"
+                          placeholder="任意 OpenAI 兼容 endpoint"
+                          value={addBaseUrl}
+                          onChange={(e) => setAddBaseUrl(e.target.value)}
+                        />
+                      </div>
+                      <div className="settings-row">
+                        <label>Model</label>
+                        <input
+                          type="text"
+                          placeholder="model 名（如 my-custom-model）"
+                          value={addModelName}
+                          onChange={(e) => setAddModelName(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="readonly-fields">
+                      <div className="readonly-field">
+                        <span className="label">Base URL</span>
+                        <code>{addBaseUrl || '（自动）'}</code>
+                      </div>
+                      <div className="readonly-field">
+                        <span className="label">Model</span>
+                        <code>{addModelName || '（自动）'}</code>
+                      </div>
+                    </div>
+                  )}
+                  <div className="settings-row">
+                    <label>工作目录</label>
+                    <div className="dir-picker">
+                      <input
+                        type="text"
+                        value={addWorkDir}
+                        readOnly
+                        placeholder="选个目录"
+                      />
+                      <button className="btn btn-secondary" onClick={() => void handlePickAddWorkDir()} type="button">选择…</button>
+                    </div>
+                  </div>
+                  {addError && <div className="error-banner"><span className="error-icon">⚠</span><span className="error-text">{addError}</span></div>}
+                  {addTest === 'ok' && <div className="status-ok">✓ 连接测试通过</div>}
+                  <div className="form-actions">
+                    <button className="btn btn-secondary" onClick={() => void handleTestAdd()} disabled={addBusy || addTest === 'testing' || !addApiKey} type="button">
+                      {addTest === 'testing' ? '测试中…' : '测试连接'}
+                    </button>
+                    <button className="btn btn-primary" onClick={() => void handleSaveAdd()} disabled={addBusy || !addApiKey} type="button">
+                      {addBusy ? '保存中…' : '保存'}
+                    </button>
+                    <button className="btn btn-secondary" onClick={resetAddForm} type="button">取消</button>
+                  </div>
+                </div>
+              )}
+
+              {models.length === 0 && !showAdd && <p className="empty-hint">还没有 model。点上方「添加模型」按钮加一个</p>}
               {models.map((m) => (
                 <div key={m.id} className="provider-card">
                   <div className="provider-info">
