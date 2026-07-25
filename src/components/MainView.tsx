@@ -37,6 +37,7 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
 
   // 点外部关闭菜单
   useEffect(() => {
@@ -75,6 +76,7 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
     if (!input.trim() || busy) return;
     const userContent = input;
     const history = [...buildHistory(), { role: 'user' as MessageRole, content: userContent }];
+    const usePlanMode = planMode;
 
     // 立即加 user + 空的 assistant
     setEntries((prev) => [
@@ -86,7 +88,7 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
     setBusy(true);
 
     try {
-      const { events } = await window.electronAPI.chat.start({ messages: history });
+      const { events } = await window.electronAPI.chat.start({ messages: history, planMode: usePlanMode });
 
       for await (const ev of events) {
         applyStreamEvent(ev);
@@ -291,6 +293,15 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
           rows={3}
         />
         <div className="input-actions">
+          <label className={`plan-toggle ${planMode ? 'on' : ''}`} title="Plan 模式：agent 只读文件 / 搜索，不写不执行">
+            <input
+              type="checkbox"
+              checked={planMode}
+              onChange={(e) => setPlanMode(e.target.checked)}
+              disabled={busy}
+            />
+            <span>Plan 模式{planMode ? '（只读）' : ''}</span>
+          </label>
           <span className="hint">Ctrl+Enter 发送</span>
           <button
             className="btn btn-primary"

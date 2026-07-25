@@ -209,6 +209,7 @@ async function runAgentLoopForIpc(
       model,
       cwd: model.workDir ?? process.cwd(),
       history,
+      planMode: request.planMode ?? false,
       // W1: 暂时自动批准所有危险操作（UI 批准机制 W2.5 实现）
       onApproval: async () => true,
     })) {

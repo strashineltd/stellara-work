@@ -769,6 +769,34 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-top: 8px;
+  gap: 12px;
+}
+
+.plan-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-soft);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.plan-toggle:hover:not([disabled]) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.plan-toggle.on {
+  color: var(--color-accent);
+  background: #e8f0ff;
+}
+
+.plan-toggle input {
+  margin: 0;
+  cursor: pointer;
 }
 
 .hint {

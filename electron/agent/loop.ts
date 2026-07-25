@@ -8,6 +8,8 @@ export interface AgentLoopOptions {
   cwd: string;
   /** 之前轮次的消息（不含 system；不含本轮的 user）— 多轮上下文 */
   history?: ChatMessage[];
+  /** Plan 模式：agent 只能调只读工具 */
+  planMode?: boolean;
   maxIterations?: number;
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
 }
@@ -23,20 +25,18 @@ export async function* runAgentLoop(
   userMessage: string,
   options: AgentLoopOptions,
 ): AsyncGenerator<ChatStreamEvent> {
-  const { model, cwd, history = [], maxIterations = 10, onApproval } = options;
+  const { model, cwd, history = [], planMode = false, maxIterations = 10, onApproval } = options;
 
   const client = new OpenAICompatClient(model);
-  // 拼消息：system + 之前轮次（剔除 system 与 tool_calls/tool 名） + 本轮 user
-  // renderer 发的 history 已经不含 system；这里也防御一下
+  // 拼消息：system（按 planMode 切） + 之前轮次 + 本轮 user
   const prior = history.filter((m) => m.role !== 'system');
   const messages: ChatMessage[] = [
-    { role: 'system', content: getSystemPrompt(false) },
+    { role: 'system', content: getSystemPrompt(planMode) },
     ...prior,
     { role: 'user', content: userMessage },
   ];
 
   let iteration = 0;
-  let planMode = false;
 
   while (iteration < maxIterations) {
     iteration++;
