@@ -86,6 +86,7 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
     const userContent = input;
     const history = [...buildHistory(), { role: 'user' as MessageRole, content: userContent }];
     const usePlanMode = planMode;
+    setLastUserForRetry(null); // 新的发送 → 清掉重试状态
 
     // 立即加 user + 空的 assistant
     setEntries((prev) => [
@@ -107,18 +108,49 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
       setEntries((prev) => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
+        const msg = err instanceof Error ? err.message : String(err);
         if (last && last.kind === 'assistant') {
           copy[copy.length - 1] = {
             ...last,
-            content: last.content + `\n\n[连接错误] ${err instanceof Error ? err.message : String(err)}`,
+            content: last.content + `\n\n[连接错误] ${msg}`,
           };
         } else {
-          copy.push({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+          copy.push({ kind: 'error', message: msg });
         }
+        // 记录最后一条 user 消息 → 错误条上挂「再试一次」
+        setLastUserForRetry(userContent);
         return copy;
       });
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** 错误后允许重试：把 input 还原 + 再 send */
+  const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
+  function handleRetry() {
+    if (lastUserForRetry) {
+      setInput(lastUserForRetry);
+      // 移除上次的错误尾巴
+      setEntries((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last && last.kind === 'assistant' && last.content.includes('[连接错误]')) {
+          // 去掉最后一段错误尾巴
+          copy[copy.length - 1] = {
+            ...last,
+            content: last.content.replace(/\n\n\[连接错误\][\s\S]*$/, ''),
+          };
+        } else if (last && last.kind === 'error') {
+          copy.pop();
+        }
+        return copy;
+      });
+      setLastUserForRetry(null);
+      // 等 React 渲染完再 send（用 rAF 等状态落地）
+      requestAnimationFrame(() => {
+        void handleSend();
+      });
     }
   }
 
@@ -265,6 +297,11 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
                     <div className="message-role">Agent</div>
                     <div className="message-content">
                       {e.content ? <MarkdownView content={e.content} /> : <span className="thinking">思考中...</span>}
+                      {lastUserForRetry && !busy && e.content.includes('[连接错误]') && (
+                        <button className="btn btn-secondary btn-retry" onClick={handleRetry} type="button">
+                          ↻ 再试一次
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -288,7 +325,12 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
                 {e.kind === 'error' && (
                   <div className="error-banner">
                     <span className="error-icon">⚠</span>
-                    <span>{e.message}</span>
+                    <span className="error-text">{e.message}</span>
+                    {lastUserForRetry && !busy && (
+                      <button className="btn btn-secondary btn-retry" onClick={handleRetry} type="button">
+                        ↻ 再试一次
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
