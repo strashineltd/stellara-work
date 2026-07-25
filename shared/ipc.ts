@@ -300,6 +300,7 @@ export interface ElectronAPI {
   fs: {
     listTree: (cwd: string, maxDepth?: number) => Promise<FsNode>;
     readFile: (workDir: string, path: string, maxBytes?: number) => Promise<{ content: string; size: number; truncated: boolean }>;
+    openPath: (workDir: string, path: string) => Promise<boolean>;
   };
   settings: {
     get: () => Promise<AppSettings>;

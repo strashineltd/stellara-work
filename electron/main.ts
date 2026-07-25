@@ -240,6 +240,19 @@ function registerIpcHandlers(): void {
     return readFileContent(workDir, filePath, maxBytes);
   });
 
+  // FS: 用系统默认应用打开（文件用默认 app，目录用资源管理器）
+  ipcMain.handle('fs:openPath', async (_e, workDir: string, filePath: string) => {
+    const root = path.resolve(workDir);
+    const resolved = path.resolve(filePath);
+    const rel = path.relative(root, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`路径超出允许范围：${resolved}`);
+    }
+    const result = await shell.openPath(resolved);
+    if (result) throw new Error(`打开失败：${result}`);
+    return true;
+  });
+
   // Sessions
   ipcMain.handle('sessions:list', async () => {
     const { listSessions } = await import('./store/db');

@@ -132,6 +132,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('fs:listTree', cwd, maxDepth),
     readFile: (workDir: string, filePath: string, maxBytes?: number) =>
       ipcRenderer.invoke('fs:readFile', workDir, filePath, maxBytes),
+    openPath: (workDir: string, filePath: string): Promise<boolean> =>
+      ipcRenderer.invoke('fs:openPath', workDir, filePath),
   },
 };
 

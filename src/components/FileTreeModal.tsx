@@ -70,6 +70,7 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
                   depth={0}
                   expanded={expanded}
                   selected={selected}
+                  workDir={workDir}
                   onToggle={toggleExpand}
                   onSelect={loadPreview}
                 />
@@ -104,14 +105,24 @@ interface TreeNodeProps {
   depth: number;
   expanded: Set<string>;
   selected: string | null;
+  workDir: string;
   onToggle: (path: string) => void;
   onSelect: (path: string) => void;
 }
 
-function TreeNode({ node, depth, expanded, selected, onToggle, onSelect }: TreeNodeProps) {
+function TreeNode({ node, depth, expanded, selected, workDir, onToggle, onSelect }: TreeNodeProps) {
   const isDir = node.type === 'dir';
   const isOpen = expanded.has(node.path);
   const isSelected = selected === node.path;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setMenuPos({ x: e.clientX, y: e.clientY });
+    setMenuOpen(true);
+  }
+
   return (
     <li>
       <div
@@ -121,6 +132,7 @@ function TreeNode({ node, depth, expanded, selected, onToggle, onSelect }: TreeN
           if (isDir) onToggle(node.path);
           else onSelect(node.path);
         }}
+        onContextMenu={handleContextMenu}
         title={node.path}
       >
         <span className="ftree-icon">{isDir ? (isOpen ? '📂' : '📁') : '📄'}</span>
@@ -138,13 +150,66 @@ function TreeNode({ node, depth, expanded, selected, onToggle, onSelect }: TreeN
               depth={depth + 1}
               expanded={expanded}
               selected={selected}
+              workDir={workDir}
               onToggle={onToggle}
               onSelect={onSelect}
             />
           ))}
         </ul>
       )}
+      {menuOpen && menuPos && (
+        <ContextMenu
+          x={menuPos.x}
+          y={menuPos.y}
+          isDir={isDir}
+          path={node.path}
+          workDir={workDir}
+          onClose={() => { setMenuOpen(false); setMenuPos(null); }}
+        />
+      )}
     </li>
+  );
+}
+
+function ContextMenu({ x, y, isDir, path, onClose, workDir }: {
+  x: number; y: number; isDir: boolean; path: string; onClose: () => void; workDir: string;
+}) {
+  // 简单自实现的 context menu（避开引入 react-contexify 等）
+  useEffect(() => {
+    const onClick = () => onClose();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('click', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('click', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  async function copyPath() {
+    try {
+      await navigator.clipboard.writeText(path);
+    } catch {
+      // ignore
+    }
+  }
+
+  function openInExplorer() {
+    // 走专用 IPC（shell.openPath 在主进程，越权检查）
+    void window.electronAPI.fs.openPath(workDir, path).catch((e: unknown) => {
+      console.error('openPath failed:', e);
+    });
+  }
+
+  return (
+    <ul
+      className="context-menu"
+      style={{ position: 'fixed', top: y, left: x }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <li onClick={() => { void copyPath(); onClose(); }}>📋 复制路径</li>
+      <li onClick={() => { void openInExplorer(); onClose(); }}>📂 {isDir ? '在资源管理器打开' : '在默认应用打开'}</li>
+    </ul>
   );
 }
 
