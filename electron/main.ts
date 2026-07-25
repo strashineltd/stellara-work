@@ -48,7 +48,11 @@ function createWindow(): void {
   if (isDev) {
     mainWindow.loadURL(RENDERER_DEV_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', '..', 'dist', 'index.html'));
+    // __dirname 在 electron/dist/electron/，需要 ../.. 回到项目根，再拼 dist/index.html
+    // 用 app.getAppPath() 更稳
+    const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
+    log.info(`Loading renderer from: ${indexPath}`);
+    mainWindow.loadFile(indexPath);
   }
 
   // 兜底：5 秒后还没显示就强制 show

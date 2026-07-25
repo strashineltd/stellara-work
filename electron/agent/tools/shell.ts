@@ -1,4 +1,4 @@
-import { execa, ExecaError } from 'execa';
+import { spawn } from 'node:child_process';
 import type { RunCommandArgs, ToolResult, OpenAITool } from '../../../shared/ipc';
 
 /**
@@ -13,6 +13,10 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /\bdel\s+\/[sq]\s+[a-z]:\\/i, // del /s q c:\
 ];
 
+/**
+ * 用 Node.js 内置 child_process.spawn 跑 shell 命令
+ * （不依赖 execa —— execa 8.x/9.x 是 ESM-only，主进程 CJS 编译跑不过）
+ */
 export async function runCommand(args: RunCommandArgs, cwd: string): Promise<ToolResult> {
   // 1. 危险命令检查
   for (const pattern of BLOCKED_PATTERNS) {
@@ -25,31 +29,63 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     }
   }
 
-  // 2. PowerShell on Windows（v0.9 Windows 专属）
+  // 2. Windows 用 PowerShell，其他平台用默认 shell
   const isWindows = process.platform === 'win32';
-  try {
-    const result = await execa(args.command, {
-      shell: isWindows ? 'powershell.exe' : true,
-      cwd,
-      timeout: args.timeoutMs ?? 30000,
-      reject: false,
-      all: true, // 合并 stdout + stderr
+  const timeoutMs = args.timeoutMs ?? 30000;
+
+  return new Promise<ToolResult>((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    let child;
+    try {
+      child = spawn(args.command, {
+        cwd,
+        shell: isWindows ? 'powershell.exe' : true,
+        windowsHide: true,
+      });
+    } catch (err) {
+      resolve({ ok: false, output: '', error: errorMessage(err) });
+      return;
+    }
+
+    const finish = (result: ToolResult) => {
+      if (settled) return;
+      settled = true;
+      try {
+        if (!child.killed) child.kill();
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+
+    child.stdout?.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.stderr?.on('data', (data: Buffer) => {
+      stderr += data.toString();
     });
 
-    if (result.failed) {
-      return {
-        ok: false,
-        output: result.all ?? '',
-        error: `Exit code ${result.exitCode}: ${(result as ExecaError).shortMessage ?? ''}`,
-      };
-    }
-    return {
-      ok: true,
-      output: (result.all ?? '').slice(0, 50000), // 限制输出大小
-    };
-  } catch (err) {
-    return { ok: false, output: '', error: errorMessage(err) };
-  }
+    child.on('error', (err) => {
+      finish({ ok: false, output: stdout + stderr, error: errorMessage(err) });
+    });
+
+    child.on('close', (code) => {
+      const output = (stdout + stderr).slice(0, 50000);
+      if (code === 0) {
+        finish({ ok: true, output });
+      } else {
+        finish({ ok: false, output, error: `Exit code ${code ?? 'null'}` });
+      }
+    });
+
+    // 超时
+    setTimeout(() => {
+      finish({ ok: false, output: stdout + stderr, error: `Timeout after ${timeoutMs}ms` });
+    }, timeoutMs);
+  });
 }
 
 function errorMessage(err: unknown): string {
