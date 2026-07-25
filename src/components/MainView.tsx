@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent } from '../../shared/ipc';
 import { MarkdownView } from './MarkdownView';
 import { ToolCallCard } from './ToolCallCard';
@@ -18,6 +18,8 @@ type DisplayEntry =
 interface MainViewProps {
   config: ModelConfig;
   info: AppInfo;
+  onReconfigure: () => void;
+  onSwitchModel: (config: ModelConfig) => void;
 }
 
 /**
@@ -27,11 +29,37 @@ interface MainViewProps {
  * - tool_call / tool_result 走折叠卡片
  * - 真实流式：content event 直接更新最后一条 assistant 条目
  */
-export function MainView({ config, info: _info }: MainViewProps) {
+export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _onSwitchModel }: MainViewProps) {
   void _info;
+  void _onSwitchModel;
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmNew, setConfirmNew] = useState(false);
+
+  // 点外部关闭菜单
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = () => setMenuOpen(false);
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, [menuOpen]);
+
+  function handleNewTask() {
+    if (busy) return; // 不在 agent 跑的时候清空
+    if (entries.length === 0) {
+      setMenuOpen(false);
+      return;
+    }
+    setConfirmNew(true);
+  }
+
+  function doNewTask() {
+    setEntries([]);
+    setConfirmNew(false);
+    setMenuOpen(false);
+  }
 
   // 把当前 entries 投成发给 LLM 的 history（只取 user + assistant 的纯文本，跳过 tool_call/tool_result/错误）
   // 注意：assistant 的 tool_calls 是 stream 才知道的；本轮流式期间 history 只提交上一轮
@@ -137,8 +165,62 @@ export function MainView({ config, info: _info }: MainViewProps) {
           <span className="main-workdir" title={config.workDir ?? ''}>
             {config.workDir ? truncatePath(config.workDir) : '（未选工作目录）'}
           </span>
+          <div className="header-menu-wrap">
+            <button
+              className="btn-icon"
+              onClick={() => setMenuOpen((o) => !o)}
+              title="菜单"
+              type="button"
+            >
+              ⋯
+            </button>
+            {menuOpen && (
+              <div className="header-menu" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="header-menu-item"
+                  onClick={handleNewTask}
+                  type="button"
+                  disabled={busy || entries.length === 0}
+                  title={entries.length === 0 ? '当前没有任务' : '清空聊天历史，开新任务'}
+                >
+                  🆕 新任务
+                </button>
+                <button
+                  className="header-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReconfigure();
+                  }}
+                  type="button"
+                  title="切换模型 / 改 API key / 改工作目录"
+                >
+                  ⚙️ 重新配置
+                </button>
+                <div className="header-menu-hint">
+                  v0.9 · 快捷键以后再加
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
+
+      {confirmNew && (
+        <div className="modal-backdrop" onClick={() => setConfirmNew(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>清空当前聊天？</h3>
+            <p>当前 {entries.length} 条记录会被清掉，agent 上下文也会重置。</p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmNew(false)} type="button">
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={doNewTask} type="button">
+                清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="main-chat">
         {entries.length === 0 ? (

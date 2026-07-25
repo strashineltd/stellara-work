@@ -6,7 +6,7 @@ import { MainView } from './components/MainView';
 type AppState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo }
+  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; initialConfig?: ModelConfig | null }
   | { kind: 'ready'; config: ModelConfig; info: AppInfo };
 
 /**
@@ -54,10 +54,31 @@ export default function App() {
     return (
       <Onboarding
         presets={state.presets}
+        initialConfig={state.initialConfig}
         onComplete={(config) => setState({ kind: 'ready', config, info: state.info })}
       />
     );
   }
 
-  return <MainView config={state.config} info={state.info} />;
+  return (
+    <MainView
+      config={state.config}
+      info={state.info}
+      onReconfigure={() => {
+        // 拿一份新的 presets（可能用户换了电脑、预设更新了）
+        void window.electronAPI.models.list().then((modelList) => {
+          setState({
+            kind: 'onboarding',
+            presets: modelList.presets,
+            info: state.info,
+            initialConfig: state.config,
+          });
+        });
+      }}
+      onSwitchModel={(newConfig) => {
+        // 切换到另一个已配模型：直接更新 state（config 已 saveModelConfig 写好）
+        setState({ kind: 'ready', config: newConfig, info: state.info });
+      }}
+    />
+  );
 }

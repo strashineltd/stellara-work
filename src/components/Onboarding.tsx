@@ -4,6 +4,8 @@ import { ModelCard } from './ModelCard';
 
 interface OnboardingProps {
   presets: ModelPreset[];
+  /** 已有配置（用于"重新配置"模式：保留 workDir 和原 model 的 key，提示已配） */
+  initialConfig?: ModelConfig | null;
   onComplete: (config: ModelConfig) => void;
 }
 
@@ -13,16 +15,21 @@ interface OnboardingProps {
  * 2. 填 API key + 可选改 base_url + model
  * 3. 选工作目录
  * 4. 测试连接 + 保存
+ *
+ * 接受 initialConfig → "重新配置"模式：
+ * - 预填模型、workDir
+ * - API key 显示一个 hint（"已配，跳过则保留"），用户留空就保留
  */
-export function Onboarding({ presets, onComplete }: OnboardingProps) {
-  const [selectedId, setSelectedId] = useState<PresetModelId>('deepseek-v4-pro');
+export function Onboarding({ presets, initialConfig, onComplete }: OnboardingProps) {
+  const [selectedId, setSelectedId] = useState<PresetModelId>(initialConfig?.id ?? 'deepseek-v4-pro');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
-  const [workDir, setWorkDir] = useState<string>('');
+  const [workDir, setWorkDir] = useState<string>(initialConfig?.workDir ?? '');
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [testError, setTestError] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const isReconfig = !!initialConfig;
 
   // 选预设时，自动填 base_url + model（自定义不动）
   useEffect(() => {
@@ -67,7 +74,8 @@ export function Onboarding({ presets, onComplete }: OnboardingProps) {
   }
 
   async function handleComplete() {
-    if (!apiKey) {
+    // 重新配置模式下，apiKey 留空就保留旧的
+    if (!isReconfig && !apiKey) {
       setTestError('请填 API key');
       setTestStatus('fail');
       return;
@@ -80,15 +88,23 @@ export function Onboarding({ presets, onComplete }: OnboardingProps) {
     setSaving(true);
     const preset = presets.find((p) => p.id === selectedId);
     if (!preset) return;
+    // 决定用哪个 apiKey
+    const finalApiKey = apiKey || initialConfig?.apiKey || '';
+    if (!finalApiKey) {
+      setTestError('API key 为空（重新配置模式下必须填新的）');
+      setTestStatus('fail');
+      setSaving(false);
+      return;
+    }
     const config: ModelConfig = {
       id: preset.id,
       label: preset.label,
       baseUrl: baseUrl || preset.baseUrl,
       model: model || preset.model,
-      apiKey,
+      apiKey: finalApiKey,
       isCustom: preset.isCustom,
       workDir,
-    } as ModelConfig & { workDir: string };
+    };
     const result = await window.electronAPI.models.configure(config);
     setSaving(false);
     if (result.ok) {
@@ -103,7 +119,9 @@ export function Onboarding({ presets, onComplete }: OnboardingProps) {
     <div className="onboarding">
       <div className="onboarding-header">
         <h1>Stellara Work</h1>
-        <p className="tagline">数据本地的 Codex 风格桌面 Agent · 首次配置</p>
+        <p className="tagline">
+          {isReconfig ? '重新配置' : '数据本地的 Codex 风格桌面 Agent · 首次配置'}
+        </p>
       </div>
 
       <div className="onboarding-body">
@@ -123,10 +141,15 @@ export function Onboarding({ presets, onComplete }: OnboardingProps) {
 
         <section className="onboarding-section">
           <h2>2. API key</h2>
+          {isReconfig && (
+            <p className="field-hint">
+              当前已配 <code>{initialConfig?.id}</code>。留空 = 保留旧 key。
+            </p>
+          )}
           <input
             className="input"
             type="password"
-            placeholder="sk-xxx 或对应厂商的 API key"
+            placeholder={isReconfig ? '留空保留旧 key' : 'sk-xxx 或对应厂商的 API key'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             autoComplete="off"
