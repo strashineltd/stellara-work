@@ -307,25 +307,24 @@ export function MainView(props: MainViewProps) {
             {sidebarOpen ? '◀' : '▶'}
           </button>
           <h1 className="main-title">Stellara Work</h1>
-          <span className="main-model">
-            {config.label} <code>{config.model}</code>
-          </span>
         </div>
-        <div className="main-header-right">
+        <div className="main-header-center">
           <button
             className="main-workdir"
             onClick={onChangeWorkDir}
             title={config.workDir ?? '点击选择工作目录'}
             type="button"
           >
-            {config.workDir ? (
-              <>
-                <span className="main-workdir-name">{basename(config.workDir)}</span>
-                <span className="main-workdir-sep">·</span>
-                <span className="main-workdir-parent">{truncatePath(parentDir(config.workDir), 28)}</span>
-              </>
-            ) : '📂 选择工作目录…'}
+            <span className="main-workdir-icon" aria-hidden="true">📂</span>
+            <span className="main-workdir-name">
+              {config.workDir ? basename(config.workDir) : '选择工作目录…'}
+            </span>
           </button>
+          <span className="main-model" title={`${config.label} · ${config.model}`}>
+            <span className="main-model-label">{config.label}</span>
+          </span>
+        </div>
+        <div className="main-header-right">
           {config.workDir && (
             <button
               className="btn-icon"
@@ -541,21 +540,10 @@ export function MainView(props: MainViewProps) {
   );
 }
 
-function truncatePath(p: string, max = 40): string {
-  if (p.length <= max) return p;
-  return '...' + p.slice(p.length - max + 3);
-}
-
 function basename(p: string): string {
   // 处理 Windows / POSIX 都可
   const m = p.replace(/[\\/]+$/, '').match(/[^\\/]+$/);
   return m ? m[0] : p;
-}
-
-function parentDir(p: string): string {
-  // 取父目录
-  const m = p.replace(/[\\/]+$/, '').match(/^(.*)[\\/][^\\/]+$/);
-  return m ? m[1] : '';
 }
 
 function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
