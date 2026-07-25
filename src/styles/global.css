@@ -608,7 +608,162 @@ body {
   overflow-y: auto;
 }
 
-/* === Markdown 渲染 === */
+/* === W2.6 Diff 卡片 === */
+.tool-card-diff {
+  border-left: 3px solid #6f42c1;
+}
+
+.diff-add {
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.diff-remove {
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.diff-body {
+  border-top: 1px solid var(--color-border);
+  margin: 0;
+  padding: 8px 0;
+  background: var(--color-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow: auto;
+}
+
+.diff-line {
+  display: flex;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.diff-line.diff-added {
+  background: #e6ffec;
+}
+
+.diff-line.diff-removed {
+  background: #ffebe9;
+}
+
+.diff-sign {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  color: var(--color-text-soft);
+  user-select: none;
+}
+
+.diff-added .diff-sign {
+  color: var(--color-success);
+}
+
+.diff-removed .diff-sign {
+  color: var(--color-error);
+}
+
+.diff-text {
+  flex: 1;
+  word-break: break-all;
+}
+
+/* === W2.7 Shell 输出卡片 === */
+.tool-card-shell {
+  border-left: 3px solid #6c757d;
+}
+
+.tool-card-shell.ok {
+  border-left-color: var(--color-success);
+}
+
+.tool-card-shell.fail {
+  border-left-color: var(--color-error);
+}
+
+.tool-card-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 0;
+  min-width: 0;
+}
+
+.tool-card-header-inner:disabled {
+  cursor: default;
+}
+
+.shell-copy-btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-soft);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.shell-copy-btn:hover {
+  background: var(--color-bg-soft);
+  color: var(--color-text);
+}
+
+.shell-body {
+  border-top: 1px solid var(--color-border);
+  max-height: 400px;
+  overflow: auto;
+  background: #1e2530;
+}
+
+.shell-stdout,
+.shell-stderr,
+.shell-empty {
+  margin: 0;
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.shell-stdout {
+  color: #e6e6e6;
+}
+
+.shell-stderr {
+  color: #ff8a80;
+  background: rgba(255, 0, 0, 0.05);
+}
+
+.shell-empty {
+  color: #999;
+  font-style: italic;
+}
+
+.shell-truncated {
+  padding: 6px 14px;
+  background: #2a3140;
+  color: #ffca28;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
 .md-content {
   font-size: 14px;
   line-height: 1.6;

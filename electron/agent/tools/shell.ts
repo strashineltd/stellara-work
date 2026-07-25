@@ -34,6 +34,7 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
   const timeoutMs = args.timeoutMs ?? 30000;
 
   return new Promise<ToolResult>((resolve) => {
+    const startedAt = Date.now();
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -58,7 +59,14 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
       } catch {
         // ignore
       }
-      resolve(result);
+      const durationMs = Date.now() - startedAt;
+      // 把 stdout / stderr / exitCode 塞到 meta 给 UI 用
+      // （LLM 收到的 output 仍然是合并 + 截断的，保持向后兼容）
+      const exitCode = child.exitCode ?? -1;
+      resolve({
+        ...result,
+        meta: { kind: 'command', command: args.command, stdout, stderr, exitCode, durationMs },
+      });
     };
 
     child.stdout?.on('data', (data: Buffer) => {

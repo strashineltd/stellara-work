@@ -46,6 +46,17 @@ describe('writeFile', () => {
     const content = await fs.readFile(path.join(tmpDir, 'a/b/c/out.txt'), 'utf-8');
     expect(content).toBe('nested');
   });
+
+  it('returns edit meta (before=null for new file, after=content)', async () => {
+    const result = await writeFile({ path: 'fresh.txt', content: 'fresh' }, tmpDir);
+    expect(result.meta).toEqual({ kind: 'edit', path: 'fresh.txt', before: null, after: 'fresh' });
+  });
+
+  it('returns edit meta with before content when overwriting', async () => {
+    await fs.writeFile(path.join(tmpDir, 'over.txt'), 'old');
+    const result = await writeFile({ path: 'over.txt', content: 'new' }, tmpDir);
+    expect(result.meta).toEqual({ kind: 'edit', path: 'over.txt', before: 'old', after: 'new' });
+  });
 });
 
 describe('editFile', () => {
@@ -68,5 +79,19 @@ describe('editFile', () => {
     );
     expect(result.ok).toBe(false);
     expect(result.error).toContain('未找到');
+  });
+
+  it('returns edit meta with before and after content', async () => {
+    await fs.writeFile(path.join(tmpDir, 'edit.txt'), 'line1\nline2\nline3\n');
+    const result = await editFile(
+      { path: 'edit.txt', oldText: 'line2', newText: 'LINE2' },
+      tmpDir,
+    );
+    expect(result.meta).toEqual({
+      kind: 'edit',
+      path: 'edit.txt',
+      before: 'line1\nline2\nline3\n',
+      after: 'line1\nLINE2\nline3\n',
+    });
   });
 });

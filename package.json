@@ -23,7 +23,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
   },
   "dependencies": {
+    "@types/diff": "^7.0.2",
     "better-sqlite3": "^12.11.1",
+    "diff": "^7.0.0",
     "dotenv": "^16.4.5",
     "electron-log": "^5.2.0",
     "electron-updater": "^6.3.9",

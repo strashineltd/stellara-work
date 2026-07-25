@@ -36,8 +36,19 @@ export async function writeFile(args: WriteFileArgs, cwd: string): Promise<ToolR
       return { ok: false, output: '', error: `路径超出工作目录：${args.path}` };
     }
     await fs.mkdir(path.dirname(absPath), { recursive: true });
+    // 读旧内容（可能不存在）
+    let before: string | null = null;
+    try {
+      before = await fs.readFile(absPath, 'utf-8');
+    } catch {
+      // 文件不存在 → 新建
+    }
     await fs.writeFile(absPath, args.content, 'utf-8');
-    return { ok: true, output: `已写入 ${args.path} (${args.content.length} 字符)` };
+    return {
+      ok: true,
+      output: `已写入 ${args.path} (${args.content.length} 字符)`,
+      meta: { kind: 'edit', path: args.path, before, after: args.content },
+    };
   } catch (err) {
     return { ok: false, output: '', error: errorMessage(err) };
   }
@@ -67,7 +78,8 @@ export async function editFile(args: EditFileArgs, cwd: string): Promise<ToolRes
     await fs.writeFile(absPath, updated, 'utf-8');
     return {
       ok: true,
-      output: `已编辑 ${args.path}（替换 ${(original.length - updated.length) * -1} 字符）`,
+      output: `已编辑 ${args.path}（净变化 ${updated.length - original.length} 字符）`,
+      meta: { kind: 'edit', path: args.path, before: original, after: updated },
     };
   } catch (err) {
     return { ok: false, output: '', error: errorMessage(err) };

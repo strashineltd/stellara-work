@@ -155,7 +155,27 @@ export interface ToolResult {
   ok: boolean;
   output: string;
   error?: string;
+  /** 给 UI 用的额外信息（diff 数据、shell 输出等） */
+  meta?: ToolResultMeta;
 }
+
+export type ToolResultMeta =
+  | {
+      kind: 'edit';
+      path: string;
+      /** 改之前的内容（write_file 覆盖时为旧文件内容；edit_file 总是有） */
+      before: string | null;
+      /** 改之后的内容 */
+      after: string;
+    }
+  | {
+      kind: 'command';
+      command: string;
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+      durationMs: number;
+    };
 
 // ============================================
 // 窗口 / 系统相关

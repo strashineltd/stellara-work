@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent } from '../../shared/ipc';
+import type { AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent, ToolResultMeta } from '../../shared/ipc';
 import { MarkdownView } from './MarkdownView';
 import { ToolCallCard } from './ToolCallCard';
 import { ToolResultCard } from './ToolResultCard';
+import { DiffCard } from './DiffCard';
+import { ShellCard } from './ShellCard';
 
 /**
  * UI 用的条目（流式累加过程中也用它来更新）
@@ -12,7 +14,7 @@ type DisplayEntry =
   | { kind: 'user'; content: string }
   | { kind: 'assistant'; content: string }
   | { kind: 'tool_call'; name: string; args: string }
-  | { kind: 'tool_result'; name: string; ok: boolean; output: string; error?: string }
+  | { kind: 'tool_result'; name: string; ok: boolean; output: string; error?: string; meta?: ToolResultMeta }
   | { kind: 'error'; message: string };
 
 interface MainViewProps {
@@ -135,13 +137,14 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
         return copy;
       }
       if (ev.type === 'tool_result' && ev.toolResult) {
-        const r = ev.toolResult.result as { ok?: boolean; output?: string; error?: string };
+        const r = ev.toolResult.result as { ok?: boolean; output?: string; error?: string; meta?: ToolResultMeta };
         copy.push({
           kind: 'tool_result',
           name: ev.toolResult.name,
           ok: r?.ok === true,
           output: r?.output ?? '',
           error: r?.error,
+          meta: r?.meta,
         });
         return copy;
       }
@@ -259,7 +262,22 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
                   </div>
                 )}
                 {e.kind === 'tool_call' && <ToolCallCard name={e.name} args={e.args} />}
-                {e.kind === 'tool_result' && <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} />}
+                {e.kind === 'tool_result' && e.meta?.kind === 'edit' && (
+                  <DiffCard path={e.meta.path} before={e.meta.before} after={e.meta.after} />
+                )}
+                {e.kind === 'tool_result' && e.meta?.kind === 'command' && (
+                  <ShellCard
+                    command={e.meta.command}
+                    stdout={e.meta.stdout}
+                    stderr={e.meta.stderr}
+                    exitCode={e.meta.exitCode}
+                    durationMs={e.meta.durationMs}
+                    ok={e.ok}
+                  />
+                )}
+                {e.kind === 'tool_result' && !e.meta && (
+                  <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} />
+                )}
                 {e.kind === 'error' && (
                   <div className="error-banner">
                     <span className="error-icon">⚠</span>
