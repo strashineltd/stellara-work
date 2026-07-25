@@ -278,6 +278,19 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: all 0.15s;
+}
+
+.main-workdir:hover {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+  color: var(--color-accent);
 }
 
 /* === W2.8 Header 菜单 === */

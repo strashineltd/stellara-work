@@ -274,6 +274,7 @@ export interface ElectronAPI {
     remove: (modelId: string) => Promise<void>;
     setActive: (modelId: string) => Promise<void>;
     updateKey: (modelId: string, newKey: string) => Promise<void>;
+    updateWorkDir: (modelId: string, workDir: string) => Promise<void>;
   };
   chat: {
     /** 启动一个流式 chat，返回 { streamId, events } - events 是 AsyncIterable<ChatStreamEvent> */

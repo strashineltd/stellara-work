@@ -150,6 +150,16 @@ export default function App() {
         onModelChanged={(newConfig) => {
           setState((s) => s.kind === 'ready' ? { ...s, config: newConfig } : s);
         }}
+        onChangeWorkDir={async () => {
+          const dir = await window.electronAPI.dialog.openDirectory();
+          if (!dir) return;
+          try {
+            await window.electronAPI.models.updateWorkDir(state.config.id, dir);
+            setState((s) => s.kind === 'ready' ? { ...s, config: { ...s.config, workDir: dir } } : s);
+          } catch (e) {
+            console.error('设置 workDir 失败:', e);
+          }
+        }}
       />
       {settingsOpen && (
         <SettingsModal

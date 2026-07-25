@@ -195,6 +195,15 @@ function registerIpcHandlers(): void {
     await setActiveModel(modelId);
   });
 
+  ipcMain.handle('models:updateWorkDir', async (_e, modelId: string, workDir: string) => {
+    const { loadConfig, saveConfig } = await import('./config/config-v2');
+    const cfg = await loadConfig();
+    const idx = cfg.models.findIndex((m) => m.id === modelId);
+    if (idx < 0) throw new Error(`Model 不存在: ${modelId}`);
+    cfg.models[idx] = { ...cfg.models[idx]!, workDir };
+    await saveConfig(cfg);
+  });
+
   ipcMain.handle('models:updateKey', async (_e, modelId: string, newKey: string) => {
     const { setKey } = await import('./config/secrets');
     await setKey(modelId, newKey);

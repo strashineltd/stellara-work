@@ -88,6 +88,7 @@ const api: ElectronAPI = {
     remove: (modelId: string) => ipcRenderer.invoke('models:remove', modelId),
     setActive: (modelId: string) => ipcRenderer.invoke('models:setActive', modelId),
     updateKey: (modelId: string, newKey: string) => ipcRenderer.invoke('models:updateKey', modelId, newKey),
+    updateWorkDir: (modelId: string, workDir: string) => ipcRenderer.invoke('models:updateWorkDir', modelId, workDir),
   },
   chat: {
     start: async (request: ChatRequest): Promise<{ streamId: string; events: AsyncIterable<ChatStreamEvent> }> => {

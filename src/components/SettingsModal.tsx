@@ -80,6 +80,23 @@ export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
     }
   }
 
+  async function handleUpdateWorkDir(id: string) {
+    const dir = await window.electronAPI.dialog.openDirectory();
+    if (!dir) return;
+    try {
+      await window.electronAPI.models.updateWorkDir(id, dir);
+      await refreshModels();
+      // 如果是当前活跃 model，通知 App 同步
+      const stillActive = (await window.electronAPI.models.getAll()).find((m) => m.id === id && m.isActive);
+      if (stillActive) {
+        const list = await window.electronAPI.models.list();
+        if (list.configured) onModelChanged(list.configured);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function handleDeleteSession(id: string) {
     if (!confirm('删除该会话？')) return;
     try {
@@ -139,6 +156,9 @@ export function SettingsModal({ onClose, onModelChanged }: SettingsModalProps) {
                       </>
                     ) : (
                       <>
+                        <button className="btn btn-secondary" onClick={() => void handleUpdateWorkDir(m.id)} type="button" title={m.workDir ?? '未选'}>
+                          📂 workdir
+                        </button>
                         <button className="btn btn-secondary" onClick={() => setEditingKey(m.id)} type="button">改 key</button>
                         {!m.isActive && <button className="btn btn-primary" onClick={() => void handleSetActive(m.id)} type="button">设活跃</button>}
                         <button className="btn btn-danger" onClick={() => void handleRemove(m.id)} type="button">删除</button>

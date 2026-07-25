@@ -36,6 +36,7 @@ interface MainViewProps {
   onSessionRenamed: (id: string, title: string) => void;
   onSessionsChanged: (sessions: SessionSummary[]) => void;
   onModelChanged: (config: ModelConfig) => void;
+  onChangeWorkDir: () => void;
 }
 
 /**
@@ -48,7 +49,7 @@ interface MainViewProps {
 export function MainView(props: MainViewProps) {
   const {
     config, info: _info, sidebarOpen, activeSessionId, sessions,
-    onToggleSidebar, onReconfigure, onOpenSettings,
+    onToggleSidebar, onReconfigure, onOpenSettings, onChangeWorkDir,
     onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
   } = props;
   void _info;
@@ -311,9 +312,14 @@ export function MainView(props: MainViewProps) {
           </span>
         </div>
         <div className="main-header-right">
-          <span className="main-workdir" title={config.workDir ?? ''}>
-            {config.workDir ? truncatePath(config.workDir) : '（未选工作目录）'}
-          </span>
+          <button
+            className="main-workdir"
+            onClick={onChangeWorkDir}
+            title={config.workDir ?? '点击选择工作目录'}
+            type="button"
+          >
+            {config.workDir ? truncatePath(config.workDir) : '📂 选择工作目录…'}
+          </button>
           {config.workDir && (
             <button
               className="btn-icon"
