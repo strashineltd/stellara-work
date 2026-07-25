@@ -39,16 +39,23 @@ describe('secrets', () => {
     expect(all).toEqual({ a: 'k-a', b: 'k-b' });
   });
 
-  it('.env file is created on setKey', async () => {
+  it('model id with dots/dashes round-trips', async () => {
+    await setKey('glm-5.2', 'sk-glm');
+    expect(getKey('glm-5.2')).toBe('sk-glm');
+    const all = await listKeys();
+    expect(all['glm-5.2']).toBe('sk-glm');
+  });
+
+  it('update existing key overwrites', async () => {
+    await setKey('m1', 'old');
+    await setKey('m1', 'new');
+    expect(getKey('m1')).toBe('new');
+  });
+
+  it('.env file is created at STELLARA_DIR/.env', async () => {
     await setKey('test', 'k');
     const envPath = path.join(tmpDir, '.env');
     const stat = await fs.stat(envPath);
     expect(stat.isFile()).toBe(true);
-  });
-
-  it('setKey overwrites existing key', async () => {
-    await setKey('m', 'k1');
-    await setKey('m', 'k2');
-    expect(getKey('m')).toBe('k2');
   });
 });
