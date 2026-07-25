@@ -87,7 +87,7 @@ describe('config-v2', () => {
       model: 'deepseek-v4-pro',
       workDir: 'D:\\work',
     });
-    expect((cfg.models[0] as Record<string, unknown>).apiKey).toBeUndefined();
+    expect((cfg.models[0] as unknown as Record<string, unknown>).apiKey).toBeUndefined();
     // .env 应该有 key
     expect(getKey('deepseek-v4-pro')).toBe('sk-old-key');
     // 旧文件备份
@@ -111,6 +111,4 @@ describe('config-v2', () => {
     expect(migrated).toBe(false);
   });
 });
-
-import.meta.vitest;
 

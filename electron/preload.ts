@@ -6,9 +6,15 @@ import type {
   AppInfo,
   ModelConfig,
   ModelListResponse,
+  ModelListItem,
   ToolName,
   ToolArgs,
   ToolResult,
+  Session,
+  SessionSummary,
+  MessageRow,
+  CreateSessionArgs,
+  AppSettings,
 } from '../shared/ipc';
 
 /**
@@ -75,8 +81,12 @@ const api: ElectronAPI = {
   },
   models: {
     list: (): Promise<ModelListResponse> => ipcRenderer.invoke('models:list'),
+    getAll: (): Promise<ModelListItem[]> => ipcRenderer.invoke('models:getAll'),
     configure: (config: ModelConfig) => ipcRenderer.invoke('models:configure', config),
     test: (config: ModelConfig) => ipcRenderer.invoke('models:test', config),
+    remove: (modelId: string) => ipcRenderer.invoke('models:remove', modelId),
+    setActive: (modelId: string) => ipcRenderer.invoke('models:setActive', modelId),
+    updateKey: (modelId: string, newKey: string) => ipcRenderer.invoke('models:updateKey', modelId, newKey),
   },
   chat: {
     start: async (request: ChatRequest): Promise<{ streamId: string; events: AsyncIterable<ChatStreamEvent> }> => {
@@ -97,6 +107,24 @@ const api: ElectronAPI = {
   },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
+  },
+  sessions: {
+    list: (): Promise<SessionSummary[]> => ipcRenderer.invoke('sessions:list'),
+    get: (id: string) => ipcRenderer.invoke('sessions:get', id),
+    create: (args: CreateSessionArgs): Promise<Session> => ipcRenderer.invoke('sessions:create', args),
+    delete: (id: string) => ipcRenderer.invoke('sessions:delete', id),
+    rename: (id: string, title: string) => ipcRenderer.invoke('sessions:rename', id, title),
+    saveMessages: (id: string, messages: MessageRow[]) =>
+      ipcRenderer.invoke('sessions:saveMessages', id, messages),
+    appendMessage: (id: string, message: MessageRow) =>
+      ipcRenderer.invoke('sessions:appendMessage', id, message),
+  },
+  settings: {
+    get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
+    update: (partial: Partial<AppSettings>) => ipcRenderer.invoke('settings:update', partial),
+    clearAllData: () => ipcRenderer.invoke('settings:clearAllData'),
+    openDataDir: () => ipcRenderer.invoke('settings:openDataDir'),
+    openLogFile: (name: 'main' | 'renderer') => ipcRenderer.invoke('settings:openLogFile', name),
   },
 };
 

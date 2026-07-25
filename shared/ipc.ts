@@ -189,6 +189,63 @@ export interface AppInfo {
 }
 
 // ============================================
+// W3: 会话 / 多 provider / 设置
+// ============================================
+
+export interface Session {
+  id: string;
+  title: string;
+  modelId: string;
+  workDir?: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
+export interface SessionSummary {
+  id: string;
+  title: string;
+  modelId: string;
+  messageCount: number;
+  updatedAt: number;
+}
+
+export interface MessageRow {
+  sessionId: string;
+  position: number;
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCalls?: string;
+  toolCallId?: string;
+  toolName?: string;
+  meta?: string;
+  planMode?: number;
+  createdAt: number;
+}
+
+export interface AppSettings {
+  workDirDefault?: string;
+  // 预留：theme / language
+}
+
+export interface ModelListItem {
+  id: string;
+  label: string;
+  baseUrl: string;
+  model: string;
+  workDir?: string;
+  hasKey: boolean;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateSessionArgs {
+  modelId: string;
+  workDir?: string;
+  title?: string;
+}
+
+// ============================================
 // electronAPI 接口（preload 暴露给渲染进程）
 // ============================================
 
@@ -198,8 +255,13 @@ export interface ElectronAPI {
   };
   models: {
     list: () => Promise<ModelListResponse>;
+    /** 列出所有已配 model（含 key 状态、活跃标志） */
+    getAll: () => Promise<ModelListItem[]>;
     configure: (config: ModelConfig) => Promise<{ ok: boolean; error?: string }>;
     test: (config: ModelConfig) => Promise<{ ok: boolean; error?: string }>;
+    remove: (modelId: string) => Promise<void>;
+    setActive: (modelId: string) => Promise<void>;
+    updateKey: (modelId: string, newKey: string) => Promise<void>;
   };
   chat: {
     /** 启动一个流式 chat，返回 { streamId, events } - events 是 AsyncIterable<ChatStreamEvent> */
@@ -213,6 +275,22 @@ export interface ElectronAPI {
   dialog: {
     /** 弹原生目录选择器，返回选中的路径（或 null 取消） */
     openDirectory: () => Promise<string | null>;
+  };
+  sessions: {
+    list: () => Promise<SessionSummary[]>;
+    get: (id: string) => Promise<{ session: Session; messages: MessageRow[] }>;
+    create: (args: CreateSessionArgs) => Promise<Session>;
+    delete: (id: string) => Promise<void>;
+    rename: (id: string, title: string) => Promise<void>;
+    saveMessages: (id: string, messages: MessageRow[]) => Promise<void>;
+    appendMessage: (id: string, message: MessageRow) => Promise<void>;
+  };
+  settings: {
+    get: () => Promise<AppSettings>;
+    update: (partial: Partial<AppSettings>) => Promise<void>;
+    clearAllData: () => Promise<void>;
+    openDataDir: () => Promise<void>;
+    openLogFile: (name: 'main' | 'renderer') => Promise<void>;
   };
 }
 
