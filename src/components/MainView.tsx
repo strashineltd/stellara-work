@@ -63,12 +63,16 @@ export function MainView(props: MainViewProps) {
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
 
-  // 点外部关闭菜单
+  // 点外部关闭菜单（用 mousedown 避开同一次 click 触发的开/关竞态）
   useEffect(() => {
     if (!menuOpen) return;
-    const onClick = () => setMenuOpen(false);
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.header-menu-wrap')) return; // 点菜单/按钮自己就跳过
+      setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
   }, [menuOpen]);
 
   // 切会话：加载历史
