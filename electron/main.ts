@@ -196,16 +196,19 @@ async function runAgentLoopForIpc(
     }
   };
 
-  const userMsg = request.messages[request.messages.length - 1];
-  if (!userMsg || userMsg.role !== 'user') {
+  const last = request.messages[request.messages.length - 1];
+  if (!last || last.role !== 'user') {
     send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
     return;
   }
+  // 多轮上下文：除最后一条外的所有消息作为 history 传入
+  const history = request.messages.slice(0, -1);
 
   try {
-    for await (const event of runAgentLoop(userMsg.content, {
+    for await (const event of runAgentLoop(last.content, {
       model,
       cwd: model.workDir ?? process.cwd(),
+      history,
       // W1: 暂时自动批准所有危险操作（UI 批准机制 W2.5 实现）
       onApproval: async () => true,
     })) {
