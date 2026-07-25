@@ -126,4 +126,43 @@ describe('db', () => {
     // The FK ON DELETE CASCADE should have removed the message
     expect(getMessages('s1')).toEqual([]);
   });
+
+  // 复现 user 报的 bug：A 聊完后创建 B，再切回 A，A 的内容不能丢
+  it('regression: chat in A, create B, switch back to A — A content preserved', () => {
+    // 1. 建 A
+    createSession({ id: 'A', title: 'A', modelId: 'm1' });
+    // 2. 在 A 里聊（user 消息 + assistant 回复）
+    appendMessage({ sessionId: 'A', position: 0, role: 'user', content: 'A 里的问题', createdAt: Date.now() });
+    appendMessage({ sessionId: 'A', position: 1, role: 'assistant', content: 'A 里的回答', createdAt: Date.now() });
+    // 3. 触发 autosave（renderer 里 debounce 300ms 后会调 saveMessages，这里直接调）
+    saveMessages('A', [
+      { sessionId: 'A', position: 0, role: 'user', content: 'A 里的问题', createdAt: Date.now() },
+      { sessionId: 'A', position: 1, role: 'assistant', content: 'A 里的回答', createdAt: Date.now() },
+    ]);
+    // 4. 创建 B
+    createSession({ id: 'B', title: 'B', modelId: 'm1' });
+    // 5. 切回 A，重新读 A 的消息
+    const aMsgs = getMessages('A');
+    expect(aMsgs).toHaveLength(2);
+    expect(aMsgs[0]?.content).toBe('A 里的问题');
+    expect(aMsgs[1]?.content).toBe('A 里的回答');
+  });
+
+  // 切 session 时的 flush 行为：有 N 条消息，save 回去 N 条，不应该把 A 的内容清掉
+  it('regression: flush save with same count preserves A content (not delete-all bug)', () => {
+    createSession({ id: 'A', title: 'A', modelId: 'm1' });
+    saveMessages('A', [
+      { sessionId: 'A', position: 0, role: 'user', content: 'q', createdAt: Date.now() },
+      { sessionId: 'A', position: 1, role: 'assistant', content: 'a', createdAt: Date.now() },
+    ]);
+    // 模拟切 session 时 flush：还是这 2 条消息
+    saveMessages('A', [
+      { sessionId: 'A', position: 0, role: 'user', content: 'q', createdAt: Date.now() },
+      { sessionId: 'A', position: 1, role: 'assistant', content: 'a', createdAt: Date.now() },
+    ]);
+    const msgs = getMessages('A');
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]?.content).toBe('q');
+    expect(msgs[1]?.content).toBe('a');
+  });
 });
