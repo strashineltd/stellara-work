@@ -318,7 +318,13 @@ export function MainView(props: MainViewProps) {
             title={config.workDir ?? '点击选择工作目录'}
             type="button"
           >
-            {config.workDir ? truncatePath(config.workDir) : '📂 选择工作目录…'}
+            {config.workDir ? (
+              <>
+                <span className="main-workdir-name">{basename(config.workDir)}</span>
+                <span className="main-workdir-sep">·</span>
+                <span className="main-workdir-parent">{truncatePath(parentDir(config.workDir), 28)}</span>
+              </>
+            ) : '📂 选择工作目录…'}
           </button>
           {config.workDir && (
             <button
@@ -538,6 +544,18 @@ export function MainView(props: MainViewProps) {
 function truncatePath(p: string, max = 40): string {
   if (p.length <= max) return p;
   return '...' + p.slice(p.length - max + 3);
+}
+
+function basename(p: string): string {
+  // 处理 Windows / POSIX 都可
+  const m = p.replace(/[\\/]+$/, '').match(/[^\\/]+$/);
+  return m ? m[0] : p;
+}
+
+function parentDir(p: string): string {
+  // 取父目录
+  const m = p.replace(/[\\/]+$/, '').match(/^(.*)[\\/][^\\/]+$/);
+  return m ? m[1] : '';
 }
 
 function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {

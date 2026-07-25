@@ -274,7 +274,10 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--color-text-soft);
-  max-width: 300px;
+  max-width: 360px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -283,7 +286,7 @@ body {
   border-radius: 4px;
   padding: 4px 8px;
   cursor: pointer;
-  font-family: var(--font-mono);
+  font-family: inherit;
   transition: all 0.15s;
 }
 
@@ -291,6 +294,28 @@ body {
   background: var(--color-bg);
   border-color: var(--color-border);
   color: var(--color-accent);
+}
+
+.main-workdir-name {
+  font-weight: 600;
+  color: var(--color-primary);
+  font-size: 12px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.main-workdir-sep {
+  color: var(--color-text-soft);
+  opacity: 0.5;
+}
+
+.main-workdir-parent {
+  font-size: 11px;
+  color: var(--color-text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 /* === W2.8 Header 菜单 === */
