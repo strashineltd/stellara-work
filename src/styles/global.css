@@ -294,6 +294,25 @@ body {
   border: 1px solid var(--color-border);
   border-radius: 4px;
   white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.main-model:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.main-model.open {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: #f0f5ff;
+}
+
+.main-model:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .main-model code {
@@ -304,6 +323,113 @@ body {
 }
 
 .main-model-label {
+  font-weight: 500;
+}
+
+.main-model-caret {
+  font-size: 10px;
+  color: var(--color-text-soft);
+  margin-left: 2px;
+}
+
+.model-switcher {
+  position: relative;
+  display: inline-flex;
+}
+
+.model-switcher-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 20;
+}
+
+.model-switcher-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.model-switcher-item:hover:not(:disabled) {
+  background: var(--color-bg-soft);
+}
+
+.model-switcher-item.active {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.model-switcher-item.no-key {
+  opacity: 0.7;
+}
+
+.model-switcher-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-switcher-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-switcher-item-meta {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.model-switcher-footer {
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.model-switcher-add {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--color-text-soft);
+  cursor: pointer;
+}
+
+.model-switcher-add:hover {
+  background: var(--color-bg-soft);
+  color: var(--color-accent);
+}
+
+.badge-warn {
+  display: inline-block;
+  background: var(--color-error);
+  color: white;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
   font-weight: 500;
 }
 

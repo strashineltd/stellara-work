@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
-  AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent,
+  AppInfo, ChatMessage, ModelConfig, ModelListItem, MessageRole, ChatStreamEvent,
   ToolResultMeta, SessionSummary, MessageRow, Session, ToolCall,
 } from '../../shared/ipc';
 import { MarkdownView } from './MarkdownView';
@@ -51,6 +51,7 @@ export function MainView(props: MainViewProps) {
     config, info: _info, sidebarOpen, activeSessionId, sessions,
     onToggleSidebar, onReconfigure, onOpenSettings, onChangeWorkDir,
     onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
+    onModelChanged,
   } = props;
   void _info;
 
@@ -62,6 +63,14 @@ export function MainView(props: MainViewProps) {
   const [planMode, setPlanMode] = useState(false);
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const [modelList, setModelList] = useState<ModelListItem[]>([]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [switchingModel, setSwitchingModel] = useState(false);
+
+  // 拉所有 model 列表（用于 header 下拉切换）
+  useEffect(() => {
+    void window.electronAPI.models.getAll().then(setModelList).catch(() => { /* ignore */ });
+  }, [config.id]); // 切完 active model 后重新拉
 
   // 点外部关闭菜单（用 mousedown 避开同一次 click 触发的开/关竞态）
   useEffect(() => {
@@ -74,6 +83,33 @@ export function MainView(props: MainViewProps) {
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [menuOpen]);
+
+  // 点外部关闭 model 下拉
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.model-switcher')) return;
+      setModelMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [modelMenuOpen]);
+
+  async function handleSwitchModel(id: string) {
+    if (id === config.id || switchingModel) return;
+    setSwitchingModel(true);
+    try {
+      await window.electronAPI.models.setActive(id);
+      const list = await window.electronAPI.models.list();
+      if (list.configured) onModelChanged(list.configured);
+      setModelMenuOpen(false);
+    } catch (e) {
+      console.error('切换 model 失败:', e);
+    } finally {
+      setSwitchingModel(false);
+    }
+  }
 
   // 切会话：加载历史
   useEffect(() => {
@@ -324,8 +360,47 @@ export function MainView(props: MainViewProps) {
               {config.workDir ? basename(config.workDir) : '选择工作目录…'}
             </span>
           </button>
-          <span className="main-model" title={`${config.label} · ${config.model}`}>
-            <span className="main-model-label">{config.label}</span>
+          <span className="model-switcher">
+            <button
+              className={`main-model ${modelMenuOpen ? 'open' : ''}`}
+              onClick={() => setModelMenuOpen((v) => !v)}
+              type="button"
+              title={`${config.label} · ${config.model}（点击切换）`}
+              disabled={switchingModel}
+            >
+              <span className="main-model-label">{config.label}</span>
+              <span className="main-model-caret" aria-hidden="true">▾</span>
+            </button>
+            {modelMenuOpen && (
+              <div className="model-switcher-menu" role="listbox">
+                {modelList.length === 0 && <div className="empty-hint">还没有 model</div>}
+                {modelList.map((m) => (
+                  <button
+                    key={m.id}
+                    className={`model-switcher-item ${m.id === config.id ? 'active' : ''} ${!m.hasKey ? 'no-key' : ''}`}
+                    onClick={() => void handleSwitchModel(m.id)}
+                    type="button"
+                    title={!m.hasKey ? '该 model 未配 API key' : m.model}
+                    disabled={switchingModel}
+                  >
+                    <span className="model-switcher-item-name">{m.label}</span>
+                    <span className="model-switcher-item-meta">
+                      {m.id === config.id && <span className="badge">活跃</span>}
+                      {!m.hasKey && <span className="badge-warn">无 key</span>}
+                    </span>
+                  </button>
+                ))}
+                <div className="model-switcher-footer">
+                  <button
+                    className="model-switcher-add"
+                    onClick={() => { setModelMenuOpen(false); onOpenSettings(); }}
+                    type="button"
+                  >
+                    ⚙️ 添加 / 管理模型
+                  </button>
+                </div>
+              </div>
+            )}
           </span>
         </div>
         <div className="main-header-right">
