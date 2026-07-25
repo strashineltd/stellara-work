@@ -111,16 +111,26 @@ export function MainView(props: MainViewProps) {
     }
   }
 
-  // 切会话：加载历史
+  // 切会话：加载历史。同时维护一个 ref 标记"当前 entries 属于哪个 session"，
+  // 避免 autosave 把上一个 session 的脏数据写到新 session（race condition）
+  const entriesSessionRef = useRef<string | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!activeSessionId) {
       setEntries([]);
+      entriesSessionRef.current = null;
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       return;
     }
+    // 切 session 时立刻取消任何 pending save，并禁止 save 直到 fetch 完成
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    entriesSessionRef.current = null;
     let cancelled = false;
     void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
       if (cancelled) return;
       setEntries(messagesToEntries(messages));
+      entriesSessionRef.current = activeSessionId; // 标记归属
       setPlanMode(false);
       setLastUserForRetry(null);
       void session; // 暂时不用
@@ -130,10 +140,10 @@ export function MainView(props: MainViewProps) {
     return () => { cancelled = true; };
   }, [activeSessionId]);
 
-  // 自动保存：debounce 300ms
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 自动保存：debounce 300ms。只有当 entries 确实属于当前 activeSessionId 时才保存
   useEffect(() => {
     if (!activeSessionId) return;
+    if (entriesSessionRef.current !== activeSessionId) return; // 切 session 中 / fetch 未完成，跳过
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       void window.electronAPI.sessions.saveMessages(activeSessionId, entriesToMessages(entries))
