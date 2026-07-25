@@ -109,14 +109,27 @@ function registerIpcHandlers(): void {
     };
   });
 
-  // Models（v1，保留兼容；新代码用 getAll / setActive / remove / updateKey）
+  // Models（v1，保留兼容但走 v2 数据）
   ipcMain.handle('models:list', async (): Promise<ModelListResponse> => {
     const { MODEL_PRESETS } = await import('./llm/presets');
-    const configured = await loadModelsConfig();
-    return {
-      presets: MODEL_PRESETS,
-      configured,
+    const { loadConfig } = await import('./config/config-v2');
+    const { getKey } = await import('./config/secrets');
+    const cfg = await loadConfig();
+    const active = cfg.models.find((m) => m.id === cfg.activeModelId);
+    if (!active) {
+      return { presets: MODEL_PRESETS, configured: null };
+    }
+    const key = getKey(active.id) ?? '';
+    const configured: ModelConfig = {
+      id: active.id as ModelConfig['id'],
+      label: active.label,
+      baseUrl: active.baseUrl,
+      model: active.model,
+      apiKey: key,
+      workDir: active.workDir,
+      isCustom: false,
     };
+    return { presets: MODEL_PRESETS, configured };
   });
 
   ipcMain.handle('models:configure', async (_e, config: ModelConfig) => {
