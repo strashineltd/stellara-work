@@ -25,7 +25,7 @@ export async function* runAgentLoop(
   userMessage: string,
   options: AgentLoopOptions,
 ): AsyncGenerator<ChatStreamEvent> {
-  const { model, cwd, history = [], planMode = false, maxIterations = 10, onApproval } = options;
+  const { model, cwd, history = [], planMode = false, maxIterations = 30, onApproval } = options;
 
   const client = new OpenAICompatClient(model);
   // 拼消息：system（按 planMode 切） + 之前轮次 + 本轮 user
@@ -36,6 +36,9 @@ export async function* runAgentLoop(
     { role: 'user', content: userMessage },
   ];
 
+  // 死循环检测：连续失败同一个 tool
+  let lastFailedTool: string | null = null;
+  let lastFailedToolCount = 0;
   let iteration = 0;
 
   while (iteration < maxIterations) {
@@ -139,10 +142,35 @@ export async function* runAgentLoop(
         name: toolName,
         content: result.ok ? result.output : `Error: ${result.error ?? '未知错误'}`,
       });
+
+      // 死循环检测：连续 3 次同一个 tool 失败 → 提前 break
+      if (!result.ok) {
+        if (lastFailedTool === toolName) {
+          lastFailedToolCount++;
+          if (lastFailedToolCount >= 3) {
+            yield {
+              type: 'error',
+              error: `工具「${toolName}」连续 3 次失败（最后错误：${result.error ?? '未知'}）。可能是参数错误或环境问题，agent 已停止。`,
+            };
+            return;
+          }
+        } else {
+          lastFailedTool = toolName;
+          lastFailedToolCount = 1;
+        }
+      } else {
+        lastFailedTool = null;
+        lastFailedToolCount = 0;
+      }
     }
   }
 
-  yield { type: 'error', error: `达到最大迭代次数 ${maxIterations}，强制结束` };
+  if (iteration >= maxIterations) {
+    yield {
+      type: 'error',
+      error: `达到最大迭代次数 ${maxIterations}，任务太复杂或模型陷入循环。可以换个更明确的提示，或在「计划」模式下先讨论方案。`,
+    };
+  }
 }
 
 function isReadOnlyTool(name: string): boolean {
