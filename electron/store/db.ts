@@ -176,6 +176,10 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
   // 静默跳过不存在的 session（autosave 在 race 条件下可能引用已删 session）
   if (!getSession(sessionId)) return;
   const db = getDb();
+  // 只有消息数真的变化才 bump updated_at，否则切 session 时 autosave
+  // 会把刚切到的 session 顶到列表最前面，看着像列表在跳
+  const prevCount = (db.prepare('SELECT COUNT(*) AS n FROM messages WHERE session_id = ?')
+    .get(sessionId) as { n: number } | undefined)?.n ?? 0;
   const tx = db.transaction((ms: MessageRow[]) => {
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
     const insert = db.prepare(
@@ -198,7 +202,9 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
     }
   });
   tx(msgs);
-  bumpSession(sessionId, msgs.length);
+  if (msgs.length !== prevCount) {
+    bumpSession(sessionId, msgs.length);
+  }
 }
 
 export function bumpSession(id: string, messageCount: number): void {
