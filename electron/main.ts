@@ -16,6 +16,8 @@ import type {
   ToolName,
   ToolArgs,
   ToolResult,
+  MessageRow,
+  AppSettings,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -48,14 +50,11 @@ function createWindow(): void {
   if (isDev) {
     mainWindow.loadURL(RENDERER_DEV_URL);
   } else {
-    // __dirname 在 electron/dist/electron/，需要 ../.. 回到项目根，再拼 dist/index.html
-    // 用 app.getAppPath() 更稳
     const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
     log.info(`Loading renderer from: ${indexPath}`);
     mainWindow.loadFile(indexPath);
   }
 
-  // 兜底：5 秒后还没显示就强制 show
   mainWindow.once('ready-to-show', () => {
     log.info('Window ready to show');
     mainWindow?.show();
@@ -67,7 +66,6 @@ function createWindow(): void {
     }
   }, 5000);
 
-  // Debug: log renderer errors to console
   mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
     const msg = `Renderer failed to load: ${errorCode} ${errorDescription} (URL: ${validatedURL})`;
     console.error(msg);
@@ -84,7 +82,6 @@ function createWindow(): void {
     log.info(msg);
   });
 
-  // 外链走系统浏览器
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -112,7 +109,7 @@ function registerIpcHandlers(): void {
     };
   });
 
-  // Models
+  // Models（v1，保留兼容；新代码用 getAll / setActive / remove / updateKey）
   ipcMain.handle('models:list', async (): Promise<ModelListResponse> => {
     const { MODEL_PRESETS } = await import('./llm/presets');
     const configured = await loadModelsConfig();
@@ -128,7 +125,6 @@ function registerIpcHandlers(): void {
       if (!preset) {
         return { ok: false, error: `未知模型：${config.id}` };
       }
-      // 合并用户填的（custom 用用户值，内置用 preset 默认）
       const final: ModelConfig = {
         id: config.id,
         label: config.label,
@@ -154,6 +150,41 @@ function registerIpcHandlers(): void {
     }
   });
 
+  // Models v2
+  ipcMain.handle('models:getAll', async () => {
+    const { loadConfig } = await import('./config/config-v2');
+    const { listKeys } = await import('./config/secrets');
+    const cfg = await loadConfig();
+    const keys = await listKeys();
+    return cfg.models.map((m) => ({
+      id: m.id,
+      label: m.label,
+      baseUrl: m.baseUrl,
+      model: m.model,
+      workDir: m.workDir,
+      createdAt: m.createdAt,
+      hasKey: !!keys[m.id],
+      isActive: m.id === cfg.activeModelId,
+    }));
+  });
+
+  ipcMain.handle('models:remove', async (_e, modelId: string) => {
+    const { removeModel } = await import('./config/config-v2');
+    const { deleteKey } = await import('./config/secrets');
+    await removeModel(modelId);
+    await deleteKey(modelId);
+  });
+
+  ipcMain.handle('models:setActive', async (_e, modelId: string) => {
+    const { setActiveModel } = await import('./config/config-v2');
+    await setActiveModel(modelId);
+  });
+
+  ipcMain.handle('models:updateKey', async (_e, modelId: string, newKey: string) => {
+    const { setKey } = await import('./config/secrets');
+    await setKey(modelId, newKey);
+  });
+
   // Chat
   ipcMain.handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
     const configured = await loadModelsConfig();
@@ -161,7 +192,6 @@ function registerIpcHandlers(): void {
       throw new Error('未配置模型，请先在设置中配置 API key');
     }
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    // 异步跑 agent 循环，event 通过 webContents.send 推
     void runAgentLoopForIpc(request, configured, streamId);
     return { streamId };
   });
@@ -183,6 +213,93 @@ function registerIpcHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
   });
+
+  // Sessions
+  ipcMain.handle('sessions:list', async () => {
+    const { listSessions } = await import('./store/db');
+    return listSessions().map((s) => ({
+      id: s.id,
+      title: s.title,
+      modelId: s.modelId,
+      messageCount: s.messageCount,
+      updatedAt: s.updatedAt,
+    }));
+  });
+
+  ipcMain.handle('sessions:get', async (_e, id: string) => {
+    const { getSession, getMessages } = await import('./store/db');
+    const session = getSession(id);
+    if (!session) throw new Error(`Session 不存在: ${id}`);
+    return { session, messages: getMessages(id) };
+  });
+
+  ipcMain.handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string }) => {
+    const { v4: uuid } = await import('uuid');
+    const { createSession } = await import('./store/db');
+    const { getKey } = await import('./config/secrets');
+    if (!getKey(args.modelId)) {
+      throw new Error(`Model ${args.modelId} 未配置 API key`);
+    }
+    const id = uuid();
+    return createSession({
+      id,
+      title: args.title ?? 'New session',
+      modelId: args.modelId,
+      workDir: args.workDir,
+    });
+  });
+
+  ipcMain.handle('sessions:delete', async (_e, id: string) => {
+    const { deleteSession } = await import('./store/db');
+    deleteSession(id);
+  });
+
+  ipcMain.handle('sessions:rename', async (_e, id: string, title: string) => {
+    const { renameSession } = await import('./store/db');
+    renameSession(id, title);
+  });
+
+  ipcMain.handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
+    const { saveMessages } = await import('./store/db');
+    saveMessages(id, messages);
+  });
+
+  ipcMain.handle('sessions:appendMessage', async (_e, id: string, message: MessageRow) => {
+    const { appendMessage } = await import('./store/db');
+    appendMessage({ ...message, sessionId: id });
+  });
+
+  // Settings
+  ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
+    const { loadConfig } = await import('./config/config-v2');
+    const cfg = await loadConfig();
+    return cfg.app;
+  });
+
+  ipcMain.handle('settings:update', async (_e, partial: Partial<AppSettings>) => {
+    const { loadConfig, saveConfig } = await import('./config/config-v2');
+    const cfg = await loadConfig();
+    cfg.app = { ...cfg.app, ...partial };
+    await saveConfig(cfg);
+  });
+
+  ipcMain.handle('settings:clearAllData', async () => {
+    const dir = path.join(os.homedir(), '.stellara');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  ipcMain.handle('settings:openDataDir', async () => {
+    const dir = path.join(os.homedir(), '.stellara');
+    await fs.mkdir(dir, { recursive: true });
+    await shell.openPath(dir);
+  });
+
+  ipcMain.handle('settings:openLogFile', async (_e, name: 'main' | 'renderer') => {
+    const logPath = name === 'main'
+      ? path.join(app.getPath('logs'), 'main.log')
+      : path.join(app.getPath('logs'), 'renderer.log');
+    await shell.openPath(logPath);
+  });
 }
 
 async function runAgentLoopForIpc(
@@ -201,7 +318,6 @@ async function runAgentLoopForIpc(
     send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
     return;
   }
-  // 多轮上下文：除最后一条外的所有消息作为 history 传入
   const history = request.messages.slice(0, -1);
 
   try {
@@ -210,7 +326,6 @@ async function runAgentLoopForIpc(
       cwd: model.workDir ?? process.cwd(),
       history,
       planMode: request.planMode ?? false,
-      // W1: 暂时自动批准所有危险操作（UI 批准机制 W2.5 实现）
       onApproval: async () => true,
     })) {
       send(event);
@@ -226,6 +341,24 @@ async function runAgentLoopForIpc(
 
 app.whenReady().then(async () => {
   await loadEnv();
+
+  // W3: 旧 config 迁移 + 初始化 db
+  try {
+    const { migrateFromV1 } = await import('./config/config-v2');
+    const migrated = await migrateFromV1();
+    if (migrated) {
+      log.info('已迁移旧 config.json 到新格式');
+    }
+  } catch (err) {
+    log.error('config 迁移失败', err);
+  }
+  try {
+    const { initDb } = await import('./store/db');
+    initDb();
+  } catch (err) {
+    log.error('db 初始化失败', err);
+  }
+
   registerIpcHandlers();
   createWindow();
 
@@ -236,6 +369,18 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  try {
+    // 同步关闭 db（better-sqlite3 是同步 API）
+    // 用 require 避免顶层 await
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const dbModule = require('./store/db') as { closeDb: () => void };
+    dbModule.closeDb();
+  } catch {
+    // ignore
+  }
 });
 
 // 安全：阻止新窗口创建
