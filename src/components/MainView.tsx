@@ -123,7 +123,6 @@ export function MainView(props: MainViewProps) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
         if (entriesSessionRef.current) {
-          console.log('[MainView] flush save on switch-to-null', { to: entriesSessionRef.current, msgCount: entries.length });
           void window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
             .catch((e) => console.error('Flush save failed:', e));
         }
@@ -137,19 +136,15 @@ export function MainView(props: MainViewProps) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
       if (entriesSessionRef.current && entriesSessionRef.current !== activeSessionId) {
-        console.log('[MainView] flush save on switch', { from: entriesSessionRef.current, to: activeSessionId, msgCount: entries.length });
         void window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
-          .then(() => console.log('[MainView] flush save done', { from: entriesSessionRef.current }))
           .catch((e) => console.error('Flush save failed:', e));
       }
     }
     // 禁止 save 直到新 session fetch 完成
     entriesSessionRef.current = null;
     let cancelled = false;
-    console.log('[MainView] load session start', { to: activeSessionId });
     void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
-      if (cancelled) { console.log('[MainView] load cancelled', { to: activeSessionId }); return; }
-      console.log('[MainView] load session done', { to: activeSessionId, msgCount: messages.length });
+      if (cancelled) return;
       setEntries(messagesToEntries(messages));
       entriesSessionRef.current = activeSessionId; // 标记归属
       setPlanMode(false);
@@ -202,8 +197,11 @@ export function MainView(props: MainViewProps) {
     });
 
   // 自动给当前会话改名（首条 user 消息触发后用前 20 字做 title）
+  // 必须先确认 entries 真的属于当前 session——切 session 中 / fetch 未完成时
+  // entries 还指着上一个会话的内容，跳过避免拿错消息给新会话起名
   useEffect(() => {
     if (!activeSessionId) return;
+    if (entriesSessionRef.current !== activeSessionId) return;
     const firstUser = entries.find((e) => e.kind === 'user');
     if (!firstUser || firstUser.kind !== 'user') return;
     const title = firstUser.content.slice(0, 20) + (firstUser.content.length > 20 ? '…' : '');
