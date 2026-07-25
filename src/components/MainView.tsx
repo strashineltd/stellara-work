@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent, ToolResultMeta } from '../../shared/ipc';
 import { MarkdownView } from './MarkdownView';
 import { ToolCallCard } from './ToolCallCard';
@@ -48,6 +48,13 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);
   }, [menuOpen]);
+
+  // 自动滚到底部
+  const chatRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = chatRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [entries, busy]);
 
   function handleNewTask() {
     if (busy) return; // 不在 agent 跑的时候清空
@@ -227,7 +234,7 @@ export function MainView({ config, info: _info, onReconfigure, onSwitchModel: _o
         </div>
       )}
 
-      <main className="main-chat">
+      <main className="main-chat" ref={chatRef}>
         {entries.length === 0 ? (
           <div className="empty-chat">
             <h2>开始一个新的任务</h2>
