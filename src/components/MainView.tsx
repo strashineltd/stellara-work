@@ -118,13 +118,29 @@ export function MainView(props: MainViewProps) {
 
   useEffect(() => {
     if (!activeSessionId) {
+      // 切走时如果有 pending save，先 flush 到上一个 session 再清掉
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        if (entriesSessionRef.current) {
+          void window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
+            .catch((e) => console.error('Flush save failed:', e));
+        }
+      }
       setEntries([]);
       entriesSessionRef.current = null;
-      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
       return;
     }
-    // 切 session 时立刻取消任何 pending save，并禁止 save 直到 fetch 完成
-    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    // 切 session 时：先 flush pending save 到上一个 session，再开始 load 新的
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      if (entriesSessionRef.current && entriesSessionRef.current !== activeSessionId) {
+        void window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
+          .catch((e) => console.error('Flush save failed:', e));
+      }
+    }
+    // 禁止 save 直到新 session fetch 完成
     entriesSessionRef.current = null;
     let cancelled = false;
     void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
