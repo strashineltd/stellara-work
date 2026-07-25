@@ -52,6 +52,8 @@ export class OpenAICompatClient {
     }
 
     // 流式解析 SSE
+    // 本地 buffer：SSE onEvent 回调里塞进来，主循环在每次 feed 之后 drain 出来 yield
+    const pending: ChatStreamEvent[] = [];
     const toolCallsBuffer = new Map<number, ToolCall>(); // index -> partial tool call
     const parser = createParser({
       onEvent: (event: EventSourceMessage) => {
@@ -63,7 +65,7 @@ export class OpenAICompatClient {
 
           // content 增量
           if (delta.content) {
-            this.emit({ type: 'content', content: delta.content });
+            pending.push({ type: 'content', content: delta.content });
           }
 
           // tool_calls 增量
@@ -100,6 +102,10 @@ export class OpenAICompatClient {
         if (done) break;
         const text = decoder.decode(value, { stream: true });
         parser.feed(text);
+        // 每个 chunk 喂完，drain 一次 pending → 真流式
+        while (pending.length > 0) {
+          yield pending.shift()!;
+        }
       }
     } finally {
       reader.releaseLock();
@@ -112,11 +118,6 @@ export class OpenAICompatClient {
       }
     }
     yield { type: 'done' };
-  }
-
-  private eventBuffer: ChatStreamEvent[] = [];
-  private emit(event: ChatStreamEvent) {
-    this.eventBuffer.push(event);
   }
 
   private async fetchWithRetry(
