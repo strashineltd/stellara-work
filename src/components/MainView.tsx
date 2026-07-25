@@ -32,6 +32,7 @@ interface MainViewProps {
   onSessionCreated: (session: Session) => void;
   onSessionSwitched: (id: string) => void;
   onSessionDeleted: (id: string) => void;
+  onSessionRenamed: (id: string, title: string) => void;
   onSessionsChanged: (sessions: SessionSummary[]) => void;
   onModelChanged: (config: ModelConfig) => void;
 }
@@ -47,7 +48,7 @@ export function MainView(props: MainViewProps) {
   const {
     config, info: _info, sidebarOpen, activeSessionId, sessions,
     onToggleSidebar, onReconfigure, onOpenSettings,
-    onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionsChanged,
+    onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
   } = props;
   void _info;
 
@@ -267,6 +268,15 @@ export function MainView(props: MainViewProps) {
     }
   }
 
+  async function handleRenameSession(id: string, title: string) {
+    try {
+      await window.electronAPI.sessions.rename(id, title);
+      onSessionRenamed(id, title);
+    } catch (e) {
+      console.error('Rename session failed:', e);
+    }
+  }
+
   return (
     <div className="main-view">
       <header className="main-header">
@@ -346,6 +356,7 @@ export function MainView(props: MainViewProps) {
             onSelect={onSessionSwitched}
             onNew={() => void handleNewSession()}
             onDelete={(id) => void handleDeleteSession(id)}
+            onRename={(id, title) => void handleRenameSession(id, title)}
           />
         )}
         <div className="main-content">

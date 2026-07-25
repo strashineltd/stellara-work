@@ -135,6 +135,15 @@ export default function App() {
             };
           });
         }}
+        onSessionRenamed={async (id, title) => {
+          setState((s) => {
+            if (s.kind !== 'ready') return s;
+            return {
+              ...s,
+              sessions: s.sessions.map((x) => x.id === id ? { ...x, title } : x),
+            };
+          });
+        }}
         onSessionsChanged={(sessions) => {
           setState((s) => s.kind === 'ready' ? { ...s, sessions } : s);
         }}

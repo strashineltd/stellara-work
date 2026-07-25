@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import type { SessionSummary } from '../../shared/ipc';
 
 interface SidebarProps {
@@ -6,15 +7,44 @@ interface SidebarProps {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
 }
 
 /**
  * 左侧会话列表
  * - 顶部「+ 新建会话」按钮
- * - 每条：title + 消息数 + 时间
- * - 活跃会话左边高亮，hover 时显示 × 按钮删除
+ * - 每条：title（双击重命名）+ 消息数 + 时间 + × 删除（常驻）
  */
-export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: SidebarProps) {
+export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onRename }: SidebarProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const editInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingId]);
+
+  function startEdit(s: SessionSummary) {
+    setEditingId(s.id);
+    setEditValue(s.title);
+  }
+
+  function commitEdit() {
+    if (editingId && editValue.trim()) {
+      onRename(editingId, editValue.trim().slice(0, 50));
+    }
+    setEditingId(null);
+    setEditValue('');
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditValue('');
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -32,7 +62,34 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete }: Sideb
             className={`session-item ${s.id === activeId ? 'active' : ''}`}
             onClick={() => onSelect(s.id)}
           >
-            <div className="session-title">{s.title}</div>
+            {editingId === s.id ? (
+              <input
+                ref={editInputRef}
+                className="session-title-input"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') commitEdit();
+                  else if (e.key === 'Escape') cancelEdit();
+                  else if (e.key === 'Tab') commitEdit();
+                }}
+                onBlur={commitEdit}
+                maxLength={50}
+              />
+            ) : (
+              <div
+                className="session-title"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  startEdit(s);
+                }}
+                title="双击重命名"
+              >
+                {s.title}
+              </div>
+            )}
             <div className="session-meta">
               <span className="session-count">{s.messageCount} 条</span>
               <span className="session-time">{formatTime(s.updatedAt)}</span>
