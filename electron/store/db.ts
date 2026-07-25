@@ -173,6 +173,8 @@ export function appendMessage(msg: MessageRow): void {
 }
 
 export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
+  // 静默跳过不存在的 session（autosave 在 race 条件下可能引用已删 session）
+  if (!getSession(sessionId)) return;
   const db = getDb();
   const tx = db.transaction((ms: MessageRow[]) => {
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
@@ -200,6 +202,8 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
 }
 
 export function bumpSession(id: string, messageCount: number): void {
+  // 静默跳过不存在的 session
+  if (!getSession(id)) return;
   getDb()
     .prepare('UPDATE sessions SET message_count = ?, updated_at = ? WHERE id = ?')
     .run(messageCount, Date.now(), id);

@@ -18,6 +18,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:w1": "vitest run scripts/verify-w1.test.ts",
+    "rebuild:node": "rm -rf node_modules/better-sqlite3 && npm install better-sqlite3",
+    "rebuild:electron": "npx --yes @electron/rebuild",
     "package": "npm run build && electron-builder --win nsis",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
