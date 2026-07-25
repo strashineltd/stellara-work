@@ -155,12 +155,15 @@ function registerIpcHandlers(): void {
   });
 
   // Chat
-  ipcMain.handle('chat:send', async (_e, request: ChatRequest) => {
+  ipcMain.handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
     const configured = await loadModelsConfig();
     if (!configured) {
       throw new Error('未配置模型，请先在设置中配置 API key');
     }
-    return runAgentLoopForIpc(request, configured);
+    const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // 异步跑 agent 循环，event 通过 webContents.send 推
+    void runAgentLoopForIpc(request, configured, streamId);
+    return { streamId };
   });
 
   // Tools (开发期直调，绕过 LLM)
@@ -182,23 +185,34 @@ function registerIpcHandlers(): void {
   });
 }
 
-async function* runAgentLoopForIpc(
+async function runAgentLoopForIpc(
   request: ChatRequest,
   model: ModelConfig,
-): AsyncGenerator<ChatStreamEvent> {
+  streamId: string,
+): Promise<void> {
+  const send = (event: ChatStreamEvent) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('chat-stream', { streamId, event });
+    }
+  };
+
   const userMsg = request.messages[request.messages.length - 1];
   if (!userMsg || userMsg.role !== 'user') {
-    yield { type: 'error', error: '消息历史末尾必须是 user 消息' };
+    send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
     return;
   }
 
-  for await (const event of runAgentLoop(userMsg.content, {
-    model,
-    cwd: process.cwd(),
-    // W1: 暂时自动批准所有危险操作（UI 批准机制 W2 实现）
-    onApproval: async () => true,
-  })) {
-    yield event;
+  try {
+    for await (const event of runAgentLoop(userMsg.content, {
+      model,
+      cwd: model.workDir ?? process.cwd(),
+      // W1: 暂时自动批准所有危险操作（UI 批准机制 W2.5 实现）
+      onApproval: async () => true,
+    })) {
+      send(event);
+    }
+  } catch (err) {
+    send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
   }
 }
 

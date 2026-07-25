@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AppInfo, ChatMessage, ModelConfig, MessageRole } from '../../shared/ipc';
+import type { AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent } from '../../shared/ipc';
 
 interface MainViewProps {
   config: ModelConfig;
@@ -7,49 +7,58 @@ interface MainViewProps {
 }
 
 /**
- * W2.2 主聊天界面（占位版）
- * 真正的聊天流 + 流式渲染 + tool call 卡片在 W2.3 / W2.4
+ * W2.2 + W2.3 主聊天界面（流式版）
+ * - 真流式：每个 token 实时 push 到 UI
+ * - 暂未实现：markdown 渲染、tool call 卡片、plan 模式（后续 W2.4 / W2.5）
  */
 export function MainView({ config, info: _info }: MainViewProps) {
-  // info 当前没用到，预留用于 W2 后续显示工作目录等信息
   void _info;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [streaming, setStreaming] = useState(false);
 
   async function handleSend() {
     if (!input.trim() || busy) return;
     const userMsg: ChatMessage = { role: 'user' as MessageRole, content: input };
-    setMessages((m) => [...m, userMsg]);
+    const history = [...messages, userMsg];
+    setMessages(history);
     setInput('');
     setBusy(true);
+    setStreaming(true);
+
+    // 立即加一个空的 assistant 消息，后续 content 增量追加
+    const assistantIdx = history.length;
+    setMessages((m) => [...m, { role: 'assistant' as MessageRole, content: '' }]);
+
+    let buffer = '';
 
     try {
-      // W2.3 替换为真正流式
-      const events = await window.electronAPI.chat.send({
-        messages: [...messages, userMsg],
-      });
-      let content = '';
-      for await (const event of events) {
-        if (event.type === 'content' && event.content) {
-          content += event.content;
-        } else if (event.type === 'error') {
-          content += `\n\n[错误] ${event.error}`;
-        }
+      const { events } = await window.electronAPI.chat.start({ messages: history });
+
+      for await (const ev of events) {
+        handleStreamEvent(ev, buffer, (next) => {
+          buffer = next;
+          setMessages((m) => {
+            const copy = [...m];
+            copy[assistantIdx] = { role: 'assistant' as MessageRole, content: buffer };
+            return copy;
+          });
+        });
+        if (ev.type === 'done' || ev.type === 'error') break;
       }
-      const assistantMsg: ChatMessage = {
-        role: 'assistant' as MessageRole,
-        content: content || '（空响应）',
-      };
-      setMessages((m) => [...m, assistantMsg]);
     } catch (err) {
-      const errorMsg: ChatMessage = {
-        role: 'assistant' as MessageRole,
-        content: `错误：${err instanceof Error ? err.message : String(err)}`,
-      };
-      setMessages((m) => [...m, errorMsg]);
+      setMessages((m) => {
+        const copy = [...m];
+        copy[assistantIdx] = {
+          role: 'assistant' as MessageRole,
+          content: buffer + `\n\n[连接错误] ${err instanceof Error ? err.message : String(err)}`,
+        };
+        return copy;
+      });
     } finally {
       setBusy(false);
+      setStreaming(false);
     }
   }
 
@@ -93,6 +102,11 @@ export function MainView({ config, info: _info }: MainViewProps) {
                 </div>
               </div>
             ))}
+            {streaming && (
+              <div className="streaming-indicator">
+                <span></span><span></span><span></span>
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -125,6 +139,33 @@ export function MainView({ config, info: _info }: MainViewProps) {
       </footer>
     </div>
   );
+}
+
+/**
+ * 处理一个 stream event，累积到 buffer
+ * 纯函数，外部用 callback 拿最新 buffer
+ */
+function handleStreamEvent(
+  ev: ChatStreamEvent,
+  buffer: string,
+  setBuffer: (next: string) => void,
+): void {
+  if (ev.type === 'content' && ev.content) {
+    setBuffer(buffer + ev.content);
+  } else if (ev.type === 'tool_call' && ev.toolCall) {
+    const tc = ev.toolCall;
+    const args = tc.function.arguments.length > 100
+      ? tc.function.arguments.slice(0, 100) + '...'
+      : tc.function.arguments;
+    setBuffer(buffer + `\n\n🔧 ${tc.function.name}(${args})\n`);
+  } else if (ev.type === 'tool_result' && ev.toolResult) {
+    const tr = ev.toolResult;
+    const ok = (tr.result as { ok?: boolean })?.ok;
+    setBuffer(buffer + `   ${ok ? '✓' : '✗'} ${tr.name}\n`);
+  } else if (ev.type === 'error' && ev.error) {
+    setBuffer(buffer + `\n\n[错误] ${ev.error}`);
+  }
+  // 'done' / 'plan' 不动 buffer
 }
 
 function truncatePath(p: string, max = 40): string {

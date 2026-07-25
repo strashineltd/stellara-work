@@ -82,6 +82,11 @@ export interface ChatStreamEvent {
   plan?: string[];
 }
 
+export interface ChatStream {
+  streamId: string;
+  events: AsyncIterable<ChatStreamEvent>;
+}
+
 // ============================================
 // Tool 相关
 // ============================================
@@ -177,7 +182,8 @@ export interface ElectronAPI {
     test: (config: ModelConfig) => Promise<{ ok: boolean; error?: string }>;
   };
   chat: {
-    send: (request: ChatRequest) => Promise<AsyncIterable<ChatStreamEvent>>;
+    /** 启动一个流式 chat，返回 { streamId, events } - events 是 AsyncIterable<ChatStreamEvent> */
+    start: (request: ChatRequest) => Promise<ChatStream>;
     cancel: () => void;
   };
   tools: {

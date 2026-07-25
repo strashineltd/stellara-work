@@ -1,5 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ElectronAPI, ChatRequest, ChatStreamEvent } from '../shared/ipc';
+import type {
+  ElectronAPI,
+  ChatRequest,
+  ChatStreamEvent,
+  AppInfo,
+  ModelConfig,
+  ModelListResponse,
+  ToolName,
+  ToolArgs,
+  ToolResult,
+} from '../shared/ipc';
 
 /**
  * Preload 脚本
@@ -7,37 +17,86 @@ import type { ElectronAPI, ChatRequest, ChatStreamEvent } from '../shared/ipc';
  * 用 contextBridge 暴露受限的 electronAPI 给渲染进程。
  * 渲染进程拿不到原始 ipcRenderer / node 模块，只能通过这个白名单 API。
  */
+
+// 内部工具：创建一个与 streamId 绑定的 AsyncIterable
+function makeStreamIterator<T>(channel: string, filter: (payload: any) => boolean): AsyncIterable<T> {
+  const queue: T[] = [];
+  const resolvers: Array<(v: IteratorResult<T>) => void> = [];
+  let closed = false;
+
+  const handler = (_e: unknown, payload: any) => {
+    if (!filter(payload)) return;
+    if (closed) return;
+    const event = payload.event as T;
+    if (resolvers.length > 0) {
+      const r = resolvers.shift()!;
+      r({ value: event, done: false });
+    } else {
+      queue.push(event);
+    }
+  };
+
+  ipcRenderer.on(channel, handler);
+
+  // done 事件（payload.event.type === 'done'）关闭流
+  const closer = (_e: unknown, payload: any) => {
+    if (filter(payload) && payload?.event?.type === 'done') {
+      closed = true;
+      ipcRenderer.removeListener(channel, handler);
+      ipcRenderer.removeListener(channel, closer);
+      while (resolvers.length > 0) {
+        const r = resolvers.shift()!;
+        r({ value: undefined as unknown as T, done: true });
+      }
+    }
+  };
+  ipcRenderer.on(channel, closer);
+
+  return {
+    [Symbol.asyncIterator]() {
+      return {
+        next: (): Promise<IteratorResult<T>> => {
+          if (queue.length > 0) {
+            return Promise.resolve({ value: queue.shift()!, done: false });
+          }
+          if (closed) {
+            return Promise.resolve({ value: undefined as unknown as T, done: true });
+          }
+          return new Promise((resolve) => resolvers.push(resolve));
+        },
+      };
+    },
+  };
+}
+
 const api: ElectronAPI = {
   app: {
-    getInfo: () => ipcRenderer.invoke('app:getInfo'),
+    getInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:getInfo'),
   },
   models: {
-    list: () => ipcRenderer.invoke('models:list'),
-    configure: (config) => ipcRenderer.invoke('models:configure', config),
-    test: (config) => ipcRenderer.invoke('models:test', config),
+    list: (): Promise<ModelListResponse> => ipcRenderer.invoke('models:list'),
+    configure: (config: ModelConfig) => ipcRenderer.invoke('models:configure', config),
+    test: (config: ModelConfig) => ipcRenderer.invoke('models:test', config),
   },
   chat: {
-    send: async (request: ChatRequest): Promise<AsyncIterable<ChatStreamEvent>> => {
-      // 返回一个 async iterable，渲染进程 for await 消费
-      return (async function* () {
-        // 一次性拿到所有事件（v0.9 简化：W1 不做实时流推送）
-        // 等 W2 接 WebSocket / EventEmitter 改成真正的流
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const events: ChatStreamEvent[] = await (ipcRenderer as any).invoke('chat:send', request);
-        for (const event of events) {
-          yield event;
-        }
-      })();
+    start: async (request: ChatRequest): Promise<{ streamId: string; events: AsyncIterable<ChatStreamEvent> }> => {
+      const { streamId } = await ipcRenderer.invoke('chat:start', request);
+      const events = makeStreamIterator<ChatStreamEvent>(
+        'chat-stream',
+        (payload) => payload?.streamId === streamId,
+      );
+      return { streamId, events };
     },
     cancel: () => {
-      // W1 不实现：暂时 noop
+      // W2 不实现：暂时 noop
     },
   },
   tools: {
-    invoke: (name, args) => ipcRenderer.invoke('tools:invoke', name, args),
+    invoke: (name: ToolName, args: ToolArgs): Promise<ToolResult> =>
+      ipcRenderer.invoke('tools:invoke', name, args),
   },
   dialog: {
-    openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
+    openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
   },
 };
 
