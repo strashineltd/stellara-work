@@ -31,6 +31,8 @@ export interface ModelPreset {
 
 export interface ModelConfig extends ModelPreset {
   apiKey: string;
+  /** 工作目录（agent 在这里读/写文件） */
+  workDir?: string;
 }
 
 export interface ModelListResponse {
@@ -181,6 +183,10 @@ export interface ElectronAPI {
   tools: {
     /** 直接调一个 tool（不通过 LLM，用于开发期 / 测试） */
     invoke: (name: ToolName, args: ToolArgs) => Promise<ToolResult>;
+  };
+  dialog: {
+    /** 弹原生目录选择器，返回选中的路径（或 null 取消） */
+    openDirectory: () => Promise<string | null>;
   };
 }
 

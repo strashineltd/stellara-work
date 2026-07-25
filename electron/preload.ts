@@ -36,6 +36,9 @@ const api: ElectronAPI = {
   tools: {
     invoke: (name, args) => ipcRenderer.invoke('tools:invoke', name, args),
   },
+  dialog: {
+    openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

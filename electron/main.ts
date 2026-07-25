@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -168,6 +168,17 @@ function registerIpcHandlers(): void {
     const { invokeTool } = await import('./agent/tools');
     const cwd = process.cwd();
     return invokeTool(name, args, cwd);
+  });
+
+  // Dialog: 选工作目录
+  ipcMain.handle('dialog:openDirectory', async (): Promise<string | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择工作目录',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 }
 
