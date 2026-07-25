@@ -101,6 +101,31 @@ export async function setActiveModel(id: string): Promise<AppConfig> {
   return cfg;
 }
 
+/**
+ * 添加或更新一个 model，并设为 active
+ * - 已存在同 id：更新字段，保留 createdAt
+ * - 不存在：新增，写入当前时间
+ */
+export async function upsertModel(entry: ModelEntry): Promise<AppConfig> {
+  const cfg = await loadConfig();
+  const idx = cfg.models.findIndex((m) => m.id === entry.id);
+  if (idx >= 0) {
+    const existing = cfg.models[idx];
+    cfg.models[idx] = {
+      ...existing,
+      label: entry.label,
+      baseUrl: entry.baseUrl,
+      model: entry.model,
+      workDir: entry.workDir,
+    };
+  } else {
+    cfg.models.push(entry);
+  }
+  cfg.activeModelId = entry.id;
+  await saveConfig(cfg);
+  return cfg;
+}
+
 export async function migrateFromV1(): Promise<boolean> {
   let old: Record<string, unknown>;
   try {

@@ -97,7 +97,7 @@ export async function* runAgentLoop(
       } catch {
         yield {
           type: 'tool_result',
-          toolResult: { name: toolName, result: { ok: false, error: '参数 JSON 解析失败' } },
+          toolResult: { name: toolName, toolCallId: toolCall.id, result: { ok: false, error: '参数 JSON 解析失败' } },
         };
         continue;
       }
@@ -106,7 +106,7 @@ export async function* runAgentLoop(
       if (planMode && !isReadOnlyTool(toolName)) {
         yield {
           type: 'tool_result',
-          toolResult: { name: toolName, result: { ok: false, error: 'Plan 模式禁止调用此工具' } },
+          toolResult: { name: toolName, toolCallId: toolCall.id, result: { ok: false, error: 'Plan 模式禁止调用此工具' } },
         };
         continue;
       }
@@ -117,7 +117,7 @@ export async function* runAgentLoop(
         if (!approved) {
           yield {
             type: 'tool_result',
-            toolResult: { name: toolName, result: { ok: false, error: '用户拒绝' } },
+            toolResult: { name: toolName, toolCallId: toolCall.id, result: { ok: false, error: '用户拒绝' } },
           };
           continue;
         }
@@ -132,7 +132,7 @@ export async function* runAgentLoop(
 
       yield {
         type: 'tool_result',
-        toolResult: { name: toolName, result },
+        toolResult: { name: toolName, toolCallId: toolCall.id, result },
       };
 
       // 把 tool 结果加到消息历史

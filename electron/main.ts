@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import log from 'electron-log/main';
 import { loadEnv, getEnvPath } from './config/env';
-import { loadModelsConfig, saveModelConfig } from './config/models';
+import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
 import { findPreset } from './llm/presets';
 import type {
@@ -135,18 +135,20 @@ function registerIpcHandlers(): void {
   ipcMain.handle('models:configure', async (_e, config: ModelConfig) => {
     try {
       const preset = findPreset(config.id);
-      if (!preset) {
-        return { ok: false, error: `未知模型：${config.id}` };
-      }
-      const final: ModelConfig = {
+      const { upsertModel } = await import('./config/config-v2');
+      const { setKey } = await import('./config/secrets');
+      const entry = {
         id: config.id,
         label: config.label,
-        baseUrl: config.baseUrl || preset.baseUrl,
-        model: config.model || preset.model,
-        apiKey: config.apiKey,
-        isCustom: config.isCustom,
+        baseUrl: config.baseUrl || preset?.baseUrl || '',
+        model: config.model || preset?.model || '',
+        workDir: config.workDir,
+        createdAt: new Date().toISOString(),
       };
-      await saveModelConfig(final);
+      await upsertModel(entry);
+      if (config.apiKey) {
+        await setKey(config.id, config.apiKey);
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };

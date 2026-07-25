@@ -15,9 +15,9 @@ import { Sidebar } from './Sidebar';
  */
 type DisplayEntry =
   | { kind: 'user'; content: string }
-  | { kind: 'assistant'; content: string }
-  | { kind: 'tool_call'; name: string; args: string }
-  | { kind: 'tool_result'; name: string; ok: boolean; output: string; error?: string; meta?: ToolResultMeta }
+  | { kind: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { kind: 'tool_call'; id: string; name: string; args: string }
+  | { kind: 'tool_result'; toolCallId?: string; name: string; ok: boolean; output: string; error?: string; meta?: ToolResultMeta }
   | { kind: 'error'; message: string };
 
 interface MainViewProps {
@@ -107,11 +107,23 @@ export function MainView(props: MainViewProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries, busy]);
 
-  // 把当前 entries 投成发给 LLM 的 history（user + assistant 纯文本）
+  // 把当前 entries 投成发给 LLM 的 history（包含完整的 tool_call / tool_result 链）
   const buildHistory = (): ChatMessage[] =>
     entries.flatMap<ChatMessage>((e) => {
       if (e.kind === 'user') return [{ role: 'user' as MessageRole, content: e.content }];
-      if (e.kind === 'assistant' && e.content) return [{ role: 'assistant' as MessageRole, content: e.content }];
+      if (e.kind === 'assistant') {
+        const msg: ChatMessage = { role: 'assistant' as MessageRole, content: e.content };
+        if (e.toolCalls && e.toolCalls.length > 0) msg.tool_calls = e.toolCalls;
+        return [msg];
+      }
+      if (e.kind === 'tool_result') {
+        return [{
+          role: 'tool' as MessageRole,
+          tool_call_id: e.toolCallId ?? '',
+          name: e.name,
+          content: e.ok ? e.output : `Error: ${e.error ?? '未知错误'}`,
+        }];
+      }
       return [];
     });
 
@@ -221,6 +233,7 @@ export function MainView(props: MainViewProps) {
       if (ev.type === 'tool_call' && ev.toolCall) {
         copy.push({
           kind: 'tool_call',
+          id: ev.toolCall.id,
           name: ev.toolCall.function.name,
           args: ev.toolCall.function.arguments,
         });
@@ -230,6 +243,7 @@ export function MainView(props: MainViewProps) {
         const r = ev.toolResult.result as { ok?: boolean; output?: string; error?: string; meta?: ToolResultMeta };
         copy.push({
           kind: 'tool_result',
+          toolCallId: ev.toolResult.toolCallId,
           name: ev.toolResult.name,
           ok: r?.ok === true,
           output: r?.output ?? '',
@@ -507,15 +521,24 @@ function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
     if (m.role === 'user') {
       out.push({ kind: 'user', content: m.content });
     } else if (m.role === 'assistant') {
-      out.push({ kind: 'assistant', content: m.content });
+      let toolCalls: ToolCall[] | undefined;
+      try { if (m.toolCalls) toolCalls = JSON.parse(m.toolCalls); } catch { /* ignore */ }
+      out.push({ kind: 'assistant', content: m.content, toolCalls });
+      if (toolCalls) {
+        for (const tc of toolCalls) {
+          out.push({ kind: 'tool_call', id: tc.id, name: tc.function.name, args: tc.function.arguments });
+        }
+      }
     } else if (m.role === 'tool') {
       let meta: ToolResultMeta | undefined;
       try { if (m.meta) meta = JSON.parse(m.meta); } catch { /* ignore */ }
+      const isError = m.content.startsWith('Error:');
       out.push({
         kind: 'tool_result',
+        toolCallId: m.toolCallId,
         name: m.toolName ?? 'tool',
-        ok: true,
-        output: m.content,
+        ok: !isError,
+        output: isError ? m.content.slice('Error:'.length).trim() : m.content,
         meta,
       });
     }
@@ -531,15 +554,29 @@ function entriesToMessages(entries: DisplayEntry[]): MessageRow[] {
     if (e.kind === 'user') {
       out.push({ sessionId: '', position: pos++, role: 'user', content: e.content, createdAt: now });
     } else if (e.kind === 'assistant') {
-      out.push({ sessionId: '', position: pos++, role: 'assistant', content: e.content, createdAt: now });
+      out.push({
+        sessionId: '',
+        position: pos++,
+        role: 'assistant',
+        content: e.content,
+        toolCalls: e.toolCalls && e.toolCalls.length > 0 ? JSON.stringify(e.toolCalls) : undefined,
+        createdAt: now,
+      });
     } else if (e.kind === 'tool_call') {
-      // 不存，合并到下一条 assistant（W2 简化版）
+      // 合并到上一条 assistant 消息，与 OpenAI 消息格式一致
+      const last = out[out.length - 1];
+      if (last && last.role === 'assistant') {
+        const calls: ToolCall[] = last.toolCalls ? JSON.parse(last.toolCalls) : [];
+        calls.push({ id: e.id, type: 'function', function: { name: e.name, arguments: e.args } });
+        last.toolCalls = JSON.stringify(calls);
+      }
     } else if (e.kind === 'tool_result') {
       out.push({
         sessionId: '',
         position: pos++,
         role: 'tool',
         content: e.output,
+        toolCallId: e.toolCallId,
         toolName: e.name,
         meta: JSON.stringify(e.meta),
         createdAt: now,

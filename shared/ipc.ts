@@ -77,7 +77,7 @@ export interface ChatStreamEvent {
   type: 'content' | 'tool_call' | 'tool_result' | 'error' | 'done' | 'plan';
   content?: string;
   toolCall?: ToolCall;
-  toolResult?: { name: string; result: unknown };
+  toolResult?: { name: string; toolCallId?: string; result: unknown };
   error?: string;
   plan?: string[];
 }
