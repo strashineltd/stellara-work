@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   AppInfo, ChatMessage, ModelConfig, MessageRole, ChatStreamEvent,
-  ToolResultMeta, SessionSummary, MessageRow, Session,
+  ToolResultMeta, SessionSummary, MessageRow, Session, ToolCall,
 } from '../../shared/ipc';
 import { MarkdownView } from './MarkdownView';
 import { ToolCallCard } from './ToolCallCard';
@@ -9,6 +9,7 @@ import { ToolResultCard } from './ToolResultCard';
 import { DiffCard } from './DiffCard';
 import { ShellCard } from './ShellCard';
 import { Sidebar } from './Sidebar';
+import { FileTreeModal } from './FileTreeModal';
 
 /**
  * UI 用的条目（流式累加过程中也用它来更新）
@@ -59,6 +60,7 @@ export function MainView(props: MainViewProps) {
   const [confirmNew, setConfirmNew] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
+  const [fileTreeOpen, setFileTreeOpen] = useState(false);
 
   // 点外部关闭菜单
   useEffect(() => {
@@ -312,6 +314,16 @@ export function MainView(props: MainViewProps) {
           <span className="main-workdir" title={config.workDir ?? ''}>
             {config.workDir ? truncatePath(config.workDir) : '（未选工作目录）'}
           </span>
+          {config.workDir && (
+            <button
+              className="btn-icon"
+              onClick={() => setFileTreeOpen(true)}
+              type="button"
+              title="浏览文件"
+            >
+              📁
+            </button>
+          )}
           <div className="header-menu-wrap">
             <button
               className="btn-icon"
@@ -505,6 +517,13 @@ export function MainView(props: MainViewProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {fileTreeOpen && config.workDir && (
+        <FileTreeModal
+          workDir={config.workDir}
+          onClose={() => setFileTreeOpen(false)}
+        />
       )}
     </div>
   );

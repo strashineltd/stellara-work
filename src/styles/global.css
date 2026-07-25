@@ -1385,6 +1385,142 @@ body {
   font-family: inherit;
 }
 
+/* === W4 File Tree Modal === */
+.file-tree-modal {
+  width: 900px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.file-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.file-tree-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-primary);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.file-tree-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.file-tree-pane,
+.file-preview-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  min-width: 0;
+}
+
+.file-tree-pane {
+  border-right: 1px solid var(--color-border);
+}
+
+.ftree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ftree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ftree-row:hover {
+  background: var(--color-bg-soft);
+}
+
+.ftree-row.selected {
+  background: #e8f0ff;
+  color: var(--color-accent);
+}
+
+.ftree-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.ftree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ftree-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-soft);
+  font-family: var(--font-mono);
+}
+
+.file-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.file-preview-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+  word-break: break-all;
+}
+
+.file-preview-size {
+  font-size: 11px;
+  color: var(--color-text-soft);
+  flex-shrink: 0;
+}
+
+.file-preview-content {
+  margin: 0;
+  padding: 12px;
+  background: #1e2530;
+  color: #e6e6e6;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.empty-hint.error {
+  color: var(--color-error);
+}
+
 /* === Loading / Error pages === */
 .app-loading,
 .app-error {

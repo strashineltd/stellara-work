@@ -229,6 +229,17 @@ function registerIpcHandlers(): void {
     return result.filePaths[0];
   });
 
+  // FS: 列目录树 / 读文件（W4）
+  ipcMain.handle('fs:listTree', async (_e, cwd: string, maxDepth?: number) => {
+    const { listTree } = await import('./fs/tree');
+    return listTree(cwd, maxDepth);
+  });
+
+  ipcMain.handle('fs:readFile', async (_e, workDir: string, filePath: string, maxBytes?: number) => {
+    const { readFileContent } = await import('./fs/tree');
+    return readFileContent(workDir, filePath, maxBytes);
+  });
+
   // Sessions
   ipcMain.handle('sessions:list', async () => {
     const { listSessions } = await import('./store/db');

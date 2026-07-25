@@ -246,6 +246,18 @@ export interface CreateSessionArgs {
 }
 
 // ============================================
+// W4: 文件树 / 文件预览
+// ============================================
+
+export interface FsNode {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size?: number;
+  children?: FsNode[];
+}
+
+// ============================================
 // electronAPI 接口（preload 暴露给渲染进程）
 // ============================================
 
@@ -284,6 +296,10 @@ export interface ElectronAPI {
     rename: (id: string, title: string) => Promise<void>;
     saveMessages: (id: string, messages: MessageRow[]) => Promise<void>;
     appendMessage: (id: string, message: MessageRow) => Promise<void>;
+  };
+  fs: {
+    listTree: (cwd: string, maxDepth?: number) => Promise<FsNode>;
+    readFile: (workDir: string, path: string, maxBytes?: number) => Promise<{ content: string; size: number; truncated: boolean }>;
   };
   settings: {
     get: () => Promise<AppSettings>;

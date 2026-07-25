@@ -15,6 +15,7 @@ import type {
   MessageRow,
   CreateSessionArgs,
   AppSettings,
+  FsNode,
 } from '../shared/ipc';
 
 /**
@@ -125,6 +126,12 @@ const api: ElectronAPI = {
     clearAllData: () => ipcRenderer.invoke('settings:clearAllData'),
     openDataDir: () => ipcRenderer.invoke('settings:openDataDir'),
     openLogFile: (name: 'main' | 'renderer') => ipcRenderer.invoke('settings:openLogFile', name),
+  },
+  fs: {
+    listTree: (cwd: string, maxDepth?: number): Promise<FsNode> =>
+      ipcRenderer.invoke('fs:listTree', cwd, maxDepth),
+    readFile: (workDir: string, filePath: string, maxBytes?: number) =>
+      ipcRenderer.invoke('fs:readFile', workDir, filePath, maxBytes),
   },
 };
 
