@@ -6,6 +6,7 @@
   --color-bg-sidebar:    #0E1014;
   --color-bg-content:    #FFFFFF;
   --color-bg-elevated:   #FAFAFA;
+  --color-bg-soft:       #F5F5F5;
   --color-bg-input:      #FFFFFF;
 
   /* 文本（侧栏白底，主区深字） */
@@ -73,6 +74,7 @@
   --color-bg-sidebar:    #000000;
   --color-bg-content:    #161618;
   --color-bg-elevated:   #1E1E20;
+  --color-bg-soft:       #252528;
   --color-bg-input:      #161618;
 
   --color-text:          #E5E7EB;
