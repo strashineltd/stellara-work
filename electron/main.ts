@@ -278,7 +278,9 @@ function registerIpcHandlers(): void {
     const { getSession, getMessages } = await import('./store/db');
     const session = getSession(id);
     if (!session) throw new Error(`Session 不存在: ${id}`);
-    return { session, messages: getMessages(id) };
+    const messages = getMessages(id);
+    console.log('[DBG-MAIN] get', { id, msgCount: messages.length, dbCount: session.messageCount });
+    return { session, messages };
   });
 
   ipcMain.handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string }) => {
@@ -309,6 +311,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
     const { saveMessages } = await import('./store/db');
+    console.log('[DBG-MAIN] save', { id, msgCount: messages.length });
     saveMessages(id, messages);
   });
 

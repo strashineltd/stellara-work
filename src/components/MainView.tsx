@@ -117,42 +117,50 @@ export function MainView(props: MainViewProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!activeSessionId) {
-      // 切走时如果有 pending save，先 flush 到上一个 session 再清掉
+    let cancelled = false;
+    (async () => {
+      if (!activeSessionId) {
+        if (saveTimer.current) {
+          clearTimeout(saveTimer.current);
+          saveTimer.current = null;
+          if (entriesSessionRef.current) {
+            console.log('[DBG] flush->null', { from: entriesSessionRef.current, n: entries.length });
+            await window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
+              .catch((e) => console.error('Flush save failed:', e));
+          }
+        }
+        if (cancelled) return;
+        setEntries([]);
+        entriesSessionRef.current = null;
+        return;
+      }
+      // 切 session 时：先 await flush 旧 session 落盘，再 load 新的
+      // （之前 fire-and-forget 会让 load 的 IPC 跑到 flush 前面，读到旧数据）
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        if (entriesSessionRef.current) {
-          void window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
+        if (entriesSessionRef.current && entriesSessionRef.current !== activeSessionId) {
+          console.log('[DBG] flush', { from: entriesSessionRef.current, to: activeSessionId, n: entries.length });
+          await window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
+            .then(() => console.log('[DBG] flush done', { from: entriesSessionRef.current }))
             .catch((e) => console.error('Flush save failed:', e));
         }
       }
-      setEntries([]);
-      entriesSessionRef.current = null;
-      return;
-    }
-    // 切 session 时：先 flush pending save 到上一个 session，再开始 load 新的
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-      if (entriesSessionRef.current && entriesSessionRef.current !== activeSessionId) {
-        void window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
-          .catch((e) => console.error('Flush save failed:', e));
-      }
-    }
-    // 禁止 save 直到新 session fetch 完成
-    entriesSessionRef.current = null;
-    let cancelled = false;
-    void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
       if (cancelled) return;
-      setEntries(messagesToEntries(messages));
-      entriesSessionRef.current = activeSessionId; // 标记归属
-      setPlanMode(false);
-      setLastUserForRetry(null);
-      void session; // 暂时不用
-    }).catch((e) => {
-      console.error('Failed to load session:', e);
-    });
+      entriesSessionRef.current = null;
+      console.log('[DBG] load start', { to: activeSessionId });
+      void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
+        if (cancelled) { console.log('[DBG] load cancelled', { to: activeSessionId }); return; }
+        console.log('[DBG] load done', { to: activeSessionId, msgCount: messages.length, dbCount: session.messageCount });
+        setEntries(messagesToEntries(messages));
+        entriesSessionRef.current = activeSessionId;
+        setPlanMode(false);
+        setLastUserForRetry(null);
+        void session;
+      }).catch((e) => {
+        console.error('Failed to load session:', e);
+      });
+    })();
     return () => { cancelled = true; };
   }, [activeSessionId]);
 
