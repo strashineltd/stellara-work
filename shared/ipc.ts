@@ -10,6 +10,13 @@
  * 3. 所有危险操作（写文件、shell 执行）走 approve 流程
  */
 
+export {
+  CONTEXT_WINDOW_OPTIONS,
+  DEFAULT_CONTEXT_WINDOW,
+  defaultThresholdTokens,
+} from './context-window';
+export type { ContextWindowValue } from './context-window';
+
 // ============================================
 // 模型相关
 // ============================================
@@ -27,6 +34,8 @@ export interface ModelPreset {
   baseUrl: string;
   model: string;
   isCustom: boolean;
+  /** 模型上下文窗口（token 数），默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
+  contextWindow?: number;
 }
 
 export interface ModelConfig extends ModelPreset {
@@ -71,15 +80,74 @@ export interface ChatRequest {
   planMode?: boolean;
   /** 取消 token（AbortSignal） */
   abortSignal?: AbortSignal;
+  /** 危险工具等待用户批准的毫秒数，默认 60000（超时默认拒绝） */
+  approvalTimeoutMs?: number;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  toolName: string;
+  args: string;
+  toolCallId: string;
 }
 
 export interface ChatStreamEvent {
-  type: 'content' | 'tool_call' | 'tool_result' | 'error' | 'done' | 'plan';
+  type:
+    | 'content'
+    | 'tool_call'
+    | 'tool_result'
+    | 'error'
+    | 'done'
+    | 'plan'
+    | 'plan_ready'
+    | 'approval_required'
+    | 'summary'
+    | 'verify'
+    | 'task_complete';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };
   error?: string;
+  /** 错误分类 + 引导（替代裸报错） */
+  errorMeta?: ErrorMeta;
   plan?: string[];
+  /** 验证/反思阶段标记 */
+  phase?: string;
+  /** 验证目标（文件路径 / 提示文本） */
+  target?: string;
+  approval?: ApprovalRequest;
+  /** 上下文压缩提示 */
+  tokensBefore?: number;
+  tokensAfter?: number;
+  compressedCount?: number;
+  summary?: string;
+}
+
+/** 错误类型 — 用于分类 + 引导文案 */
+export type ErrorKind =
+  | 'auth'
+  | 'rate_limit'
+  | 'quota'
+  | 'model_not_found'
+  | 'context_too_long'
+  | 'invalid_request'
+  | 'server'
+  | 'network'
+  | 'idle_timeout'
+  | 'user_aborted'
+  | 'unknown';
+
+/** 推荐的行动按钮（前端按需渲染） */
+export type ErrorAction = 'open_settings' | 'switch_model' | 'check_network' | 'retry';
+
+export interface ErrorMeta {
+  kind: ErrorKind;
+  /** 中文一句话引导 */
+  hint: string;
+  /** 推荐的行动；undefined = 仅展示提示 */
+  action?: ErrorAction;
+  /** 是否值得 retry（前端可显示重试按钮） */
+  retryable: boolean;
 }
 
 export interface ChatStream {
@@ -109,7 +177,11 @@ export type ToolName =
   | 'write_file'
   | 'edit_file'
   | 'run_command'
-  | 'search_files';
+  | 'search_files'
+  | 'search_content'
+  | 'list_files'
+  | 'web_fetch'
+  | 'task_complete';
 
 export interface ReadFileArgs {
   path: string;
@@ -144,12 +216,37 @@ export interface SearchFilesArgs {
   cwd?: string;
 }
 
+export interface SearchContentArgs {
+  pattern: string;
+  query: string;
+  caseSensitive?: boolean;
+  cwd?: string;
+}
+
+export interface ListFilesArgs {
+  path?: string;
+  maxDepth?: number;
+}
+
+export interface WebFetchArgs {
+  url: string;
+  maxBytes?: number;
+}
+
+export interface TaskCompleteArgs {
+  summary?: string;
+}
+
 export type ToolArgs =
   | ReadFileArgs
   | WriteFileArgs
   | EditFileArgs
   | RunCommandArgs
-  | SearchFilesArgs;
+  | SearchFilesArgs
+  | SearchContentArgs
+  | ListFilesArgs
+  | WebFetchArgs
+  | TaskCompleteArgs;
 
 export interface ToolResult {
   ok: boolean;
@@ -175,6 +272,8 @@ export type ToolResultMeta =
       stderr: string;
       exitCode: number;
       durationMs: number;
+      /** 输出超过 5MB 时为 true（已截断） */
+      outputTruncated?: boolean;
     };
 
 // ============================================
@@ -223,9 +322,41 @@ export interface MessageRow {
   createdAt: number;
 }
 
+export type ThemeName = 'light' | 'dark' | 'system';
+
 export interface AppSettings {
   workDirDefault?: string;
-  // 预留：theme / language
+  /** 用户自定义的快捷键覆盖（action → binding 字符串） */
+  shortcuts?: Partial<Record<string, string>>;
+  /** 主题：light / dark / system（跟随系统 prefers-color-scheme） */
+  theme?: ThemeName;
+  /** 工作区模式：sidebar（紧凑 sidebar）或 tabs（Tab 栏） */
+  workspaceMode?: 'sidebar' | 'tabs';
+  // 预留：language
+}
+
+/**
+ * 诊断信息（settings:collectDiagnostics 返回）
+ * 用户从 Settings → 「复制诊断信息」按钮一键复制到剪贴板，上报 bug 用
+ */
+export interface DiagnosticsInfo {
+  version: string;
+  platform: string;
+  arch: string;
+  electron: string;
+  chrome: string;
+  node: string;
+  appDataPath: string;
+  envPath: string;
+  logPath: string;
+  dbSizeBytes: number;
+  sessionCount: number;
+  messageCount: number;
+  modelCount: number;
+  activeModelId: string | null;
+  modelsWithKey: string[];
+  logTail: string;
+  collectedAt: string;
 }
 
 export interface ModelListItem {
@@ -237,6 +368,13 @@ export interface ModelListItem {
   hasKey: boolean;
   isActive: boolean;
   createdAt: string;
+  contextWindow?: number;
+}
+
+export interface SkillDef {
+  name: string;
+  description: string;
+  prompt: string;
 }
 
 export interface CreateSessionArgs {
@@ -269,17 +407,22 @@ export interface ElectronAPI {
     list: () => Promise<ModelListResponse>;
     /** 列出所有已配 model（含 key 状态、活跃标志） */
     getAll: () => Promise<ModelListItem[]>;
-    configure: (config: ModelConfig) => Promise<{ ok: boolean; error?: string }>;
+    configure: (config: ModelConfig) => Promise<{ ok: boolean; error?: string; errorKind?: string }>;
     test: (config: ModelConfig) => Promise<{ ok: boolean; error?: string }>;
     remove: (modelId: string) => Promise<void>;
     setActive: (modelId: string) => Promise<void>;
     updateKey: (modelId: string, newKey: string) => Promise<void>;
     updateWorkDir: (modelId: string, workDir: string) => Promise<void>;
+    updateContextWindow: (modelId: string, contextWindow: number) => Promise<void>;
   };
   chat: {
     /** 启动一个流式 chat，返回 { streamId, events } - events 是 AsyncIterable<ChatStreamEvent> */
     start: (request: ChatRequest) => Promise<ChatStream>;
     cancel: () => void;
+    /** 中断当前 chat（通过 streamId） */
+    abort: (streamId: string) => void;
+    /** 回应一次批准请求（true=同意，false=拒绝） */
+    approve: (approvalId: string, approved: boolean) => void;
   };
   tools: {
     /** 直接调一个 tool（不通过 LLM，用于开发期 / 测试） */
@@ -309,6 +452,10 @@ export interface ElectronAPI {
     clearAllData: () => Promise<void>;
     openDataDir: () => Promise<void>;
     openLogFile: (name: 'main' | 'renderer') => Promise<void>;
+    collectDiagnostics: () => Promise<DiagnosticsInfo>;
+  };
+  skills: {
+    list: (workDir: string) => Promise<SkillDef[]>;
   };
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import type {
   AppInfo, ApprovalRequest, ChatMessage, ModelConfig, ModelListItem, MessageRole, ChatStreamEvent,
   ToolResultMeta, SessionSummary, MessageRow, Session, ToolCall,
@@ -11,6 +11,7 @@ import { ShellCard } from './ShellCard';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { ApprovalTopBar } from './ApprovalTopBar';
+import { TabBar, type TabBarTab } from './chat/TabBar';
 
 /**
  * UI 用的条目（流式累加过程中也用它来更新）
@@ -26,6 +27,7 @@ interface MainViewProps {
   config: ModelConfig;
   info: AppInfo;
   sidebarOpen: boolean;
+  workspaceMode?: 'sidebar' | 'tabs';
   activeSessionId: string | null;
   sessions: SessionSummary[];
   onToggleSidebar: () => void;
@@ -49,12 +51,22 @@ interface MainViewProps {
  */
 export function MainView(props: MainViewProps) {
   const {
-    config, info: _info, sidebarOpen, activeSessionId, sessions,
+    config, info: _info, sidebarOpen, workspaceMode, activeSessionId, sessions,
     onToggleSidebar, onReconfigure, onOpenSettings, onChangeWorkDir,
     onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
     onModelChanged,
   } = props;
   void _info;
+
+  // Build TabBarTab list from sessions for tabs workspace mode
+  const tabBarTabs = useMemo<TabBarTab[]>(() =>
+    sessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      status: s.id === activeSessionId ? 'active' : 'idle',
+    })),
+    [sessions, activeSessionId],
+  );
 
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [input, setInput] = useState('');
@@ -525,6 +537,7 @@ export function MainView(props: MainViewProps) {
           <Sidebar
             sessions={sessions}
             activeId={activeSessionId}
+            mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
             onSelect={onSessionSwitched}
             onNew={() => void handleNewSession()}
             onDelete={(id) => void handleDeleteSession(id)}
@@ -532,6 +545,14 @@ export function MainView(props: MainViewProps) {
           />
         )}
         <div className="main-content">
+          {workspaceMode === 'tabs' && (
+            <TabBar
+              tabs={tabBarTabs}
+              activeId={activeSessionId ?? ''}
+              onSelect={(id) => void onSessionSwitched(id)}
+              onClose={(id) => void handleDeleteSession(id)}
+            />
+          )}
           {pendingApproval && (
             <ApprovalTopBar
               request={pendingApproval}

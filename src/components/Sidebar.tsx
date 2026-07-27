@@ -4,6 +4,8 @@ import type { SessionSummary } from '../../shared/ipc';
 interface SidebarProps {
   sessions: SessionSummary[];
   activeId: string | null;
+  /** 'full' = normal sidebar with active highlight; 'compact' = skip active-highlight (used in tabs mode) */
+  mode?: 'full' | 'compact';
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
@@ -29,7 +31,7 @@ function formatRelativeTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onRename, onExport }: SidebarProps) {
+export function Sidebar({ sessions, activeId, mode, onSelect, onNew, onDelete, onRename, onExport }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [search, setSearch] = useState('');
@@ -118,9 +120,10 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onRenam
         )}
         {filtered.map((s) => {
           const isActive = s.id === activeId;
+          // In compact mode (tabs), skip the active highlight — the TabBar handles it
           const rowClass = [
             'session-row',
-            isActive ? 'session-row--active' : 'session-row--idle',
+            (isActive && mode !== 'compact') ? 'session-row--active' : 'session-row--idle',
           ].join(' ');
 
           // Status icon glyph
