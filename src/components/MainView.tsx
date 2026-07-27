@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
-  AppInfo, ChatMessage, ModelConfig, ModelListItem, MessageRole, ChatStreamEvent,
+  AppInfo, ApprovalRequest, ChatMessage, ModelConfig, ModelListItem, MessageRole, ChatStreamEvent,
   ToolResultMeta, SessionSummary, MessageRow, Session, ToolCall,
 } from '../../shared/ipc';
 import { MarkdownView } from './MarkdownView';
@@ -10,6 +10,7 @@ import { DiffCard } from './DiffCard';
 import { ShellCard } from './ShellCard';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
+import { ApprovalTopBar } from './ApprovalTopBar';
 
 /**
  * UI 用的条目（流式累加过程中也用它来更新）
@@ -66,6 +67,7 @@ export function MainView(props: MainViewProps) {
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [switchingModel, setSwitchingModel] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
 
   // 拉所有 model 列表（用于 header 下拉切换）
   useEffect(() => {
@@ -277,6 +279,18 @@ export function MainView(props: MainViewProps) {
     }
   }
 
+  function handleApprove() {
+    if (!pendingApproval) return;
+    window.electronAPI.chat.approve(pendingApproval.id, true);
+    setPendingApproval(null);
+  }
+
+  function handleReject() {
+    if (!pendingApproval) return;
+    window.electronAPI.chat.approve(pendingApproval.id, false);
+    setPendingApproval(null);
+  }
+
   function handleRetry() {
     if (lastUserForRetry) {
       setInput(lastUserForRetry);
@@ -301,6 +315,11 @@ export function MainView(props: MainViewProps) {
    * 把一个流事件落到 entries 上
    */
   function applyStreamEvent(ev: ChatStreamEvent): void {
+    // approval_required doesn't modify entries — it shows the top bar instead
+    if (ev.type === 'approval_required' && ev.approval) {
+      setPendingApproval(ev.approval);
+      return;
+    }
     setEntries((prev) => {
       const copy = [...prev];
       if (ev.type === 'content' && ev.content) {
@@ -513,6 +532,13 @@ export function MainView(props: MainViewProps) {
           />
         )}
         <div className="main-content">
+          {pendingApproval && (
+            <ApprovalTopBar
+              request={pendingApproval}
+              onApprove={handleApprove}
+              onReject={handleReject}
+            />
+          )}
           <main className="main-chat" ref={chatRef}>
             {entries.length === 0 ? (
               <div className="empty-chat">

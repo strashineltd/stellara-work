@@ -2849,6 +2849,44 @@ body {
   white-space: pre-wrap;
 }
 
+/* === M2 Approval Top Bar (replaces modal) === */
+.approval-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  margin: 0 var(--space-3) var(--space-2);
+}
+.approval-top-bar__inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.approval-top-bar__icon { color: var(--color-warning); font-size: var(--fs-lg); }
+.approval-top-bar__tool {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  background: var(--color-bg-content);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.approval-top-bar__args {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-soft);
+  margin: 0;
+  max-height: 64px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.approval-top-bar__actions { display: flex; gap: var(--space-2); }
+
 /* === W3 TabBar (Y-mode top tab bar) === */
 .tab-bar {
   display: flex;
