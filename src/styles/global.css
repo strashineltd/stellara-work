@@ -284,10 +284,11 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: 10px var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   flex-shrink: 0;
+  font-family: var(--font-mono);
 }
 
 .main-header-left {
@@ -309,12 +310,12 @@ body {
 .main-header-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
 .main-title {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--color-primary);
   margin: 0;
@@ -327,13 +328,13 @@ body {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 3px var(--space-2);
+  padding: var(--space-1) var(--space-2);
   background: var(--color-bg-content);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   white-space: nowrap;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-mono);
   transition: all 0.15s;
 }
 
@@ -474,15 +475,15 @@ body {
 .main-workdir {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-family: var(--font-sans);
+  gap: var(--space-2);
+  font-family: var(--font-mono);
   font-size: var(--fs-base);
   font-weight: 600;
   color: var(--color-primary);
   background: var(--color-bg-content);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-3);
   cursor: pointer;
   transition: all 0.15s;
   max-width: 360px;
@@ -672,9 +673,9 @@ body {
 /* === Summary Banner（上下文压缩提示）=== */
 .summary-banner {
   margin: var(--space-2) 0;
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   background: var(--color-bg-elevated);
-  border-left: 3px solid var(--color-text-soft);
+  border-left: 3px solid var(--color-accent);
   border-radius: var(--radius-md);
   font-size: var(--fs-sm);
   color: var(--color-text-soft);
@@ -682,7 +683,7 @@ body {
 
 .summary-banner-title {
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-1);
   color: var(--color-primary);
 }
 
@@ -727,7 +728,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 10px var(--space-4);
+  padding: var(--space-2) var(--space-4);
   margin-bottom: var(--space-4);
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning);
@@ -744,7 +745,7 @@ body {
 }
 
 .empty-chat h2 {
-  font-size: 18px;
+  font-size: var(--fs-lg);
   margin-bottom: var(--space-3);
   color: var(--color-primary);
 }
@@ -753,7 +754,7 @@ body {
   margin-top: var(--space-6);
   text-align: left;
   background: var(--color-bg-elevated);
-  padding: 20px var(--space-5);
+  padding: var(--space-5);
   border-radius: var(--radius-lg);
   font-size: var(--fs-base);
 }
@@ -776,7 +777,7 @@ body {
 }
 
 .message {
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 
 .message-role {
@@ -796,8 +797,19 @@ body {
   line-height: 1.5;
 }
 
+.message-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.message-user .message-content {
+  max-width: 70%;
+}
+
 .message-user .message-content pre {
-  background: var(--color-accent-soft);
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
 }
 
 /* === W2.4 entry 布局 === */
@@ -809,11 +821,12 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-sans);
-  font-size: var(--fs-md);
-  background: var(--color-accent-soft);
-  padding: 10px 14px;
-  border-radius: var(--radius-lg);
+  font-size: var(--fs-base);
+  background: var(--color-bg-elevated);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
   line-height: 1.6;
+  max-width: 100%;
 }
 
 .thinking {
@@ -825,8 +838,8 @@ body {
 .error-banner {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: var(--space-3) 14px;
+  gap: var(--space-1);
+  padding: var(--space-3);
   background: var(--color-danger-bg);
   border-left: 3px solid var(--color-danger);
   border-radius: var(--radius-md);
@@ -991,7 +1004,7 @@ body {
 
 .tool-card-body {
   border-top: 1px solid var(--color-border);
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   margin: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
@@ -1190,9 +1203,9 @@ body {
 }
 
 .md-content h1 { font-size: var(--fs-xl); }
-.md-content h2 { font-size: 18px; }
+.md-content h2 { font-size: var(--fs-xl); }
 .md-content h3 { font-size: var(--fs-lg); }
-.md-content h4 { font-size: 15px; }
+.md-content h4 { font-size: var(--fs-md); }
 .md-content h5 { font-size: var(--fs-md); }
 .md-content h6 { font-size: var(--fs-base); color: var(--color-text-soft); }
 
@@ -1300,11 +1313,11 @@ body {
 
 .input-chat {
   width: 100%;
-  padding: var(--space-3) 14px;
+  padding: var(--space-3);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   font-family: inherit;
-  font-size: var(--fs-md);
+  font-size: var(--fs-base);
   resize: none;
   outline: none;
   background: var(--color-bg-content);
@@ -1379,7 +1392,7 @@ body {
 .plan-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   font-size: var(--fs-sm);
   color: var(--color-text-soft);
   cursor: pointer;
@@ -1390,7 +1403,7 @@ body {
 }
 
 .plan-toggle:hover:not([disabled]) {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--color-bg-soft);
 }
 
 .plan-toggle.on {
@@ -1404,7 +1417,7 @@ body {
 }
 
 .hint {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   color: var(--color-text-soft);
 }
 
@@ -1518,7 +1531,7 @@ body {
 }
 
 .report-section-header {
-  padding: 10px var(--space-4);
+  padding: var(--space-2) var(--space-4);
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--color-primary);
@@ -1618,7 +1631,7 @@ body {
 
 /* Brand mark */
 .sidebar-brand {
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border-bottom: 1px solid var(--color-border-dark);
 }
 
@@ -2385,11 +2398,13 @@ body {
 .workspace-section > summary.workspace-section-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  font-size: var(--fs-sm);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   cursor: pointer;
   list-style: none;
   background: transparent;
@@ -2399,7 +2414,7 @@ body {
 .workspace-section > summary.workspace-section-header::marker { content: ''; }
 
 .workspace-section > summary.workspace-section-header:hover {
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--color-bg-soft);
 }
 
 .workspace-section[open] > summary.workspace-section-header {
@@ -2412,7 +2427,7 @@ body {
 .workspace-section > .progress-summary,
 .workspace-section > .progress-current,
 .workspace-section > .workspace-files-tree {
-  padding: var(--space-2) 14px var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-3);
 }
 
 /* Goal */
@@ -2425,15 +2440,15 @@ body {
 
 .goal-steps {
   list-style: none;
-  padding: var(--space-2) 14px var(--space-3) 14px;
+  padding: var(--space-2) var(--space-3) var(--space-3) var(--space-3);
   margin: 0;
 }
 
 .goal-step-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 6px 0;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
   cursor: pointer;
   border-radius: var(--radius-sm);
   font-size: var(--fs-base);
@@ -2441,7 +2456,7 @@ body {
   transition: background 0.1s;
 }
 
-.goal-step-item:hover { background: rgba(0,0,0,0.03); }
+.goal-step-item:hover { background: var(--color-bg-soft); }
 
 .goal-step-num {
   flex-shrink: 0;
@@ -2507,7 +2522,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--color-text);
 }
@@ -2519,8 +2534,8 @@ body {
 }
 
 .progress-current {
-  margin-top: 6px;
-  padding: 6px 10px;
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-3);
   background: var(--color-accent-soft);
   border-radius: var(--radius-sm);
   font-size: var(--fs-sm);
@@ -2530,14 +2545,14 @@ body {
 
 /* Deliverables */
 .deliverable-item {
-  padding: 4px 14px;
+  padding: var(--space-1) var(--space-3);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .deliverable-item:last-child {
