@@ -1,0 +1,96 @@
+/* Stellara Work design tokens (A1 · 冷炭蓝男股风 / Linear tier) */
+
+:root {
+  /* 背景（高对比分层） */
+  --color-bg-app:        #F1F2F4;
+  --color-bg-sidebar:    #0E1014;
+  --color-bg-content:    #FFFFFF;
+  --color-bg-elevated:   #FAFAFA;
+  --color-bg-input:      #FFFFFF;
+
+  /* 文本（侧栏白底，主区深字） */
+  --color-text:          #0F0F10;
+  --color-text-soft:     #6B7280;
+  --color-text-on-dark:  #E5E7EB;
+  --color-text-on-dark-soft: #9CA3AF;
+
+  /* 边框 */
+  --color-border:        #E5E7EB;
+  --color-border-strong: #D1D5DB;
+  --color-border-dark:   #1F2937;
+
+  /* 品牌 */
+  --color-primary:       #0F0F10;
+  --color-accent:        #3D6DFB;
+  --color-accent-soft:   #F1F5FF;
+  --color-accent-hover:  #2D5BD9;
+
+  /* 状态 */
+  --color-success:       #10B981;
+  --color-success-bg:    #ECFDF5;
+  --color-warning:       #F59E0B;
+  --color-warning-bg:    #FFFBEB;
+  --color-danger:        #EF4444;
+  --color-danger-bg:     #FEF2F2;
+  --color-danger-tint:   rgba(255, 0, 0, 0.05);
+  --color-info:          #3D6DFB;
+
+  /* 阴影（极简） */
+  --shadow-sm: 0 1px 2px rgba(15, 15, 16, 0.05);
+  --shadow-md: 0 2px 8px rgba(15, 15, 16, 0.08);
+  --shadow-lg: 0 10px 30px rgba(15, 15, 16, 0.12);
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+               "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  /* 字号 */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+
+  /* 间距 (4px 阶梯) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+}
+
+[data-theme="dark"] {
+  --color-bg-app:        #0A0A0B;
+  --color-bg-sidebar:    #000000;
+  --color-bg-content:    #161618;
+  --color-bg-elevated:   #1E1E20;
+  --color-bg-input:      #161618;
+
+  --color-text:          #E5E7EB;
+  --color-text-soft:     #9CA3AF;
+  --color-text-on-dark:  #E5E7EB;
+  --color-text-on-dark-soft: #6B7280;
+
+  --color-border:        #2E2E33;
+  --color-border-strong: #404045;
+
+  --color-primary:       #FFFFFF;
+  --color-accent:        #5B8DEF;
+  --color-accent-soft:   #1E2530;
+
+  --color-success:       #34D399;
+  --color-success-bg:    #0F2920;
+  --color-warning:       #FBBF24;
+  --color-warning-bg:    #2E2519;
+  --color-danger:        #F87171;
+  --color-danger-bg:     #2E1A1A;
+}
