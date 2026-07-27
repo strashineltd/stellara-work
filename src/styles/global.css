@@ -206,8 +206,85 @@ body {
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--space-3);
+}
+
+/* Onboarding V3 two-page wizard */
+.onboarding-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.onboarding-title {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: var(--space-1);
+}
+
+.onboarding-subtitle {
+  font-size: var(--fs-base);
+  color: var(--color-text-soft);
+  margin-bottom: var(--space-5);
+}
+
+/* Step progress pills */
+.step-pills {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+.step-pill {
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-text-soft);
+  background: var(--color-bg-content);
+  border: 1px solid var(--color-border);
+  transition: all 0.15s;
+}
+
+.step-pill.active {
+  color: var(--color-bg-content);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* Field group for workdir page */
+.onboarding-field {
+  margin-bottom: var(--space-4);
+  max-width: 720px;
+}
+
+.onboarding-label {
+  display: block;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: var(--space-1);
+}
+
+.onboarding-back {
+  align-self: flex-start;
+  margin-bottom: var(--space-3);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-text-soft);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
 }
 
 .btn {
