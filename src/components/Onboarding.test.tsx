@@ -61,13 +61,7 @@ function fireClick(el: Element | null) {
   });
 }
 
-function fireInput(el: Element | null, value: string) {
-  if (!el) throw new Error('Element not found for input');
-  act(() => {
-    (el as HTMLInputElement).value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-}
+// (fireInput helper removed — unused)
 
 describe('Onboarding', () => {
   beforeEach(() => {

@@ -28,8 +28,12 @@ interface MainViewProps {
   info: AppInfo;
   sidebarOpen: boolean;
   workspaceMode?: 'sidebar' | 'tabs';
+  workspaceOpen: boolean;
+  onToggleWorkspace: () => void;
+  shortcuts?: Partial<Record<import('../../shared/shortcuts').ShortcutAction, string>>;
   activeSessionId: string | null;
   sessions: SessionSummary[];
+  theme?: import('../../shared/ipc').ThemeName;
   onToggleSidebar: () => void;
   onReconfigure: () => void;
   onOpenSettings: () => void;
@@ -40,6 +44,7 @@ interface MainViewProps {
   onSessionsChanged: (sessions: SessionSummary[]) => void;
   onModelChanged: (config: ModelConfig) => void;
   onChangeWorkDir: () => void;
+  onThemeChange?: (theme: import('../../shared/ipc').ThemeName) => void;
 }
 
 /**

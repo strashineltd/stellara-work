@@ -5,17 +5,19 @@ import { Header } from './Header';
 import type { ModelConfig, ModelListItem } from '../../../shared/ipc';
 
 const MODEL_CONFIG: ModelConfig = {
-  id: 'deepseek',
+  id: 'deepseek-v4-pro',
   label: 'DeepSeek v4',
   model: 'deepseek-v4-pro',
   workDir: 'D:/test',
   apiKey: 'sk-test',
+  isCustom: false,
+  baseUrl: 'https://api.deepseek.com',
   contextWindow: 128000,
 };
 
 const MODEL_LIST: ModelListItem[] = [
-  { id: 'deepseek', label: 'DeepSeek v4', model: 'deepseek-v4-pro', hasKey: true },
-  { id: 'glm', label: 'GLM-5', model: 'glm-5.2', hasKey: false },
+  { id: 'deepseek-v4-pro', label: 'DeepSeek v4', model: 'deepseek-v4-pro', hasKey: true, baseUrl: 'https://api.deepseek.com', isActive: true, createdAt: '2026-01-01' },
+  { id: 'glm-5.2', label: 'GLM-5', model: 'glm-5.2', hasKey: false, baseUrl: 'https://open.bigmodel.cn', isActive: false, createdAt: '2026-01-01' },
 ];
 
 function render(ui: React.ReactElement) {
