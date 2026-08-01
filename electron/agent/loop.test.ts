@@ -2,7 +2,7 @@
  * Agent loop unit tests (extracted logic, no LLM dependency)
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { ModelConfig, ChatStreamEvent } from '../../shared/ipc';
+import type { ModelConfig, ChatMessage, ChatStreamEvent } from '../../shared/ipc';
 
 const { mockChat, mockInvokeTool } = vi.hoisted(() => ({
   mockChat: vi.fn(),
@@ -164,6 +164,54 @@ describe('plan approval gate', () => {
     expect(approvedPlans).toHaveLength(1);
     expect(events.filter((e) => e.type === 'plan')).toHaveLength(1);
     expect(events.some((e) => e.type === 'plan_ready')).toBe(true);
+  });
+
+  it('READY TO EXECUTE with a read tool call: executes the tool and never sends a dangling assistant tool_call', async () => {
+    mockChat
+      .mockReturnValueOnce((async function* () {
+        yield { type: 'content', content: '1. 读 README\n\nREADY TO EXECUTE' };
+        yield {
+          type: 'tool_call',
+          toolCall: {
+            id: 'tc_read',
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ path: 'README.md' }) },
+          },
+        };
+        yield { type: 'done' };
+      })())
+      .mockReturnValueOnce(contentThenDone(''));
+    mockInvokeTool.mockResolvedValue({ ok: true, output: '' });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', {
+      model: makeConfig(),
+      cwd: '/work',
+      planMode: true,
+      onPlanApproval: async () => true,
+      onApproval: async () => true,
+    })) {
+      events.push(ev);
+    }
+
+    expect(mockInvokeTool).toHaveBeenCalledTimes(1);
+    const readResults = events.filter((e) => e.type === 'tool_result' && e.toolResult?.name === 'read_file');
+    expect(readResults).toHaveLength(1);
+    expect(readResults[0]?.toolResult?.result).toEqual({ ok: true, output: '' });
+
+    const calls = mockChat.mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    const lastMessages = calls[calls.length - 1][0].messages as ChatMessage[];
+    for (let i = 0; i < lastMessages.length; i++) {
+      const m = lastMessages[i];
+      if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+        const next = lastMessages[i + 1];
+        expect(next, 'assistant tool_call must be immediately followed by its tool response').toBeDefined();
+        expect(next.role).toBe('tool');
+        const callIds = m.tool_calls.map((tc) => tc.id);
+        expect(callIds).toContain(next.tool_call_id);
+      }
+    }
   });
 });
 

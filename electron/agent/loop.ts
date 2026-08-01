@@ -198,9 +198,7 @@ export async function* runAgentLoop(
               content: `${getSystemPrompt(false, options.skills, options.activeSkill)}\n\n${formatPlanProgress(parsed)}`,
             };
           }
-          if (toolCalls.length > 0) {
-            messages.push({ role: 'assistant', content: assistantContent, tool_calls: toolCalls });
-          } else {
+          if (toolCalls.length === 0) {
             messages.push({ role: 'assistant', content: assistantContent });
             continue; // 纯文本计划：下一轮以 build 工具集继续执行
           }
