@@ -87,7 +87,10 @@ describe('plan approval gate', () => {
 
     expect(approvedPlans).toHaveLength(1);
     expect(events.some((e) => e.type === 'plan_ready')).toBe(true);
-    expect(events.some((e) => e.type === 'tool_result')).toBe(true);
+    const writeResults = events.filter((e) => e.type === 'tool_result' && e.toolResult?.name === 'write_file');
+    expect(writeResults).toHaveLength(1);
+    expect(writeResults[0]?.toolResult?.result).toEqual({ ok: true, output: 'written' });
+    expect(mockInvokeTool).toHaveBeenCalled();
   });
 
   it('rejects the plan: emits user_aborted error, no plan_ready, no tool execution', async () => {

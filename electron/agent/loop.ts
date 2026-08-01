@@ -50,6 +50,9 @@ export async function* runAgentLoop(
   let lastFailedToolCount = 0;
   let iteration = 0;
 
+  // Plan 批准门禁：本 run 是否已产出 READY TO EXECUTE 计划（防重试/多轮绕过门禁）
+  let planGateDone = false;
+
   while (iteration < maxIterations) {
     iteration++;
 
@@ -85,7 +88,7 @@ export async function* runAgentLoop(
     }
 
     // Plan 模式：从 LLM 输出中提取结构化计划
-    if (planMode && assistantContent && !options.plan) {
+    if (planMode && assistantContent && !planGateDone) {
       const parsed = parsePlanFromContent(assistantContent);
       if (parsed) {
         options.plan = parsed;
@@ -105,6 +108,7 @@ export async function* runAgentLoop(
             };
             return;
           }
+          planGateDone = true;
           yield { type: 'plan_ready', plan: parsed.steps.map((s) => s.description) };
 
           // 批准后切换到 build 模式：重建 system prompt 并注入计划进度
@@ -122,6 +126,7 @@ export async function* runAgentLoop(
           }
           continue; // 下一轮以 build 工具集继续执行
         } else if (parsed.readyToExecute) {
+          planGateDone = true;
           yield { type: 'plan_ready', plan: parsed.steps.map((s) => s.description) };
         }
       }
