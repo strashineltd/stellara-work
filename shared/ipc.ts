@@ -91,6 +91,11 @@ export interface ApprovalRequest {
   toolCallId: string;
 }
 
+export interface PlanApprovalRequest {
+  id: string;
+  plan: string[];
+}
+
 export interface ChatStreamEvent {
   type:
     | 'content'
@@ -101,6 +106,7 @@ export interface ChatStreamEvent {
     | 'plan'
     | 'plan_ready'
     | 'approval_required'
+    | 'plan_approval_required'
     | 'summary'
     | 'verify'
     | 'task_complete';
@@ -116,6 +122,8 @@ export interface ChatStreamEvent {
   /** 验证目标（文件路径 / 提示文本） */
   target?: string;
   approval?: ApprovalRequest;
+  /** 计划批准请求（plan_approval_required 事件） */
+  planApproval?: PlanApprovalRequest;
   /** 上下文压缩提示 */
   tokensBefore?: number;
   tokensAfter?: number;
