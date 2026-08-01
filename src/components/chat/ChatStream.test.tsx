@@ -104,4 +104,28 @@ describe('ChatStream', () => {
     const html = container.innerHTML;
     expect(html).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
   });
+
+  it('renders a plan entry with approve buttons when approval pending', () => {
+    const onApprovePlan = vi.fn();
+    const { getByText, querySelector } = render(
+      <ChatStream
+        entries={[{ kind: 'plan', steps: [{ description: '写 README', status: 'pending' }] }]}
+        busy={true}
+        streamId="s1"
+        chatRef={null as any}
+        lastUserForRetry={null}
+        modelMissing={false}
+        onOpenSettings={vi.fn()}
+        onRetry={vi.fn()}
+        onAbort={vi.fn()}
+        onApprove={vi.fn()}
+        pendingApproval={null}
+        pendingPlanApproval={{ id: 'plan-1', plan: ['写 README'] }}
+        onApprovePlan={onApprovePlan}
+        onRejectPlan={vi.fn()}
+      />,
+    );
+    expect(getByText('执行计划')).not.toBeNull();
+    expect(querySelector('.plan-actions')).not.toBeNull();
+  });
 });

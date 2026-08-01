@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
-import type { ApprovalRequest } from '../../../shared/ipc';
+import type { ApprovalRequest, PlanApprovalRequest } from '../../../shared/ipc';
 import { MarkdownView } from '../MarkdownView';
+import { PlanCard } from '../PlanCard';
 import { ToolCallCard } from '../ToolCallCard';
 import { ToolResultCard } from '../ToolResultCard';
 import { DiffCard } from '../DiffCard';
@@ -23,6 +24,10 @@ interface ChatStreamProps {
   onApprove: (approved: boolean) => void;
   onReview?: () => void;
   pendingApproval: ApprovalRequest | null;
+  /** 等待计划批准（plan_approval_required） */
+  pendingPlanApproval?: PlanApprovalRequest | null;
+  onApprovePlan?: () => void;
+  onRejectPlan?: () => void;
 }
 
 export function ChatStream(props: ChatStreamProps) {
@@ -74,6 +79,19 @@ export function ChatStream(props: ChatStreamProps) {
                     已压缩 {e.compressedCount} 条消息（{e.tokensBefore} → {e.tokensAfter} tokens）
                   </div>
                   {e.summary && <pre className="summary-banner-preview">{e.summary}</pre>}
+                </div>
+              )}
+              {e.kind === 'plan' && (
+                <PlanCard
+                  steps={e.steps}
+                  awaitingApproval={!!props.pendingPlanApproval}
+                  onApprove={() => props.onApprovePlan?.()}
+                  onReject={() => props.onRejectPlan?.()}
+                />
+              )}
+              {e.kind === 'verify' && (
+                <div className="verify-chip" role="status">
+                  验证中{e.target ? ` · ${e.target}` : ''}
                 </div>
               )}
               {e.kind === 'error' && (
