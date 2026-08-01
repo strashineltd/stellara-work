@@ -12,6 +12,14 @@ export interface AgentLoopOptions {
   planMode?: boolean;
   maxIterations?: number;
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
+  /**
+   * Plan 批准回调：plan 模式产出 READY TO EXECUTE 计划后暂停，等待用户批准。
+   * 返回 true 则切到 build 模式继续执行；返回 false 则 yield user_aborted 错误并停止。
+   *
+   * 实现方：通常是主进程 → 通过 IPC 让 renderer 弹批准 modal → 用户回应 → resolve。
+   * 必须实现超时，否则 agent 会卡死。
+   */
+  onPlanApproval?: (plan: Plan) => Promise<boolean>;
 }
 
 /**
@@ -25,7 +33,8 @@ export async function* runAgentLoop(
   userMessage: string,
   options: AgentLoopOptions,
 ): AsyncGenerator<ChatStreamEvent> {
-  const { model, cwd, history = [], planMode = false, maxIterations = 30, onApproval } = options;
+  const { model, cwd, history = [], planMode: initialPlanMode = false, maxIterations = 200, onApproval } = options;
+  let planMode = initialPlanMode;
 
   const client = new OpenAICompatClient(model);
   // 拼消息：system（按 planMode 切） + 之前轮次 + 本轮 user
@@ -72,6 +81,49 @@ export async function* runAgentLoop(
         return;
       } else if (event.type === 'done') {
         // done
+      }
+    }
+
+    // Plan 模式：从 LLM 输出中提取结构化计划
+    if (planMode && assistantContent && !options.plan) {
+      const parsed = parsePlanFromContent(assistantContent);
+      if (parsed) {
+        options.plan = parsed;
+        yield { type: 'plan', plan: parsed.steps.map((s) => s.description) };
+        if (parsed.readyToExecute && options.onPlanApproval) {
+          const approved = await options.onPlanApproval(parsed);
+          if (!approved) {
+            yield {
+              type: 'error',
+              error: '计划已被拒绝，任务已停止。可以重新描述需求后再试。',
+              errorMeta: {
+                kind: 'user_aborted',
+                hint: '你拒绝了这份计划，任务已停止。',
+                action: 'retry',
+                retryable: true,
+              },
+            };
+            return;
+          }
+          yield { type: 'plan_ready', plan: parsed.steps.map((s) => s.description) };
+
+          // 批准后切换到 build 模式：重建 system prompt 并注入计划进度
+          planMode = false;
+          if (messages[0]?.role === 'system') {
+            messages[0] = {
+              role: 'system',
+              content: `${getSystemPrompt(false, options.skills, options.activeSkill)}\n\n${formatPlanProgress(parsed)}`,
+            };
+          }
+          if (toolCalls.length > 0) {
+            messages.push({ role: 'assistant', content: assistantContent, tool_calls: toolCalls });
+          } else {
+            messages.push({ role: 'assistant', content: assistantContent });
+          }
+          continue; // 下一轮以 build 工具集继续执行
+        } else if (parsed.readyToExecute) {
+          yield { type: 'plan_ready', plan: parsed.steps.map((s) => s.description) };
+        }
       }
     }
 
