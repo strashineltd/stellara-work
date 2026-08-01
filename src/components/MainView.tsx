@@ -1,27 +1,21 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import type {
-  AppInfo, ApprovalRequest, ChatMessage, ModelConfig, ModelListItem, MessageRole, ChatStreamEvent,
-  ToolResultMeta, SessionSummary, MessageRow, Session, ToolCall,
+  AppInfo, ApprovalRequest, ModelConfig, ModelListItem,
+  SessionSummary, Session, SkillDef,
 } from '../../shared/ipc';
-import { MarkdownView } from './MarkdownView';
-import { ToolCallCard } from './ToolCallCard';
-import { ToolResultCard } from './ToolResultCard';
-import { DiffCard } from './DiffCard';
-import { ShellCard } from './ShellCard';
+import {
+  type DisplayEntry,
+  messagesToEntries, entriesToMessages, buildHistory,
+  applyStreamEventToEntries, generateReportFromEntries,
+} from '../lib/chat-utils';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
-import { ApprovalTopBar } from './ApprovalTopBar';
+import { WorkspacePanel, type Goal, type Deliverable } from './WorkspacePanel';
+import { Header } from './chat/Header';
+import { ChatStream } from './chat/ChatStream';
+import { InputArea, type SlashState } from './chat/InputArea';
 import { TabBar, type TabBarTab } from './chat/TabBar';
-
-/**
- * UI 用的条目（流式累加过程中也用它来更新）
- */
-type DisplayEntry =
-  | { kind: 'user'; content: string }
-  | { kind: 'assistant'; content: string; toolCalls?: ToolCall[] }
-  | { kind: 'tool_call'; id: string; name: string; args: string }
-  | { kind: 'tool_result'; toolCallId?: string; name: string; ok: boolean; output: string; error?: string; meta?: ToolResultMeta }
-  | { kind: 'error'; message: string };
+import { HomeDashboard } from './HomeDashboard';
 
 interface MainViewProps {
   config: ModelConfig;
@@ -32,11 +26,15 @@ interface MainViewProps {
   onToggleWorkspace: () => void;
   shortcuts?: Partial<Record<import('../../shared/shortcuts').ShortcutAction, string>>;
   activeSessionId: string | null;
+  projects: import('../../shared/ipc').ProjectSummary[];
   sessions: SessionSummary[];
   theme?: import('../../shared/ipc').ThemeName;
   onToggleSidebar: () => void;
   onReconfigure: () => void;
   onOpenSettings: () => void;
+  onProjectCreated: (project: import('../../shared/ipc').Project) => void;
+  onProjectDeleted: (id: string) => void;
+  onProjectRenamed: (id: string, name: string) => void;
   onSessionCreated: (session: Session) => void;
   onSessionSwitched: (id: string) => void;
   onSessionDeleted: (id: string) => void;
@@ -47,23 +45,16 @@ interface MainViewProps {
   onThemeChange?: (theme: import('../../shared/ipc').ThemeName) => void;
 }
 
-/**
- * W3 主聊天界面
- * - 左 Sidebar 会话列表 + 主聊天区
- * - entry-based 数据模型
- * - 自动保存：entries 变化时 debounce 300ms 写 SQLite
- * - 切会话：清空 entries + 加载该 session 的 messages
- */
 export function MainView(props: MainViewProps) {
   const {
-    config, info: _info, sidebarOpen, workspaceMode, activeSessionId, sessions,
+    config, info: _info, sidebarOpen, workspaceMode, activeSessionId, projects, sessions,
     onToggleSidebar, onReconfigure, onOpenSettings, onChangeWorkDir,
+    onProjectCreated, onProjectDeleted, onProjectRenamed,
     onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
     onModelChanged,
   } = props;
   void _info;
 
-  // Build TabBarTab list from sessions for tabs workspace mode
   const tabBarTabs = useMemo<TabBarTab[]>(() =>
     sessions.map((s) => ({
       id: s.id,
@@ -73,47 +64,29 @@ export function MainView(props: MainViewProps) {
     [sessions, activeSessionId],
   );
 
+  // ---- State ----
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
+  const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
+  const [streamId, setStreamId] = useState<string | null>(null);
+  const [modelMissing, setModelMissing] = useState(false);
+  const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks'>('home');
+  const [slash, setSlash] = useState<SlashState>({
+    slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
+  });
 
-  // 拉所有 model 列表（用于 header 下拉切换）
+  // ---- Model list ----
   useEffect(() => {
     void window.electronAPI.models.getAll().then(setModelList).catch(() => { /* ignore */ });
-  }, [config.id]); // 切完 active model 后重新拉
-
-  // 点外部关闭菜单（用 mousedown 避开同一次 click 触发的开/关竞态）
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && target.closest('.header-menu-wrap')) return; // 点菜单/按钮自己就跳过
-      setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [menuOpen]);
-
-  // 点外部关闭 model 下拉
-  useEffect(() => {
-    if (!modelMenuOpen) return;
-    const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && target.closest('.model-switcher')) return;
-      setModelMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [modelMenuOpen]);
+  }, [config.id]);
 
   async function handleSwitchModel(id: string) {
     if (id === config.id || switchingModel) return;
@@ -122,7 +95,6 @@ export function MainView(props: MainViewProps) {
       await window.electronAPI.models.setActive(id);
       const list = await window.electronAPI.models.list();
       if (list.configured) onModelChanged(list.configured);
-      setModelMenuOpen(false);
     } catch (e) {
       console.error('切换 model 失败:', e);
     } finally {
@@ -130,8 +102,7 @@ export function MainView(props: MainViewProps) {
     }
   }
 
-  // 切会话：加载历史。同时维护一个 ref 标记"当前 entries 属于哪个 session"，
-  // 避免 autosave 把上一个 session 的脏数据写到新 session（race condition）
+  // ---- Session lifecycle ----
   const entriesSessionRef = useRef<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -143,8 +114,7 @@ export function MainView(props: MainViewProps) {
           clearTimeout(saveTimer.current);
           saveTimer.current = null;
           if (entriesSessionRef.current) {
-            console.log('[DBG] flush->null', { from: entriesSessionRef.current, n: entries.length });
-            await window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
+            await window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries, entriesSessionRef.current))
               .catch((e) => console.error('Flush save failed:', e));
           }
         }
@@ -153,79 +123,60 @@ export function MainView(props: MainViewProps) {
         entriesSessionRef.current = null;
         return;
       }
-      // 切 session 时：先 await flush 旧 session 落盘，再 load 新的
-      // （之前 fire-and-forget 会让 load 的 IPC 跑到 flush 前面，读到旧数据）
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
         if (entriesSessionRef.current && entriesSessionRef.current !== activeSessionId) {
-          console.log('[DBG] flush', { from: entriesSessionRef.current, to: activeSessionId, n: entries.length });
-          await window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries))
-            .then(() => console.log('[DBG] flush done', { from: entriesSessionRef.current }))
+          await window.electronAPI.sessions.saveMessages(entriesSessionRef.current, entriesToMessages(entries, entriesSessionRef.current))
             .catch((e) => console.error('Flush save failed:', e));
         }
       }
       if (cancelled) return;
       entriesSessionRef.current = null;
-      console.log('[DBG] load start', { to: activeSessionId });
       void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
-        if (cancelled) { console.log('[DBG] load cancelled', { to: activeSessionId }); return; }
-        console.log('[DBG] load done', { to: activeSessionId, msgCount: messages.length, dbCount: session.messageCount });
+        if (cancelled) return;
         setEntries(messagesToEntries(messages));
         entriesSessionRef.current = activeSessionId;
         setPlanMode(false);
         setLastUserForRetry(null);
-        void session;
+        setModelMissing(session.modelId !== config.id);
       }).catch((e) => {
         console.error('Failed to load session:', e);
       });
     })();
     return () => { cancelled = true; };
-  }, [activeSessionId]);
+  }, [activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 自动保存：debounce 300ms。只有当 entries 确实属于当前 activeSessionId 时才保存
+  // Auto-save: debounce 300ms
   useEffect(() => {
     if (!activeSessionId) return;
-    if (entriesSessionRef.current !== activeSessionId) return; // 切 session 中 / fetch 未完成，跳过
+    if (entriesSessionRef.current !== activeSessionId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      void window.electronAPI.sessions.saveMessages(activeSessionId, entriesToMessages(entries))
+      void window.electronAPI.sessions.saveMessages(activeSessionId, entriesToMessages(entries, activeSessionId))
         .then(() => window.electronAPI.sessions.list())
         .then(onSessionsChanged)
         .catch((e) => console.error('Auto-save failed:', e));
     }, 300);
   }, [entries, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 自动滚到底部
+  // Auto-scroll
   const chatRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const el = chatRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries, busy]);
 
-  // 把当前 entries 投成发给 LLM 的 history（包含完整的 tool_call / tool_result 链）
-  const buildHistory = (): ChatMessage[] =>
-    entries.flatMap<ChatMessage>((e) => {
-      if (e.kind === 'user') return [{ role: 'user' as MessageRole, content: e.content }];
-      if (e.kind === 'assistant') {
-        const msg: ChatMessage = { role: 'assistant' as MessageRole, content: e.content };
-        if (e.toolCalls && e.toolCalls.length > 0) msg.tool_calls = e.toolCalls;
-        return [msg];
-      }
-      if (e.kind === 'tool_result') {
-        return [{
-          role: 'tool' as MessageRole,
-          tool_call_id: e.toolCallId ?? '',
-          name: e.name,
-          content: e.ok ? e.output : `Error: ${e.error ?? '未知错误'}`,
-        }];
-      }
-      return [];
-    });
+  useEffect(() => {
+    if (!confirmNew) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConfirmNew(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [confirmNew]);
 
-  // 自动给当前会话改名（首条 user 消息触发后用前 20 字做 title）
-  // 必须先确认 entries 真的属于当前 session——切 session 中 / fetch 未完成时
-  // entries 还指着上一个会话的内容，跳过避免拿错消息给新会话起名
+  // Auto-rename session on first user message
   useEffect(() => {
     if (!activeSessionId) return;
     if (entriesSessionRef.current !== activeSessionId) return;
@@ -241,26 +192,56 @@ export function MainView(props: MainViewProps) {
     }
   }, [entries, activeSessionId, sessions, onSessionsChanged]);
 
-  async function handleNewTask() {
-    if (busy) return;
-    if (entries.length === 0) {
-      setMenuOpen(false);
-      return;
+  // ---- Workspace data (computed from entries) ----
+  const workspaceGoal = useMemo<Goal | null>(() => {
+    // Find the first user message as the goal
+    const firstUser = entries.find((e) => e.kind === 'user');
+    return firstUser ? { kind: 'userMessage', content: firstUser.content } : null;
+  }, [entries]);
+
+  const workspaceDeliverables = useMemo<Deliverable[]>(() => {
+    const seen = new Set<string>();
+    const out: Deliverable[] = [];
+    for (const e of entries) {
+      if (e.kind === 'tool_result' && e.meta?.kind === 'edit' && !seen.has(e.meta.path)) {
+        seen.add(e.meta.path);
+        out.push({ path: e.meta.path, kind: e.meta.before === null ? 'write' : 'edit', ts: Date.now() });
+      }
     }
+    return out;
+  }, [entries]);
+
+  const touchedFiles = useMemo(() => {
+    const s = new Set<string>();
+    for (const e of entries) {
+      if (e.kind === 'tool_result' && e.meta?.kind === 'edit') s.add(e.meta.path);
+    }
+    return s;
+  }, [entries]);
+
+  const toolCallCount = useMemo(() => entries.filter((e) => e.kind === 'tool_call').length, [entries]);
+  const toolResultCount = useMemo(() => entries.filter((e) => e.kind === 'tool_result').length, [entries]);
+
+  // ---- Chat handlers ----
+  function handleNewTask() {
+    if (busy || entries.length === 0) return;
     setConfirmNew(true);
   }
 
   function doNewTask() {
     setEntries([]);
     setConfirmNew(false);
-    setMenuOpen(false);
     setLastUserForRetry(null);
   }
 
   async function handleSend() {
     if (!input.trim() || busy) return;
+    if (!activeSessionId) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再发送任务。' }]);
+      return;
+    }
     const userContent = input;
-    const history = [...buildHistory(), { role: 'user' as MessageRole, content: userContent }];
+    const history = [...buildHistory(entries), { role: 'user' as const, content: userContent }];
     const usePlanMode = planMode;
     setLastUserForRetry(null);
 
@@ -271,12 +252,30 @@ export function MainView(props: MainViewProps) {
     ]);
     setInput('');
     setBusy(true);
+    setStreamId(null);
 
     try {
-      const { events } = await window.electronAPI.chat.start({ messages: history, planMode: usePlanMode });
-      for await (const ev of events) {
-        applyStreamEvent(ev);
-        if (ev.type === 'done' || ev.type === 'error') break;
+      const result = await window.electronAPI.chat.start({ sessionId: activeSessionId, messages: history, planMode: usePlanMode });
+      setStreamId(result.streamId);
+      for await (const ev of result.events) {
+        setEntries((prev) => {
+          const next = applyStreamEventToEntries(prev, ev, setPendingApproval, setPendingPlanApproval);
+          return next ?? prev;
+        });
+        if (ev.type === 'task_complete') {
+          setEntries((prev) => {
+            const report = generateReportFromEntries(prev);
+            return report ? [...prev, report] : prev;
+          });
+        }
+        if (ev.type === 'error') {
+          setLastUserForRetry(userContent);
+        }
+        if (ev.type === 'done' || ev.type === 'error') {
+          setPendingApproval(null);
+          setPendingPlanApproval(null);
+          break;
+        }
       }
     } catch (err) {
       setEntries((prev) => {
@@ -293,100 +292,76 @@ export function MainView(props: MainViewProps) {
       });
     } finally {
       setBusy(false);
+      setStreamId(null);
     }
   }
 
-  function handleApprove() {
-    if (!pendingApproval) return;
-    window.electronAPI.chat.approve(pendingApproval.id, true);
+  function handleAbort() {
+    if (streamId) {
+      window.electronAPI.chat.abort(streamId);
+    }
     setPendingApproval(null);
-  }
-
-  function handleReject() {
-    if (!pendingApproval) return;
-    window.electronAPI.chat.approve(pendingApproval.id, false);
-    setPendingApproval(null);
+    setPendingPlanApproval(null);
+    setBusy(false);
+    setStreamId(null);
   }
 
   function handleRetry() {
-    if (lastUserForRetry) {
-      setInput(lastUserForRetry);
-      setEntries((prev) => {
-        const copy = [...prev];
-        const last = copy[copy.length - 1];
-        if (last && last.kind === 'assistant' && last.content.includes('[连接错误]')) {
-          copy[copy.length - 1] = { ...last, content: last.content.replace(/\n\n\[连接错误\][\s\S]*$/, '') };
-        } else if (last && last.kind === 'error') {
-          copy.pop();
-        }
-        return copy;
-      });
-      setLastUserForRetry(null);
-      requestAnimationFrame(() => {
-        void handleSend();
-      });
-    }
-  }
-
-  /**
-   * 把一个流事件落到 entries 上
-   */
-  function applyStreamEvent(ev: ChatStreamEvent): void {
-    // approval_required doesn't modify entries — it shows the top bar instead
-    if (ev.type === 'approval_required' && ev.approval) {
-      setPendingApproval(ev.approval);
-      return;
-    }
+    if (!lastUserForRetry) return;
+    setInput(lastUserForRetry);
     setEntries((prev) => {
       const copy = [...prev];
-      if (ev.type === 'content' && ev.content) {
-        const last = copy[copy.length - 1];
-        if (last && last.kind === 'assistant') {
-          copy[copy.length - 1] = { ...last, content: last.content + ev.content };
-        }
-        return copy;
-      }
-      if (ev.type === 'tool_call' && ev.toolCall) {
-        copy.push({
-          kind: 'tool_call',
-          id: ev.toolCall.id,
-          name: ev.toolCall.function.name,
-          args: ev.toolCall.function.arguments,
-        });
-        return copy;
-      }
-      if (ev.type === 'tool_result' && ev.toolResult) {
-        const r = ev.toolResult.result as { ok?: boolean; output?: string; error?: string; meta?: ToolResultMeta };
-        copy.push({
-          kind: 'tool_result',
-          toolCallId: ev.toolResult.toolCallId,
-          name: ev.toolResult.name,
-          ok: r?.ok === true,
-          output: r?.output ?? '',
-          error: r?.error,
-          meta: r?.meta,
-        });
-        return copy;
-      }
-      if (ev.type === 'error' && ev.error) {
-        copy.push({ kind: 'error', message: ev.error });
-        return copy;
+      const last = copy[copy.length - 1];
+      if (last && last.kind === 'assistant' && last.content.includes('[连接错误]')) {
+        copy[copy.length - 1] = { ...last, content: last.content.replace(/\n\n\[连接错误\][\s\S]*$/, '') };
+      } else if (last && last.kind === 'error') {
+        copy.pop();
       }
       return copy;
     });
+    setLastUserForRetry(null);
+    requestAnimationFrame(() => { void handleSend(); });
   }
 
-  async function handleNewSession() {
+  // ---- Slash / Skills ----
+  function handleLoadSkills() {
+    if (!config.workDir) return;
+    void window.electronAPI.skills.list(config.workDir).then((items) => {
+      setSlash((s) => ({ ...s, skillsLoaded: true, slashItems: items }));
+    }).catch(() => {
+      setSlash((s) => ({ ...s, skillsLoaded: true, slashItems: [] }));
+    });
+  }
+
+  function handleSlashApply(skill: SkillDef) {
+    setInput(skill.prompt);
+    setSlash((s) => ({ ...s, slashOpen: false }));
+  }
+
+  // ---- Session CRUD ----
+  async function handleNewSession(projectId?: string) {
     if (busy) return;
     try {
-      const s = await window.electronAPI.sessions.create({
-        modelId: config.id,
-        workDir: config.workDir,
-      });
+      const s = await window.electronAPI.sessions.create({ modelId: config.id, workDir: config.workDir, projectId });
       onSessionCreated(s);
+      setActiveSection('tasks');
     } catch (e) {
       console.error('New session failed:', e);
     }
+  }
+
+  function handleSelectSession(id: string) {
+    setActiveSection('tasks');
+    onSessionSwitched(id);
+  }
+
+  function handleOpenProject(projectId: string) {
+    const firstSession = sessions.find((session) => session.projectId === projectId);
+    if (firstSession) {
+      handleSelectSession(firstSession.id);
+      return;
+    }
+    void handleNewSession(projectId);
   }
 
   async function handleDeleteSession(id: string) {
@@ -407,290 +382,183 @@ export function MainView(props: MainViewProps) {
     }
   }
 
+  // ---- Render ----
   return (
     <div className="main-view">
-      <header className="main-header">
-        <div className="main-header-left">
-          <button
-            className="btn-icon sidebar-toggle"
-            onClick={onToggleSidebar}
-            type="button"
-            title={sidebarOpen ? '隐藏会话列表' : '显示会话列表'}
-          >
-            {sidebarOpen ? '◀' : '▶'}
-          </button>
-          <h1 className="main-title">Stellara Work</h1>
-        </div>
-        <div className="main-header-center">
-          <button
-            className="main-workdir"
-            onClick={onChangeWorkDir}
-            title={config.workDir ?? '点击选择工作目录'}
-            type="button"
-          >
-            <span className="main-workdir-icon" aria-hidden="true">📂</span>
-            <span className="main-workdir-name">
-              {config.workDir ? basename(config.workDir) : '选择工作目录…'}
-            </span>
-          </button>
-          <span className="model-switcher">
-            <button
-              className={`main-model ${modelMenuOpen ? 'open' : ''}`}
-              onClick={() => setModelMenuOpen((v) => !v)}
-              type="button"
-              title={`${config.label} · ${config.model}（点击切换）`}
-              disabled={switchingModel}
-            >
-              <span className="main-model-label">{config.label}</span>
-              <span className="main-model-caret" aria-hidden="true">▾</span>
-            </button>
-            {modelMenuOpen && (
-              <div className="model-switcher-menu" role="listbox">
-                {modelList.length === 0 && <div className="empty-hint">还没有 model</div>}
-                {modelList.map((m) => (
-                  <button
-                    key={m.id}
-                    className={`model-switcher-item ${m.id === config.id ? 'active' : ''} ${!m.hasKey ? 'no-key' : ''}`}
-                    onClick={() => void handleSwitchModel(m.id)}
-                    type="button"
-                    title={!m.hasKey ? '该 model 未配 API key' : m.model}
-                    disabled={switchingModel}
-                  >
-                    <span className="model-switcher-item-name">{m.label}</span>
-                    <span className="model-switcher-item-meta">
-                      {m.id === config.id && <span className="badge">活跃</span>}
-                      {!m.hasKey && <span className="badge-warn">无 key</span>}
-                    </span>
-                  </button>
-                ))}
-                <div className="model-switcher-footer">
-                  <button
-                    className="model-switcher-add"
-                    onClick={() => { setModelMenuOpen(false); onOpenSettings(); }}
-                    type="button"
-                  >
-                    ⚙️ 添加 / 管理模型
-                  </button>
-                </div>
-              </div>
-            )}
-          </span>
-        </div>
-        <div className="main-header-right">
-          {config.workDir && (
-            <button
-              className="btn-icon"
-              onClick={() => setFileTreeOpen(true)}
-              type="button"
-              title="浏览文件"
-            >
-              📁
-            </button>
-          )}
-          <div className="header-menu-wrap">
-            <button
-              className="btn-icon"
-              onClick={() => setMenuOpen((o) => !o)}
-              title="菜单"
-              type="button"
-            >
-              ⋯
-            </button>
-            {menuOpen && (
-              <div className="header-menu" onClick={(e) => e.stopPropagation()}>
-                <button
-                  className="header-menu-item"
-                  onClick={handleNewTask}
-                  type="button"
-                  disabled={busy || entries.length === 0}
-                  title={entries.length === 0 ? '当前没有任务' : '清空聊天历史，开新任务'}
-                >
-                  🆕 新任务（清空当前）
-                </button>
-                <button
-                  className="header-menu-item"
-                  onClick={() => { setMenuOpen(false); void handleNewSession(); }}
-                  type="button"
-                  title="新建一个会话"
-                >
-                  ➕ 新建会话
-                </button>
-                <button
-                  className="header-menu-item"
-                  onClick={() => { setMenuOpen(false); onReconfigure(); }}
-                  type="button"
-                  title="切换模型 / 改 API key / 改工作目录"
-                >
-                  🔄 重新配置
-                </button>
-                <button
-                  className="header-menu-item"
-                  onClick={() => { setMenuOpen(false); onOpenSettings(); }}
-                  type="button"
-                  title="Providers / Sessions / App 设置"
-                >
-                  ⚙️ 设置
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      {activeSection === 'tasks' && <a className="skip-link" href="#task-stream">跳到工作记录</a>}
+      <Header
+        config={config}
+        sidebarOpen={sidebarOpen}
+        workspaceOpen={props.workspaceOpen}
+        modelList={modelList}
+        switchingModel={switchingModel}
+        busy={busy}
+        hasEntries={entries.length > 0}
+        onToggleSidebar={onToggleSidebar}
+        onToggleWorkspace={props.onToggleWorkspace}
+        onChangeWorkDir={onChangeWorkDir}
+        onOpenFileTree={() => setFileTreeOpen(true)}
+        onOpenSettings={onOpenSettings}
+        onReconfigure={onReconfigure}
+        onNewSession={() => void handleNewSession()}
+        onNewTask={handleNewTask}
+        onSwitchModel={(id) => void handleSwitchModel(id)}
+      />
 
       <div className="main-layout">
         {sidebarOpen && (
           <Sidebar
+            projects={projects}
             sessions={sessions}
             activeId={activeSessionId}
             mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
-            onSelect={onSessionSwitched}
+            activeSection={activeSection}
+            onNavigateHome={() => setActiveSection('home')}
+            onNavigateProjects={() => setActiveSection('projects')}
+            onNavigateTasks={() => setActiveSection('tasks')}
+            onOpenFiles={() => setFileTreeOpen(true)}
+            onOpenSettings={onOpenSettings}
+            onSelect={handleSelectSession}
             onNew={() => void handleNewSession()}
             onDelete={(id) => void handleDeleteSession(id)}
             onRename={(id, title) => void handleRenameSession(id, title)}
+            onProjectCreate={async (name) => {
+              const project = await window.electronAPI.projects.create({ name });
+              onProjectCreated(project);
+            }}
+            onProjectDelete={async (id) => {
+              await window.electronAPI.projects.delete(id);
+              onProjectDeleted(id);
+            }}
+            onProjectRename={async (id, name) => {
+              await window.electronAPI.projects.rename(id, name);
+              onProjectRenamed(id, name);
+            }}
+            onNewSessionInProject={(projectId) => void handleNewSession(projectId)}
           />
         )}
         <div className="main-content">
-          {workspaceMode === 'tabs' && (
-            <TabBar
-              tabs={tabBarTabs}
-              activeId={activeSessionId ?? ''}
-              onSelect={(id) => void onSessionSwitched(id)}
-              onClose={(id) => void handleDeleteSession(id)}
-            />
-          )}
-          {pendingApproval && (
-            <ApprovalTopBar
-              request={pendingApproval}
-              onApprove={handleApprove}
-              onReject={handleReject}
-            />
-          )}
-          <main className="main-chat" ref={chatRef}>
-            {entries.length === 0 ? (
-              <div className="empty-chat">
-                <h2>开始一个新的任务</h2>
-                <p>在下方输入你的需求，agent 会在工作目录里读 / 写文件、跑命令、汇报结果。</p>
-                <div className="empty-examples">
-                  <p>试试这些：</p>
-                  <ul>
-                    <li>"读 README.md 然后总结一下"</li>
-                    <li>"在 src/utils/ 新增一个 helper.ts 实现字符串反转"</li>
-                    <li>"跑 npm test 看哪些挂了"</li>
-                  </ul>
-                </div>
-              </div>
-            ) : (
-              <div className="messages">
-                {entries.map((e, i) => (
-                  <div key={i} className="entry">
-                    {e.kind === 'user' && (
-                      <div className="message message-user">
-                        <div className="message-role">你</div>
-                        <div className="message-content">
-                          <pre className="user-text">{e.content}</pre>
-                        </div>
-                      </div>
-                    )}
-                    {e.kind === 'assistant' && (
-                      <div className="message message-assistant">
-                        <div className="message-role">Agent</div>
-                        <div className="message-content">
-                          {e.content ? <MarkdownView content={e.content} /> : <span className="thinking">思考中...</span>}
-                          {lastUserForRetry && !busy && e.content.includes('[连接错误]') && (
-                            <button className="btn btn-secondary btn-retry" onClick={handleRetry} type="button">
-                              ↻ 再试一次
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    {e.kind === 'tool_call' && <ToolCallCard name={e.name} args={e.args} />}
-                    {e.kind === 'tool_result' && e.meta?.kind === 'edit' && (
-                      <DiffCard path={e.meta.path} before={e.meta.before} after={e.meta.after} />
-                    )}
-                    {e.kind === 'tool_result' && e.meta?.kind === 'command' && (
-                      <ShellCard
-                        command={e.meta.command}
-                        stdout={e.meta.stdout}
-                        stderr={e.meta.stderr}
-                        exitCode={e.meta.exitCode}
-                        durationMs={e.meta.durationMs}
-                        ok={e.ok}
-                      />
-                    )}
-                    {e.kind === 'tool_result' && !e.meta && (
-                      <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} />
-                    )}
-                    {e.kind === 'error' && (
-                      <div className="error-banner">
-                        <span className="error-icon">⚠</span>
-                        <span className="error-text">{e.message}</span>
-                        {lastUserForRetry && !busy && (
-                          <button className="btn btn-secondary btn-retry" onClick={handleRetry} type="button">
-                            ↻ 再试一次
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {busy && (
-                  <div className="streaming-indicator">
-                    <span></span><span></span><span></span>
-                  </div>
-                )}
-              </div>
-            )}
-          </main>
-
-          <footer className="main-input">
-            <textarea
-              className="input-chat"
-              placeholder={busy ? 'Agent 思考中...' : '输入你的需求...'}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  void handleSend();
-                }
-              }}
-              disabled={busy}
-              rows={3}
-            />
-            <div className="input-actions">
-              <label className={`plan-toggle ${planMode ? 'on' : ''}`} title="Plan 模式：agent 只读文件 / 搜索，不写不执行">
-                <input
-                  type="checkbox"
-                  checked={planMode}
-                  onChange={(e) => setPlanMode(e.target.checked)}
-                  disabled={busy}
+          {activeSection === 'tasks' ? (
+            <>
+              {workspaceMode === 'tabs' && (
+                <TabBar
+                  tabs={tabBarTabs}
+                  activeId={activeSessionId ?? ''}
+                  onSelect={handleSelectSession}
+                  onClose={(id) => void handleDeleteSession(id)}
+                  onNewTab={() => void handleNewSession()}
+                  onRename={(id) => {
+                    const tab = sessions.find((s) => s.id === id);
+                    if (tab) {
+                      const newTitle = prompt('重命名会话', tab.title);
+                      if (newTitle) void handleRenameSession(id, newTitle);
+                    }
+                  }}
+                  onCloseOthers={(keepId) => {
+                    for (const s of sessions) {
+                      if (s.id !== keepId) void handleDeleteSession(s.id);
+                    }
+                  }}
                 />
-                <span>Plan 模式{planMode ? '（只读）' : ''}</span>
-              </label>
-              <span className="hint">Ctrl+Enter 发送</span>
-              <button
-                className="btn btn-primary"
-                onClick={() => void handleSend()}
-                disabled={busy || !input.trim()}
-              >
-                {busy ? '思考中...' : '发送'}
-              </button>
-            </div>
-          </footer>
+              )}
+              <ChatStream
+                entries={entries}
+                busy={busy}
+                streamId={streamId}
+                chatRef={chatRef}
+                lastUserForRetry={lastUserForRetry}
+                modelMissing={modelMissing}
+                onOpenSettings={onOpenSettings}
+                onRetry={handleRetry}
+                onAbort={handleAbort}
+                onApprove={(approved) => {
+                  if (!pendingApproval) return;
+                  window.electronAPI.chat.approve(pendingApproval.id, approved);
+                  setPendingApproval(null);
+                }}
+                pendingApproval={pendingApproval}
+                pendingPlanApproval={pendingPlanApproval}
+                onApprovePlan={() => {
+                  if (!pendingPlanApproval) return;
+                  window.electronAPI.chat.approve(pendingPlanApproval.id, true);
+                  setPendingPlanApproval(null);
+                }}
+                onRejectPlan={() => {
+                  if (!pendingPlanApproval) return;
+                  window.electronAPI.chat.approve(pendingPlanApproval.id, false);
+                  setPendingPlanApproval(null);
+                }}
+              />
+              <InputArea
+                input={input}
+                busy={busy}
+                planMode={planMode}
+                slash={slash}
+                hasWorkDir={!!config.workDir}
+                onInputChange={setInput}
+                onPlanToggle={() => setPlanMode((v) => !v)}
+                onSend={() => void handleSend()}
+                onSlashApply={handleSlashApply}
+                onSlashOpen={() => setSlash((s) => ({ ...s, slashOpen: true, slashIdx: 0 }))}
+                onSlashClose={() => setSlash((s) => ({ ...s, slashOpen: false }))}
+                onSlashIdxChange={(idx) => setSlash((s) => ({ ...s, slashIdx: idx }))}
+                onLazyLoadSkills={handleLoadSkills}
+              />
+            </>
+          ) : (
+            <HomeDashboard
+              section={activeSection}
+              config={config}
+              projects={projects}
+              sessions={sessions}
+              input={input}
+              busy={busy}
+              onInputChange={setInput}
+              onSend={() => {
+                if (!activeSessionId) {
+                  void handleNewSession();
+                  return;
+                }
+                setActiveSection('tasks');
+                void handleSend();
+              }}
+              onSelectSession={handleSelectSession}
+              onOpenProject={handleOpenProject}
+              onCreateProject={() => {
+                void window.electronAPI.projects.create({ name: '新项目' }).then(onProjectCreated);
+              }}
+              onOpenFiles={() => setFileTreeOpen(true)}
+            />
+          )}
         </div>
+        {props.workspaceOpen && config.workDir && (
+          <WorkspacePanel
+            workDir={config.workDir}
+            goal={workspaceGoal}
+            progress={{ completed: toolResultCount, total: toolCallCount }}
+            deliverables={workspaceDeliverables}
+            touchedFiles={touchedFiles}
+          />
+        )}
       </div>
 
       {confirmNew && (
         <div className="modal-backdrop" onClick={() => setConfirmNew(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>清空当前聊天？</h3>
-            <p>当前 {entries.length} 条记录会被清掉，agent 上下文也会重置。</p>
+          <div
+            className="modal confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-new-title"
+            aria-describedby="confirm-new-description"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="confirm-new-title">清空当前聊天？</h3>
+            <p id="confirm-new-description">当前 {entries.length} 条记录会被清除，任务上下文也会重新开始。</p>
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setConfirmNew(false)} type="button">
+              <button className="btn btn-secondary" onClick={() => setConfirmNew(false)} type="button" autoFocus>
                 取消
               </button>
-              <button className="btn btn-primary" onClick={doNewTask} type="button">
+              <button className="btn btn-danger" onClick={doNewTask} type="button">
                 清空
               </button>
             </div>
@@ -706,83 +574,4 @@ export function MainView(props: MainViewProps) {
       )}
     </div>
   );
-}
-
-function basename(p: string): string {
-  // 处理 Windows / POSIX 都可
-  const m = p.replace(/[\\/]+$/, '').match(/[^\\/]+$/);
-  return m ? m[0] : p;
-}
-
-function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
-  const out: DisplayEntry[] = [];
-  for (const m of msgs) {
-    if (m.role === 'user') {
-      out.push({ kind: 'user', content: m.content });
-    } else if (m.role === 'assistant') {
-      let toolCalls: ToolCall[] | undefined;
-      try { if (m.toolCalls) toolCalls = JSON.parse(m.toolCalls); } catch { /* ignore */ }
-      out.push({ kind: 'assistant', content: m.content, toolCalls });
-      if (toolCalls) {
-        for (const tc of toolCalls) {
-          out.push({ kind: 'tool_call', id: tc.id, name: tc.function.name, args: tc.function.arguments });
-        }
-      }
-    } else if (m.role === 'tool') {
-      let meta: ToolResultMeta | undefined;
-      try { if (m.meta) meta = JSON.parse(m.meta); } catch { /* ignore */ }
-      const isError = m.content.startsWith('Error:');
-      out.push({
-        kind: 'tool_result',
-        toolCallId: m.toolCallId,
-        name: m.toolName ?? 'tool',
-        ok: !isError,
-        output: isError ? m.content.slice('Error:'.length).trim() : m.content,
-        meta,
-      });
-    }
-  }
-  return out;
-}
-
-function entriesToMessages(entries: DisplayEntry[]): MessageRow[] {
-  const out: MessageRow[] = [];
-  let pos = 0;
-  const now = Date.now();
-  for (const e of entries) {
-    if (e.kind === 'user') {
-      out.push({ sessionId: '', position: pos++, role: 'user', content: e.content, createdAt: now });
-    } else if (e.kind === 'assistant') {
-      out.push({
-        sessionId: '',
-        position: pos++,
-        role: 'assistant',
-        content: e.content,
-        toolCalls: e.toolCalls && e.toolCalls.length > 0 ? JSON.stringify(e.toolCalls) : undefined,
-        createdAt: now,
-      });
-    } else if (e.kind === 'tool_call') {
-      // 合并到上一条 assistant 消息，与 OpenAI 消息格式一致
-      const last = out[out.length - 1];
-      if (last && last.role === 'assistant') {
-        const calls: ToolCall[] = last.toolCalls ? JSON.parse(last.toolCalls) : [];
-        calls.push({ id: e.id, type: 'function', function: { name: e.name, arguments: e.args } });
-        last.toolCalls = JSON.stringify(calls);
-      }
-    } else if (e.kind === 'tool_result') {
-      out.push({
-        sessionId: '',
-        position: pos++,
-        role: 'tool',
-        content: e.output,
-        toolCallId: e.toolCallId,
-        toolName: e.name,
-        meta: JSON.stringify(e.meta),
-        createdAt: now,
-      });
-    } else if (e.kind === 'error') {
-      // 错误不存
-    }
-  }
-  return out;
 }
