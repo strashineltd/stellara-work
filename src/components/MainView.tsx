@@ -139,6 +139,7 @@ export function MainView(props: MainViewProps) {
         entriesSessionRef.current = activeSessionId;
         setPlanMode(false);
         setLastUserForRetry(null);
+        setPendingPlanApproval(null);
         setModelMissing(session.modelId !== config.id);
       }).catch((e) => {
         console.error('Failed to load session:', e);
@@ -287,9 +288,11 @@ export function MainView(props: MainViewProps) {
         } else {
           copy.push({ kind: 'error', message: msg });
         }
-        setLastUserForRetry(userContent);
         return copy;
       });
+      setLastUserForRetry(userContent);
+      setPendingApproval(null);
+      setPendingPlanApproval(null);
     } finally {
       setBusy(false);
       setStreamId(null);
