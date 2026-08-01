@@ -378,6 +378,16 @@ async function runAgentLoopForIpc(
       history,
       planMode: request.planMode ?? false,
       onApproval: async () => true,
+      onPlanApproval: async (plan) => {
+        const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        send({
+          type: 'plan_approval_required',
+          planApproval: { id: approvalId, plan: plan.steps.map((s) => s.description) },
+        });
+        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
+        const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
+        return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
+      },
     })) {
       send(event);
     }
