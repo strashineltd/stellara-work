@@ -129,6 +129,42 @@ describe('plan approval gate', () => {
     expect(events.some((e) => e.type === 'plan_ready')).toBe(true);
     expect(events.some((e) => e.type === 'error')).toBe(false);
   });
+
+  it('multi-turn: plan without READY TO EXECUTE continues via tool calls, then the gate triggers once on the READY TO EXECUTE turn', async () => {
+    mockChat
+      .mockReturnValueOnce((async function* () {
+        yield { type: 'content', content: '1. 阅读 README\n2. 写代码\n3. 运行测试' };
+        yield {
+          type: 'tool_call',
+          toolCall: {
+            id: 'tc1',
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ path: 'README.md' }) },
+          },
+        };
+        yield { type: 'done' };
+      })())
+      .mockReturnValueOnce(contentThenDone('1. 阅读 README\n2. 写代码\n3. 运行测试\n\nREADY TO EXECUTE'));
+    mockInvokeTool.mockResolvedValue({ ok: true, output: '' });
+
+    const approvedPlans: unknown[] = [];
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', {
+      model: makeConfig(),
+      cwd: '/work',
+      planMode: true,
+      onPlanApproval: async (plan) => {
+        approvedPlans.push(plan);
+        return true;
+      },
+    })) {
+      events.push(ev);
+    }
+
+    expect(approvedPlans).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'plan')).toHaveLength(1);
+    expect(events.some((e) => e.type === 'plan_ready')).toBe(true);
+  });
 });
 
 // Test the consecutive-failure detection by extracting the logic:
