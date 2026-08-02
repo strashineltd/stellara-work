@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   AppInfo, ApprovalRequest, ModelConfig, ModelListItem,
-  SessionSummary, Session, SkillDef,
+  SessionSummary, Session, SkillDef, Project, ProjectFileSelection,
 } from '../../shared/ipc';
 import {
   type DisplayEntry,
@@ -16,6 +17,8 @@ import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
 import { TabBar, type TabBarTab } from './chat/TabBar';
 import { HomeDashboard } from './HomeDashboard';
+import { ProjectDialog } from './ProjectDialog';
+import { MemoryCenter } from './memory/MemoryCenter';
 
 interface MainViewProps {
   config: ModelConfig;
@@ -35,21 +38,21 @@ interface MainViewProps {
   onProjectCreated: (project: import('../../shared/ipc').Project) => void;
   onProjectDeleted: (id: string) => void;
   onProjectRenamed: (id: string, name: string) => void;
+  onProjectFileUpdated: (project: Project) => void;
   onSessionCreated: (session: Session) => void;
   onSessionSwitched: (id: string) => void;
   onSessionDeleted: (id: string) => void;
   onSessionRenamed: (id: string, title: string) => void;
   onSessionsChanged: (sessions: SessionSummary[]) => void;
   onModelChanged: (config: ModelConfig) => void;
-  onChangeWorkDir: () => void;
   onThemeChange?: (theme: import('../../shared/ipc').ThemeName) => void;
 }
 
 export function MainView(props: MainViewProps) {
   const {
     config, info: _info, sidebarOpen, workspaceMode, activeSessionId, projects, sessions,
-    onToggleSidebar, onReconfigure, onOpenSettings, onChangeWorkDir,
-    onProjectCreated, onProjectDeleted, onProjectRenamed,
+    onToggleSidebar, onReconfigure, onOpenSettings,
+    onProjectCreated, onProjectDeleted, onProjectRenamed, onProjectFileUpdated,
     onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
     onModelChanged,
   } = props;
@@ -63,6 +66,9 @@ export function MainView(props: MainViewProps) {
     })),
     [sessions, activeSessionId],
   );
+  const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const activeProject = projects.find((project) => project.id === activeSession?.projectId);
+  const activeWorkDir = activeProject?.workDir ?? activeSession?.workDir ?? config.workDir;
 
   // ---- State ----
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
@@ -72,13 +78,14 @@ export function MainView(props: MainViewProps) {
   const [planMode, setPlanMode] = useState(false);
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
   const [modelMissing, setModelMissing] = useState(false);
-  const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks'>('home');
+  const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks' | 'memory'>('home');
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -328,8 +335,8 @@ export function MainView(props: MainViewProps) {
 
   // ---- Slash / Skills ----
   function handleLoadSkills() {
-    if (!config.workDir) return;
-    void window.electronAPI.skills.list(config.workDir).then((items) => {
+    if (!activeWorkDir) return;
+    void window.electronAPI.skills.list(activeWorkDir).then((items) => {
       setSlash((s) => ({ ...s, skillsLoaded: true, slashItems: items }));
     }).catch(() => {
       setSlash((s) => ({ ...s, skillsLoaded: true, slashItems: [] }));
@@ -344,13 +351,29 @@ export function MainView(props: MainViewProps) {
   // ---- Session CRUD ----
   async function handleNewSession(projectId?: string) {
     if (busy) return;
+    const targetProjectId = projectId ?? activeSession?.projectId;
+    if (!targetProjectId) {
+      setActiveSection('projects');
+      if (projects.length === 0) setCreateProjectOpen(true);
+      return;
+    }
     try {
-      const s = await window.electronAPI.sessions.create({ modelId: config.id, workDir: config.workDir, projectId });
+      const s = await window.electronAPI.sessions.create({ modelId: config.id, projectId: targetProjectId });
       onSessionCreated(s);
       setActiveSection('tasks');
     } catch (e) {
       console.error('New session failed:', e);
     }
+  }
+
+  async function handleCreateProject(name: string, selection: ProjectFileSelection) {
+    const project = await window.electronAPI.projects.create({
+      name,
+      workDir: selection.workDir,
+      entryFile: selection.path,
+    });
+    onProjectCreated(project);
+    setCreateProjectOpen(false);
   }
 
   function handleSelectSession(id: string) {
@@ -399,7 +422,12 @@ export function MainView(props: MainViewProps) {
         hasEntries={entries.length > 0}
         onToggleSidebar={onToggleSidebar}
         onToggleWorkspace={props.onToggleWorkspace}
-        onChangeWorkDir={onChangeWorkDir}
+        workDir={activeWorkDir}
+        projectName={activeProject?.name}
+        onChooseProject={() => {
+          setActiveSection('projects');
+          if (!activeProject && projects.length === 0) setCreateProjectOpen(true);
+        }}
         onOpenFileTree={() => setFileTreeOpen(true)}
         onOpenSettings={onOpenSettings}
         onReconfigure={onReconfigure}
@@ -419,16 +447,14 @@ export function MainView(props: MainViewProps) {
             onNavigateHome={() => setActiveSection('home')}
             onNavigateProjects={() => setActiveSection('projects')}
             onNavigateTasks={() => setActiveSection('tasks')}
-            onOpenFiles={() => setFileTreeOpen(true)}
+            onNavigateMemory={() => setActiveSection('memory')}
+            onOpenFiles={() => activeWorkDir ? setFileTreeOpen(true) : setCreateProjectOpen(true)}
             onOpenSettings={onOpenSettings}
             onSelect={handleSelectSession}
             onNew={() => void handleNewSession()}
             onDelete={(id) => void handleDeleteSession(id)}
             onRename={(id, title) => void handleRenameSession(id, title)}
-            onProjectCreate={async (name) => {
-              const project = await window.electronAPI.projects.create({ name });
-              onProjectCreated(project);
-            }}
+            onProjectCreate={() => setCreateProjectOpen(true)}
             onProjectDelete={async (id) => {
               await window.electronAPI.projects.delete(id);
               onProjectDeleted(id);
@@ -436,6 +462,11 @@ export function MainView(props: MainViewProps) {
             onProjectRename={async (id, name) => {
               await window.electronAPI.projects.rename(id, name);
               onProjectRenamed(id, name);
+            }}
+            onProjectFileUpdate={async (id, selection) => {
+              const project = await window.electronAPI.projects.updateFile(id, selection);
+              onProjectFileUpdated(project);
+              return project;
             }}
             onNewSessionInProject={(projectId) => void handleNewSession(projectId)}
           />
@@ -497,7 +528,7 @@ export function MainView(props: MainViewProps) {
                 busy={busy}
                 planMode={planMode}
                 slash={slash}
-                hasWorkDir={!!config.workDir}
+                hasWorkDir={!!activeWorkDir}
                 onInputChange={setInput}
                 onPlanToggle={() => setPlanMode((v) => !v)}
                 onSend={() => void handleSend()}
@@ -508,10 +539,14 @@ export function MainView(props: MainViewProps) {
                 onLazyLoadSkills={handleLoadSkills}
               />
             </>
+          ) : activeSection === 'memory' ? (
+            <MemoryCenter />
           ) : (
             <HomeDashboard
               section={activeSection}
               config={config}
+              workDir={activeWorkDir}
+              projectName={activeProject?.name}
               projects={projects}
               sessions={sessions}
               input={input}
@@ -527,16 +562,14 @@ export function MainView(props: MainViewProps) {
               }}
               onSelectSession={handleSelectSession}
               onOpenProject={handleOpenProject}
-              onCreateProject={() => {
-                void window.electronAPI.projects.create({ name: '新项目' }).then(onProjectCreated);
-              }}
-              onOpenFiles={() => setFileTreeOpen(true)}
+              onCreateProject={() => setCreateProjectOpen(true)}
+              onOpenFiles={() => activeWorkDir ? setFileTreeOpen(true) : setCreateProjectOpen(true)}
             />
           )}
         </div>
-        {props.workspaceOpen && config.workDir && (
+        {props.workspaceOpen && activeWorkDir && (
           <WorkspacePanel
-            workDir={config.workDir}
+            workDir={activeWorkDir}
             goal={workspaceGoal}
             progress={{ completed: toolResultCount, total: toolCallCount }}
             deliverables={workspaceDeliverables}
@@ -569,11 +602,20 @@ export function MainView(props: MainViewProps) {
         </div>
       )}
 
-      {fileTreeOpen && config.workDir && (
+      {fileTreeOpen && activeWorkDir && (
         <FileTreeModal
-          workDir={config.workDir}
+          workDir={activeWorkDir}
           onClose={() => setFileTreeOpen(false)}
         />
+      )}
+
+      {createProjectOpen && createPortal(
+        <ProjectDialog
+          mode="create"
+          onCreate={handleCreateProject}
+          onClose={() => setCreateProjectOpen(false)}
+        />,
+        document.body,
       )}
     </div>
   );

@@ -1,98 +1,153 @@
-/* Stellara Work design tokens (A1 · 冷炭蓝男股风 / Linear tier) */
+/* Stellara Work · Quiet Workbench design tokens */
 
 :root {
-  /* 背景（高对比分层） */
-  --color-bg-app:        #F1F2F4;
-  --color-bg-sidebar:    #0E1014;
-  --color-bg-content:    #FFFFFF;
-  --color-bg-elevated:   #FAFAFA;
-  --color-bg-soft:       #F5F5F5;
-  --color-bg-input:      #FFFFFF;
+  color-scheme: light;
 
-  /* 文本（侧栏白底，主区深字） */
-  --color-text:          #0F0F10;
-  --color-text-soft:     #6B7280;
-  --color-text-on-dark:  #E5E7EB;
-  --color-text-on-dark-soft: #9CA3AF;
+  /* Surfaces */
+  --color-bg-app: #f3f3f0;
+  --color-bg-sidebar: #ecece8;
+  --color-bg-content: #ffffff;
+  --color-bg-elevated: #f8f8f5;
+  --color-bg-soft: #efefeb;
+  --color-bg-input: #ffffff;
 
-  /* 边框 */
-  --color-border:        #E5E7EB;
-  --color-border-strong: #D1D5DB;
-  --color-border-dark:   #1F2937;
+  /* Text */
+  --color-text: #292925;
+  --color-text-soft: #6f6f68;
+  --color-text-faint: #777770;
+  --color-text-on-dark: #f7f7f3;
+  --color-text-on-dark-soft: #b8b8b0;
 
-  /* 品牌 */
-  --color-primary:       #0F0F10;
-  --color-accent:        #3D6DFB;
-  --color-accent-soft:   #F1F5FF;
-  --color-accent-hover:  #2D5BD9;
+  /* Lines */
+  --color-border: #deded8;
+  --color-border-strong: #c9c9c1;
+  --color-border-dark: #d7d7d0;
 
-  /* 状态 */
-  --color-success:       #10B981;
-  --color-success-bg:    #ECFDF5;
-  --color-warning:       #F59E0B;
-  --color-warning-bg:    #FFFBEB;
-  --color-danger:        #EF4444;
-  --color-danger-bg:     #FEF2F2;
-  --color-danger-tint:   rgba(255, 0, 0, 0.05);
-  --color-info:          #3D6DFB;
+  /* Brand and interaction */
+  --color-primary: #242421;
+  --color-accent: #42689f;
+  --color-on-accent: #ffffff;
+  --color-accent-soft: #eaf0f7;
+  --color-accent-hover: #365988;
+  --color-focus: #5379ad;
 
-  /* 阴影（极简） */
-  --shadow-sm: 0 1px 2px rgba(15, 15, 16, 0.05);
-  --shadow-md: 0 2px 8px rgba(15, 15, 16, 0.08);
-  --shadow-lg: 0 10px 30px rgba(15, 15, 16, 0.12);
+  /* Status */
+  --color-success: #39745a;
+  --color-on-success: #ffffff;
+  --color-success-bg: #edf6f0;
+  --color-warning: #936621;
+  --color-warning-bg: #fbf4e7;
+  --color-danger: #ad4d49;
+  --color-on-danger: #ffffff;
+  --color-danger-bg: #faefee;
+  --color-danger-tint: rgba(173, 77, 73, 0.08);
+  --color-info: #42689f;
+  --color-modal-backdrop: rgba(36, 36, 33, 0.42);
+  --color-hover-overlay: rgba(36, 36, 33, 0.045);
+  --color-accent-tint: rgba(66, 104, 159, 0.14);
 
-  /* 字体 */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
-               "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* Depth: menus and modal only */
+  --shadow-sm: 0 1px 2px rgba(36, 36, 33, 0.05);
+  --shadow-md: 0 8px 24px rgba(36, 36, 33, 0.1);
+  --shadow-lg: 0 18px 48px rgba(36, 36, 33, 0.14);
 
-  /* 字号 */
+  /* Typography */
+  --font-sans: "Segoe UI Variable", "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas,
+    "Liberation Mono", monospace;
+
+  --fs-xxs: 10px;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-base: 13px;
   --fs-md: 14px;
   --fs-lg: 16px;
-  --fs-xl: 20px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
 
-  /* 间距 (4px 阶梯) */
+  /* 4px spacing rhythm */
   --space-1: 4px;
+  --space-1-5: 6px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --space-7: 40px;
+  --space-8: 48px;
 
-  /* 圆角 */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  --space-input-h: 10px;
+  --space-card-h: 14px;
+  --space-section-h: 18px;
+
+  /* Restrained desktop geometry */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
   --radius-pill: 999px;
+  --header-height: 48px;
+  --sidebar-width: 248px;
+  --content-reading-width: 820px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 18px;
+  --control-height-sm: 30px;
+  --control-height: 36px;
+  --z-header: 20;
+  --z-overlay-panel: 40;
+  --z-popover: 100;
+  --z-modal: 200;
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 [data-theme="dark"] {
-  --color-bg-app:        #0A0A0B;
-  --color-bg-sidebar:    #000000;
-  --color-bg-content:    #161618;
-  --color-bg-elevated:   #1E1E20;
-  --color-bg-soft:       #252528;
-  --color-bg-input:      #161618;
+  color-scheme: dark;
 
-  --color-text:          #E5E7EB;
-  --color-text-soft:     #9CA3AF;
-  --color-text-on-dark:  #E5E7EB;
-  --color-text-on-dark-soft: #6B7280;
+  --color-bg-app: #1d1d1b;
+  --color-bg-sidebar: #20201e;
+  --color-bg-content: #252523;
+  --color-bg-elevated: #2a2a27;
+  --color-bg-soft: #30302d;
+  --color-bg-input: #252523;
 
-  --color-border:        #2E2E33;
-  --color-border-strong: #404045;
+  --color-text: #e9e9e4;
+  --color-text-soft: #aaa9a1;
+  --color-text-faint: #8f8f87;
+  --color-text-on-dark: #e9e9e4;
+  --color-text-on-dark-soft: #aaa9a1;
 
-  --color-primary:       #FFFFFF;
-  --color-accent:        #5B8DEF;
-  --color-accent-soft:   #1E2530;
+  --color-border: #3a3a36;
+  --color-border-strong: #4a4a45;
+  --color-border-dark: #3a3a36;
 
-  --color-success:       #34D399;
-  --color-success-bg:    #0F2920;
-  --color-warning:       #FBBF24;
-  --color-warning-bg:    #2E2519;
-  --color-danger:        #F87171;
-  --color-danger-bg:     #2E1A1A;
+  --color-primary: #f0f0eb;
+  --color-accent: #8ba7cf;
+  --color-on-accent: #1d1d1b;
+  --color-accent-soft: #303b49;
+  --color-accent-hover: #a0b8d9;
+  --color-focus: #9bb3d5;
+
+  --color-success: #79ad8d;
+  --color-on-success: #1d1d1b;
+  --color-success-bg: #26372d;
+  --color-warning: #c7a467;
+  --color-warning-bg: #3b3325;
+  --color-danger: #d88782;
+  --color-on-danger: #1d1d1b;
+  --color-danger-bg: #3d2928;
+  --color-danger-tint: rgba(216, 135, 130, 0.1);
+  --color-info: #8ba7cf;
+  --color-modal-backdrop: rgba(9, 9, 8, 0.64);
+  --color-hover-overlay: rgba(255, 255, 255, 0.045);
+  --color-accent-tint: rgba(139, 167, 207, 0.16);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.38);
 }

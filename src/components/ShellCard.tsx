@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { Icon } from './Icon';
 
 interface ShellCardProps {
   command: string;
@@ -47,12 +48,16 @@ export function ShellCard({ command, stdout, stderr, exitCode, durationMs, ok }:
           title={longOutput ? (open ? '折叠' : '展开') : undefined}
           disabled={!longOutput}
         >
-          <span className="tool-card-icon">$</span>
+          <span className="tool-card-icon"><Icon name="terminal" size={14} /></span>
           <span className="tool-card-name">{truncateMiddle(command, 80)}</span>
           <span className="tool-card-summary">
             exit {exitCode} · {durationMs}ms
           </span>
-          {longOutput && <span className="tool-card-chevron">{open ? '▾' : '▸'}</span>}
+          {longOutput && (
+            <span className="tool-card-chevron">
+              <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -60,7 +65,7 @@ export function ShellCard({ command, stdout, stderr, exitCode, durationMs, ok }:
           onClick={handleCopy}
           title="复制输出"
         >
-          {copied ? '✓' : '⧉'}
+          <Icon name={copied ? 'check' : 'copy'} size={14} />
         </button>
       </div>
       {open && (

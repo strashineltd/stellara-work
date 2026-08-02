@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { listTree, readFileContent } from './tree';
+import { createEmptyFile, listTree, readFileContent } from './tree';
 
 let tmpDir: string;
 
@@ -74,6 +74,46 @@ describe('listTree', () => {
     const types = tree.children!.map((c) => `${c.type}:${c.name}`);
     expect(types).toEqual(['dir:a-dir', 'file:a.txt', 'file:z.txt']);
   });
+
+  it('does not follow symlink pointing outside cwd', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-outside-'));
+    await fs.writeFile(path.join(outsideDir, 'secret.txt'), 'secret');
+    const linkDir = path.join(tmpDir, 'linkdir');
+    try {
+      await fs.symlink(outsideDir, linkDir, 'junction');
+      const tree = await listTree(tmpDir, 3);
+      const linkNode = tree.children!.find((c) => c.name === 'linkdir');
+      expect(linkNode).toBeDefined();
+      // symlink 应显示为 file 类型，不递归
+      expect(linkNode!.type).toBe('file');
+      expect(linkNode!.children).toBeUndefined();
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not follow symlink pointing inside cwd', async () => {
+    const realDir = path.join(tmpDir, 'real');
+    await fs.mkdir(realDir);
+    await fs.writeFile(path.join(realDir, 'inner.txt'), 'data');
+    const linkDir = path.join(tmpDir, 'linkdir');
+    await fs.symlink(realDir, linkDir, 'junction');
+    const tree = await listTree(tmpDir, 3);
+    const linkNode = tree.children!.find((c) => c.name === 'linkdir');
+    expect(linkNode).toBeDefined();
+    // 即使指向内部，symlink 也不递归
+    expect(linkNode!.type).toBe('file');
+    expect(linkNode!.children).toBeUndefined();
+  });
+
+  it('handles broken symlink', async () => {
+    const linkDir = path.join(tmpDir, 'broken-link');
+    await fs.symlink(path.join(tmpDir, 'nonexistent'), linkDir);
+    const tree = await listTree(tmpDir, 3);
+    const linkNode = tree.children!.find((c) => c.name === 'broken-link');
+    expect(linkNode).toBeDefined();
+    expect(linkNode!.type).toBe('file');
+  });
 });
 
 describe('readFileContent', () => {
@@ -115,5 +155,49 @@ describe('readFileContent', () => {
     await expect(
       readFileContent(tmpDir, path.join(tmpDir, 'sub')),
     ).rejects.toThrow(/不是文件/);
+  });
+
+  it('rejects symlink pointing outside workDir', async () => {
+    const target = path.join(os.tmpdir(), 'tree-symlink-target-' + Date.now() + '.txt');
+    await fs.writeFile(target, 'secret');
+    const link = path.join(tmpDir, 'link.txt');
+    try {
+      await fs.symlink(target, link);
+      await expect(readFileContent(tmpDir, link)).rejects.toThrow(/符号链接/);
+    } finally {
+      await fs.rm(target, { force: true });
+    }
+  });
+
+  it('rejects broken symlink', async () => {
+    const link = path.join(tmpDir, 'broken-link.txt');
+    await fs.symlink(path.join(tmpDir, 'nonexistent'), link);
+    await expect(readFileContent(tmpDir, link)).rejects.toThrow(/符号链接/);
+  });
+});
+
+describe('createEmptyFile', () => {
+  it('creates an empty file inside an existing work directory', async () => {
+    const result = await createEmptyFile(tmpDir, 'notes.md');
+    expect(result.path).toBe(path.join(tmpDir, 'notes.md'));
+    expect(await fs.readFile(result.path, 'utf-8')).toBe('');
+  });
+
+  it('creates a file in an existing nested directory', async () => {
+    await fs.mkdir(path.join(tmpDir, 'docs'));
+    const result = await createEmptyFile(tmpDir, 'docs/brief.md');
+    expect(result.path).toBe(path.join(tmpDir, 'docs', 'brief.md'));
+  });
+
+  it('never overwrites an existing file', async () => {
+    const target = path.join(tmpDir, 'keep.txt');
+    await fs.writeFile(target, 'keep');
+    await expect(createEmptyFile(tmpDir, 'keep.txt')).rejects.toThrow(/已存在/);
+    expect(await fs.readFile(target, 'utf-8')).toBe('keep');
+  });
+
+  it('rejects traversal and missing parent directories', async () => {
+    await expect(createEmptyFile(tmpDir, '../outside.txt')).rejects.toThrow(/超出/);
+    await expect(createEmptyFile(tmpDir, 'missing/file.txt')).rejects.toThrow(/父目录不存在/);
   });
 });

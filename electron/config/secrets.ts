@@ -1,13 +1,12 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { getAppDataDir } from './data-dir';
 
-const DEFAULT_SECRETS_DIR = path.join(os.homedir(), '.stellara');
 let _overrideSecretsDir: string | null = null;
 const PREFIX = 'STELLARA_KEY_';
 
 function secretsDir(): string {
-  return _overrideSecretsDir ?? DEFAULT_SECRETS_DIR;
+  return _overrideSecretsDir ?? getAppDataDir();
 }
 
 function secretsPath(): string {
@@ -90,6 +89,7 @@ export async function deleteKey(modelId: string): Promise<void> {
   await writeEnv(map);
 }
 
+/** ⚠️ 返回 **裸 API key**（modelId → 真实密钥）—— 仅供主进程内部使用。绝不要通过 IPC 传给 renderer。调用方请只用 `!!keys[id]` boolean check。 */
 export async function listKeys(): Promise<Record<string, string>> {
   const map = await readEnv();
   const result: Record<string, string> = {};

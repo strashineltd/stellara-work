@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import type { FsNode } from '../../shared/ipc';
 import { FileTreeNode, formatSize } from './FileTreeNode';
+import { Icon } from './Icon';
 
 interface FileTreeModalProps {
   workDir: string;
@@ -29,6 +30,14 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
     return () => { cancelled = true; };
   }, [workDir]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const loadPreview = useCallback(async (path: string) => {
     setSelected(path);
     setPreview(null);
@@ -55,15 +64,23 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal file-tree-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal file-tree-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="file-tree-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="file-tree-header">
-          <h3>文件浏览 · {workDir}</h3>
-          <button className="btn-icon" onClick={onClose} type="button" title="关闭">×</button>
+          <h3 id="file-tree-title">文件浏览 · {workDir}</h3>
+          <button className="btn-icon" onClick={onClose} type="button" title="关闭" aria-label="关闭文件浏览" autoFocus>
+            <Icon name="x" />
+          </button>
         </div>
         <div className="file-tree-body">
           <div className="file-tree-pane">
-            {treeError && <p className="empty-hint">⚠ {treeError}</p>}
-            {!treeError && !tree && <p className="empty-hint">加载中...</p>}
+            {treeError && <p className="empty-hint error">{treeError}</p>}
+            {!treeError && !tree && <p className="empty-hint" role="status">正在加载文件…</p>}
             {tree && (
               <ul className="ftree">
                 <FileTreeNode
@@ -80,8 +97,8 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
           </div>
           <div className="file-preview-pane">
             {!selected && <p className="empty-hint">点左边的文件预览</p>}
-            {selected && previewLoading && <p className="empty-hint">加载中...</p>}
-            {selected && previewError && <p className="empty-hint error">⚠ {previewError}</p>}
+            {selected && previewLoading && <p className="empty-hint" role="status">正在加载预览…</p>}
+            {selected && previewError && <p className="empty-hint error">{previewError}</p>}
             {selected && preview && (
               <>
                 <div className="file-preview-header">

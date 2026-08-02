@@ -42,7 +42,6 @@ describe('config-v2', () => {
   });
 
   it('addModel appends and returns new config', async () => {
-    console.log('DEBUG prev: tmpDir=', tmpDir);
     const cfg1 = await addModel({ id: 'a', label: 'A', baseUrl: 'x', model: 'a', createdAt: 't' });
     expect(cfg1.models).toHaveLength(1);
     const cfg2 = await addModel({ id: 'b', label: 'B', baseUrl: 'x', model: 'b', createdAt: 't' });
@@ -51,7 +50,6 @@ describe('config-v2', () => {
 
   it('addModel throws on duplicate id', async () => {
     const cfg0 = await loadConfig();
-    console.log('DEBUG: cfg0=', JSON.stringify(cfg0));
     await addModel({ id: 'a', label: 'A', baseUrl: 'x', model: 'a', createdAt: 't' });
     let threw = false;
     try {

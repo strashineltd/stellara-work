@@ -76,10 +76,10 @@ export interface ToolCall {
 
 export interface ChatRequest {
   messages: ChatMessage[];
+  /** 所属会话。主进程依此锁定模型和工作目录。 */
+  sessionId: string;
   /** plan 模式只暴露只读工具 */
   planMode?: boolean;
-  /** 取消 token（AbortSignal） */
-  abortSignal?: AbortSignal;
   /** 危险工具等待用户批准的毫秒数，默认 60000（超时默认拒绝） */
   approvalTimeoutMs?: number;
 }
@@ -105,6 +105,7 @@ export interface ChatStreamEvent {
     | 'done'
     | 'plan'
     | 'plan_ready'
+    | 'plan_progress'
     | 'approval_required'
     | 'plan_approval_required'
     | 'summary'
@@ -117,6 +118,8 @@ export interface ChatStreamEvent {
   /** 错误分类 + 引导（替代裸报错） */
   errorMeta?: ErrorMeta;
   plan?: string[];
+  /** Plan 步骤进度（plan_progress 事件） */
+  planSteps?: { description: string; status: string }[];
   /** 验证/反思阶段标记 */
   phase?: string;
   /** 验证目标（文件路径 / 提示文本） */
@@ -189,10 +192,19 @@ export type ToolName =
   | 'search_content'
   | 'list_files'
   | 'web_fetch'
-  | 'task_complete';
+  | 'task_complete'
+  | 'git_status'
+  | 'git_diff'
+  | 'git_log'
+  | 'memory_search'
+  | 'memory_save';
 
 export interface ReadFileArgs {
   path: string;
+  /** 起始行（1-indexed） */
+  offset?: number;
+  /** 最大读取行数 */
+  limit?: number;
 }
 
 export interface WriteFileArgs {
@@ -208,6 +220,8 @@ export interface EditFileArgs {
   oldText: string;
   /** 新文本 */
   newText: string;
+  /** 是否替换所有匹配项（默认 false，要求恰好 1 次匹配） */
+  replaceAll?: boolean;
   needsApproval?: boolean;
 }
 
@@ -228,6 +242,8 @@ export interface SearchContentArgs {
   pattern: string;
   query: string;
   caseSensitive?: boolean;
+  /** 是否使用正则表达式匹配 query（默认 false） */
+  regex?: boolean;
   cwd?: string;
 }
 
@@ -299,11 +315,30 @@ export interface AppInfo {
 // W3: 会话 / 多 provider / 设置
 // ============================================
 
+export interface Project {
+  id: string;
+  name: string;
+  workDir?: string;
+  entryFile?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  workDir?: string;
+  entryFile?: string;
+  updatedAt: number;
+  sessionCount: number;
+}
+
 export interface Session {
   id: string;
   title: string;
   modelId: string;
   workDir?: string;
+  projectId?: string;
   createdAt: number;
   updatedAt: number;
   messageCount: number;
@@ -313,6 +348,8 @@ export interface SessionSummary {
   id: string;
   title: string;
   modelId: string;
+  projectId?: string;
+  workDir?: string;
   messageCount: number;
   updatedAt: number;
 }
@@ -328,6 +365,32 @@ export interface MessageRow {
   meta?: string;
   planMode?: number;
   createdAt: number;
+}
+
+// ============================================
+// Memory OS
+// ============================================
+
+export interface Memory {
+  id: string;
+  scope: 'personal' | 'project' | 'workspace';
+  scopeId?: string;
+  kind: 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting';
+  content: string;
+  source?: string;
+  importance: number;
+  confidence: number;
+  accessCount: number;
+  tags?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MemoryStats {
+  total: number;
+  byScope: Record<string, number>;
+  byKind: Record<string, number>;
+  recentCount: number;
 }
 
 export type ThemeName = 'light' | 'dark' | 'system';
@@ -389,6 +452,7 @@ export interface CreateSessionArgs {
   modelId: string;
   workDir?: string;
   title?: string;
+  projectId?: string;
 }
 
 // ============================================
@@ -401,6 +465,11 @@ export interface FsNode {
   type: 'file' | 'dir';
   size?: number;
   children?: FsNode[];
+}
+
+export interface ProjectFileSelection {
+  path: string;
+  workDir: string;
 }
 
 // ============================================
@@ -439,6 +508,19 @@ export interface ElectronAPI {
   dialog: {
     /** 弹原生目录选择器，返回选中的路径（或 null 取消） */
     openDirectory: () => Promise<string | null>;
+    /** 在已授权工作目录内选择单个文件（或 null 取消） */
+    openFile: (workDir: string) => Promise<string | null>;
+    /** 用户显式选择任意项目入口文件，并返回其规范化路径和父目录 */
+    selectProjectFile: () => Promise<ProjectFileSelection | null>;
+    /** 通过系统保存窗口安全新建项目入口文件（禁止覆盖） */
+    createProjectFile: () => Promise<ProjectFileSelection | null>;
+  };
+  projects: {
+    list: () => Promise<ProjectSummary[]>;
+    create: (args: { name: string; workDir: string; entryFile: string }) => Promise<Project>;
+    delete: (id: string) => Promise<void>;
+    rename: (id: string, name: string) => Promise<void>;
+    updateFile: (id: string, selection: ProjectFileSelection) => Promise<Project>;
   };
   sessions: {
     list: () => Promise<SessionSummary[]>;
@@ -448,11 +530,13 @@ export interface ElectronAPI {
     rename: (id: string, title: string) => Promise<void>;
     saveMessages: (id: string, messages: MessageRow[]) => Promise<void>;
     appendMessage: (id: string, message: MessageRow) => Promise<void>;
+    move: (sessionId: string, projectId: string | null) => Promise<void>;
   };
   fs: {
     listTree: (cwd: string, maxDepth?: number) => Promise<FsNode>;
     readFile: (workDir: string, path: string, maxBytes?: number) => Promise<{ content: string; size: number; truncated: boolean }>;
     openPath: (workDir: string, path: string) => Promise<boolean>;
+    createFile: (workDir: string, relativePath: string) => Promise<{ path: string }>;
   };
   settings: {
     get: () => Promise<AppSettings>;
@@ -464,6 +548,14 @@ export interface ElectronAPI {
   };
   skills: {
     list: (workDir: string) => Promise<SkillDef[]>;
+  };
+  memory: {
+    search: (query: string, options?: { scope?: string; kind?: string; limit?: number }) => Promise<Memory[]>;
+    list: (options?: { scope?: string; kind?: string; limit?: number; offset?: number }) => Promise<Memory[]>;
+    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) => Promise<Memory>;
+    update: (id: string, patch: Partial<Pick<Memory, 'content' | 'importance' | 'tags'>>) => Promise<void>;
+    delete: (id: string) => Promise<void>;
+    stats: () => Promise<MemoryStats>;
   };
 }
 

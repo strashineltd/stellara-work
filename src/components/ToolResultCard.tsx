@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from './Icon';
 
 interface ToolResultCardProps {
   name: string;
@@ -23,7 +24,7 @@ export function ToolResultCard({ name, ok, output, error }: ToolResultCardProps)
         onClick={() => longOutput && setOpen((o) => !o)}
         title={longOutput ? (open ? '折叠' : '展开输出') : undefined}
       >
-        <span className="tool-card-icon">{ok ? '✓' : '✗'}</span>
+        <span className="tool-card-icon"><Icon name={ok ? 'check' : 'x'} size={14} /></span>
         <span className="tool-card-name">{name}</span>
         {!open && longOutput && (
           <span className="tool-card-summary">
@@ -31,7 +32,11 @@ export function ToolResultCard({ name, ok, output, error }: ToolResultCardProps)
             {text.length > 80 ? '…' : ''}
           </span>
         )}
-        {longOutput && <span className="tool-card-chevron">{open ? '▾' : '▸'}</span>}
+        {longOutput && (
+          <span className="tool-card-chevron">
+            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
+          </span>
+        )}
       </button>
       {open && <pre className="tool-card-body">{text}</pre>}
     </div>

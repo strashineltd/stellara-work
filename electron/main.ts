@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import log from 'electron-log/main';
 import { loadEnv, getEnvPath } from './config/env';
 import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
+import { ChatStreamRegistry } from './chat/stream-registry';
+import { resolveSessionModel } from './chat/session-context';
 import { findPreset } from './llm/presets';
 import type {
   AppInfo,
@@ -18,6 +19,7 @@ import type {
   ToolResult,
   MessageRow,
   AppSettings,
+  ProjectFileSelection,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -28,6 +30,16 @@ log.info('Stellara Work 启动中...');
 
 let mainWindow: BrowserWindow | null = null;
 
+// P0-1 + P0-2: 审批流和取消任务的状态管理
+const chatStreams = new ChatStreamRegistry();
+const grantedWorkDirs = new Set<string>();
+
+function grantWorkDir(workDir: string): string {
+  const resolved = path.resolve(workDir);
+  grantedWorkDirs.add(resolved.toLowerCase());
+  return resolved;
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -37,6 +49,12 @@ function createWindow(): void {
     show: true,
     autoHideMenuBar: true,
     backgroundColor: '#FFFFFF',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: 'rgba(0, 0, 0, 0)',
+      symbolColor: '#65758B',
+      height: 72,
+    },
     icon: path.join(__dirname, '..', '..', 'assets', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -99,7 +117,7 @@ function createWindow(): void {
 function registerIpcHandlers(): void {
   // App info
   ipcMain.handle('app:getInfo', async (): Promise<AppInfo> => {
-    const appDataPath = path.join(os.homedir(), '.stellara');
+    const appDataPath = app.getPath('userData');
     await fs.mkdir(appDataPath, { recursive: true });
     return {
       version: app.getVersion(),
@@ -180,6 +198,7 @@ function registerIpcHandlers(): void {
       createdAt: m.createdAt,
       hasKey: !!keys[m.id],
       isActive: m.id === cfg.activeModelId,
+      contextWindow: m.contextWindow,
     }));
   });
 
@@ -209,23 +228,46 @@ function registerIpcHandlers(): void {
     await setKey(modelId, newKey);
   });
 
+  ipcMain.handle('models:updateContextWindow', async (_e, modelId: string, contextWindow: number) => {
+    const { loadConfig, saveConfig } = await import('./config/config-v2');
+    const cfg = await loadConfig();
+    const idx = cfg.models.findIndex((m) => m.id === modelId);
+    if (idx < 0) throw new Error(`Model 不存在: ${modelId}`);
+    cfg.models[idx] = { ...cfg.models[idx]!, contextWindow };
+    await saveConfig(cfg);
+  });
+
   // Chat
   ipcMain.handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
-    const configured = await loadModelsConfig();
-    if (!configured) {
-      throw new Error('未配置模型，请先在设置中配置 API key');
-    }
+    const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     void runAgentLoopForIpc(request, configured, streamId);
     return { streamId };
   });
 
-  // Tools (开发期直调，绕过 LLM)
-  ipcMain.handle('tools:invoke', async (_e, name: ToolName, args: ToolArgs): Promise<ToolResult> => {
-    const { invokeTool } = await import('./agent/tools');
-    const cwd = process.cwd();
-    return invokeTool(name, args, cwd);
+  // P0-2: 取消任务
+  ipcMain.on('chat:abort', (_e, streamId: string) => {
+    if (chatStreams.abort(streamId)) {
+      log.info(`[chat:abort] stream ${streamId} 已取消`);
+    }
   });
+
+  // P0-1: 审批响应
+  ipcMain.on('approval:respond', (_e, approvalId: string, approved: boolean) => {
+    if (chatStreams.respond(approvalId, approved)) {
+      log.info(`[approval:respond] ${approvalId} → ${approved ? '同意' : '拒绝'}`);
+    }
+  });
+
+  // Tools (仅开发环境，绕过 LLM 直调)
+  if (isDev) {
+    ipcMain.handle('tools:invoke', async (_e, name: ToolName, args: ToolArgs): Promise<ToolResult> => {
+      const { invokeTool } = await import('./agent/tools');
+      const configured = await loadModelsConfig();
+      const cwd = configured?.workDir ?? process.cwd();
+      return invokeTool(name, args, cwd);
+    });
+  }
 
   // Dialog: 选工作目录
   ipcMain.handle('dialog:openDirectory', async (): Promise<string | null> => {
@@ -238,28 +280,158 @@ function registerIpcHandlers(): void {
     return result.filePaths[0];
   });
 
-  // FS: 列目录树 / 读文件（W4）
+  ipcMain.handle('dialog:openFile', async (_e, workDir: string): Promise<string | null> => {
+    if (!mainWindow) return null;
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    await assertWorkDirAllowed(workDir);
+    const root = path.resolve(workDir);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择项目文件',
+      defaultPath: root,
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const { verifyExistingPath } = await import('./fs/path-security');
+    const check = await verifyExistingPath(path.resolve(result.filePaths[0]!), root);
+    if (!check.ok) throw new Error(check.error);
+    const stat = await fs.stat(check.realPath);
+    if (!stat.isFile()) throw new Error('选择的路径不是文件');
+    return check.realPath;
+  });
+
+  ipcMain.handle('dialog:selectProjectFile', async (): Promise<ProjectFileSelection | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择项目入口文件',
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const selected = await fs.realpath(path.resolve(result.filePaths[0]!));
+    const stat = await fs.stat(selected);
+    if (!stat.isFile()) throw new Error('选择的路径不是文件');
+    const workDir = grantWorkDir(path.dirname(selected));
+    return { path: selected, workDir };
+  });
+
+  ipcMain.handle('dialog:createProjectFile', async (): Promise<ProjectFileSelection | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '新建项目入口文件',
+      defaultPath: 'README.md',
+      buttonLabel: '新建文件',
+    });
+    if (result.canceled || !result.filePath) return null;
+
+    const requested = path.resolve(result.filePath);
+    const realParent = await fs.realpath(path.dirname(requested));
+    const filePath = path.join(realParent, path.basename(requested));
+    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+    try {
+      handle = await fs.open(filePath, 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error('文件已存在，请更换名称');
+      }
+      throw error;
+    } finally {
+      await handle?.close();
+    }
+    const workDir = grantWorkDir(realParent);
+    return { path: filePath, workDir };
+  });
+
+  // FS: 列目录树 / 读文件（W4）—— workDir 必须来自已配置的工作区
   ipcMain.handle('fs:listTree', async (_e, cwd: string, maxDepth?: number) => {
+    await assertWorkDirAllowed(cwd);
     const { listTree } = await import('./fs/tree');
     return listTree(cwd, maxDepth);
   });
 
   ipcMain.handle('fs:readFile', async (_e, workDir: string, filePath: string, maxBytes?: number) => {
+    await assertWorkDirAllowed(workDir);
     const { readFileContent } = await import('./fs/tree');
     return readFileContent(workDir, filePath, maxBytes);
   });
 
   // FS: 用系统默认应用打开（文件用默认 app，目录用资源管理器）
   ipcMain.handle('fs:openPath', async (_e, workDir: string, filePath: string) => {
+    await assertWorkDirAllowed(workDir);
+    const { isWithinDir } = await import('./fs/path-security');
     const root = path.resolve(workDir);
     const resolved = path.resolve(filePath);
-    const rel = path.relative(root, resolved);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    if (!isWithinDir(resolved, root)) {
       throw new Error(`路径超出允许范围：${resolved}`);
     }
-    const result = await shell.openPath(resolved);
+    // 真实路径检查（防 symlink 绕过）
+    const { verifyExistingPath } = await import('./fs/path-security');
+    const check = await verifyExistingPath(resolved, root);
+    if (!check.ok) throw new Error(check.error);
+    const result = await shell.openPath(check.realPath);
     if (result) throw new Error(`打开失败：${result}`);
     return true;
+  });
+
+  ipcMain.handle('fs:createFile', async (_e, workDir: string, relativePath: string) => {
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    if (typeof relativePath !== 'string') throw new Error('文件名无效');
+    await assertWorkDirAllowed(workDir);
+    const { createEmptyFile } = await import('./fs/tree');
+    return createEmptyFile(workDir, relativePath);
+  });
+
+  // Projects
+  ipcMain.handle('projects:list', async () => {
+    const { listProjects } = await import('./store/db');
+    const projects = listProjects();
+    const { listSessions } = await import('./store/db');
+    const sessions = listSessions();
+    return projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      workDir: p.workDir,
+      entryFile: p.entryFile,
+      updatedAt: p.updatedAt,
+      sessionCount: sessions.filter((s) => s.projectId === p.id).length,
+    }));
+  });
+
+  ipcMain.handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile: string }) => {
+    if (typeof args?.name !== 'string' || !args.name.trim()) throw new Error('项目名称不能为空');
+    if (typeof args?.workDir !== 'string' || !args.workDir.trim()) throw new Error('请选择项目文件');
+    if (typeof args?.entryFile !== 'string' || !args.entryFile.trim()) throw new Error('请选择项目文件');
+    const selection = await verifyProjectSelection(args.workDir, args.entryFile);
+    const { v4: uuid } = await import('uuid');
+    const { createProject } = await import('./store/db');
+    return createProject({
+      id: uuid(),
+      name: args.name.trim().slice(0, 50),
+      workDir: selection.workDir,
+      entryFile: selection.path,
+    });
+  });
+
+  ipcMain.handle('projects:updateFile', async (_e, id: string, selection: ProjectFileSelection) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
+    if (typeof selection?.workDir !== 'string' || typeof selection?.path !== 'string') {
+      throw new Error('项目文件无效');
+    }
+    const verified = await verifyProjectSelection(selection.workDir, selection.path);
+    const { updateProjectFile } = await import('./store/db');
+    return updateProjectFile(id.trim(), verified.workDir, verified.path);
+  });
+
+  ipcMain.handle('projects:delete', async (_e, id: string) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
+    const { deleteProject } = await import('./store/db');
+    deleteProject(id.trim());
+  });
+
+  ipcMain.handle('projects:rename', async (_e, id: string, name: string) => {
+    if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
+    if (typeof name !== 'string' || !name.trim()) throw new Error('项目名称不能为空');
+    const { renameProject } = await import('./store/db');
+    renameProject(id.trim(), name.trim().slice(0, 50));
   });
 
   // Sessions
@@ -269,6 +441,8 @@ function registerIpcHandlers(): void {
       id: s.id,
       title: s.title,
       modelId: s.modelId,
+      workDir: s.workDir,
+      projectId: s.projectId,
       messageCount: s.messageCount,
       updatedAt: s.updatedAt,
     }));
@@ -279,23 +453,32 @@ function registerIpcHandlers(): void {
     const session = getSession(id);
     if (!session) throw new Error(`Session 不存在: ${id}`);
     const messages = getMessages(id);
-    console.log('[DBG-MAIN] get', { id, msgCount: messages.length, dbCount: session.messageCount });
     return { session, messages };
   });
 
-  ipcMain.handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string }) => {
+  ipcMain.handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string; projectId?: string }) => {
     const { v4: uuid } = await import('uuid');
-    const { createSession } = await import('./store/db');
+    const { createSession, getProject } = await import('./store/db');
     const { getKey } = await import('./config/secrets');
     if (!getKey(args.modelId)) {
       throw new Error(`Model ${args.modelId} 未配置 API key`);
     }
+    let workDir = args.workDir;
+    if (args.projectId) {
+      const project = getProject(args.projectId);
+      if (!project) throw new Error('项目不存在或已被删除');
+      if (!project.workDir) throw new Error('该项目尚未设置入口文件');
+      workDir = project.workDir;
+    }
+    if (!workDir) throw new Error('请先创建项目并设置入口文件');
+    await assertWorkDirAllowed(workDir);
     const id = uuid();
     return createSession({
       id,
       title: args.title ?? 'New session',
       modelId: args.modelId,
-      workDir: args.workDir,
+      workDir,
+      projectId: args.projectId,
     });
   });
 
@@ -311,13 +494,17 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
     const { saveMessages } = await import('./store/db');
-    console.log('[DBG-MAIN] save', { id, msgCount: messages.length });
     saveMessages(id, messages);
   });
 
   ipcMain.handle('sessions:appendMessage', async (_e, id: string, message: MessageRow) => {
     const { appendMessage } = await import('./store/db');
     appendMessage({ ...message, sessionId: id });
+  });
+
+  ipcMain.handle('sessions:move', async (_e, sessionId: string, projectId: string | null) => {
+    const { moveSession } = await import('./store/db');
+    moveSession(sessionId, projectId);
   });
 
   // Settings
@@ -335,12 +522,41 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('settings:clearAllData', async () => {
-    const dir = path.join(os.homedir(), '.stellara');
-    await fs.rm(dir, { recursive: true, force: true });
+    try {
+      // 先 checkpoint 和关闭数据库，避免文件锁
+      const { closeDb } = await import('./store/db');
+      closeDb();
+    } catch {
+      // ignore
+    }
+    const { getAppDataDir } = await import('./config/data-dir');
+    const dir = getAppDataDir();
+    try {
+      await Promise.all([
+        'config.json', 'config.json.bak', '.env',
+        'stellara.db', 'stellara.db-wal', 'stellara.db-shm',
+      ].map((name) => fs.rm(path.join(dir, name), { force: true })));
+    } catch (err) {
+      // Windows 文件锁失败时返回清晰错误
+      if ((err as NodeJS.ErrnoException).code === 'EBUSY' || (err as NodeJS.ErrnoException).code === 'EPERM') {
+        throw new Error('无法删除数据目录：文件被占用。请关闭应用后重试。');
+      }
+      throw err;
+    }
+    // 重新初始化空数据库 + 记忆存储
+    try {
+      const { initDb, getDb } = await import('./store/db');
+      initDb();
+      const { setMemoryDb } = await import('./memory/memory-store');
+      setMemoryDb(getDb);
+    } catch {
+      // ignore - will be re-initialized on next access
+    }
   });
 
   ipcMain.handle('settings:openDataDir', async () => {
-    const dir = path.join(os.homedir(), '.stellara');
+    const { getAppDataDir } = await import('./config/data-dir');
+    const dir = getAppDataDir();
     await fs.mkdir(dir, { recursive: true });
     await shell.openPath(dir);
   });
@@ -351,6 +567,110 @@ function registerIpcHandlers(): void {
       : path.join(app.getPath('logs'), 'renderer.log');
     await shell.openPath(logPath);
   });
+
+  ipcMain.handle('settings:collectDiagnostics', async () => {
+    const { loadConfig } = await import('./config/config-v2');
+    const { listSessions } = await import('./store/db');
+    const { listKeys } = await import('./config/secrets');
+    const cfg = await loadConfig();
+    const sessions = listSessions();
+    const keys = await listKeys();
+    // 脱敏：不包含 API key
+    return {
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      electron: process.versions.electron ?? '',
+      chrome: process.versions.chrome ?? '',
+      node: process.version,
+      appDataPath: app.getPath('userData'),
+      envPath: getEnvPath(),
+      logPath: app.getPath('logs'),
+      dbSizeBytes: 0,
+      sessionCount: sessions.length,
+      messageCount: 0,
+      modelCount: cfg.models.length,
+      activeModelId: cfg.activeModelId,
+      modelsWithKey: cfg.models.filter((m) => !!keys[m.id]).map((m) => m.id),
+      logTail: '',
+      collectedAt: new Date().toISOString(),
+    };
+  });
+
+  ipcMain.handle('skills:list', async (_e, workDir: string) => {
+    // 安全：只允许读取已授权项目工作目录内的 skills/
+    await assertWorkDirAllowed(workDir);
+    const { loadSkills } = await import('./agent/skills');
+    return loadSkills(workDir);
+  });
+
+  // Memory OS
+  ipcMain.handle('memory:search', async (_e, query: string, options?: { scope?: string; kind?: string; limit?: number }) => {
+    const { searchMemories } = await import('./memory/memory-store');
+    return searchMemories({ query, scope: options?.scope as 'personal' | 'project' | 'workspace' | undefined, kind: options?.kind as 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting' | undefined, limit: options?.limit });
+  });
+
+  ipcMain.handle('memory:list', async (_e, options?: { scope?: string; kind?: string; limit?: number; offset?: number }) => {
+    const { listMemories } = await import('./memory/memory-store');
+    return listMemories({ scope: options?.scope as 'personal' | 'project' | 'workspace' | undefined, kind: options?.kind as 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting' | undefined, limit: options?.limit, offset: options?.offset });
+  });
+
+  ipcMain.handle('memory:save', async (_e, memory: { scope: string; scopeId?: string; kind: string; content: string; source?: string; importance?: number; confidence?: number; tags?: string[] }) => {
+    const { saveMemory } = await import('./memory/memory-store');
+    return saveMemory(memory as Parameters<typeof saveMemory>[0]);
+  });
+
+  ipcMain.handle('memory:update', async (_e, id: string, patch: { content?: string; importance?: number; tags?: string[] }) => {
+    const { updateMemory } = await import('./memory/memory-store');
+    updateMemory(id, patch);
+  });
+
+  ipcMain.handle('memory:delete', async (_e, id: string) => {
+    const { deleteMemory } = await import('./memory/memory-store');
+    deleteMemory(id);
+  });
+
+  ipcMain.handle('memory:stats', async () => {
+    const { getMemoryStats } = await import('./memory/memory-store');
+    return getMemoryStats();
+  });
+}
+
+async function verifyProjectSelection(workDir: string, filePath: string): Promise<ProjectFileSelection> {
+  await assertWorkDirAllowed(workDir);
+  const root = path.resolve(workDir);
+  const { verifyExistingPath } = await import('./fs/path-security');
+  const check = await verifyExistingPath(path.resolve(filePath), root);
+  if (!check.ok) throw new Error(check.error);
+  const stat = await fs.stat(check.realPath);
+  if (!stat.isFile()) throw new Error('项目入口必须是文件');
+  return { path: check.realPath, workDir: root };
+}
+
+/**
+ * 验证 renderer 传入的 workDir 是否来自现有项目、旧会话/模型配置，
+ * 或本次原生文件选择明确授予的目录。防止 renderer 通过 IPC 读取任意目录。
+ */
+async function assertWorkDirAllowed(workDir: string): Promise<void> {
+  const [{ loadConfig }, { listProjects, listSessions }] = await Promise.all([
+    import('./config/config-v2'),
+    import('./store/db'),
+  ]);
+  const cfg = await loadConfig();
+  const allowed = cfg.models
+    .map((m) => m.workDir)
+    .filter((d): d is string => !!d);
+  allowed.push(...listProjects().map((project) => project.workDir).filter((d): d is string => !!d));
+  allowed.push(...listSessions().map((session) => session.workDir).filter((d): d is string => !!d));
+  // 兼容旧版 app 设置中的默认工作目录
+  if (cfg.app.workDirDefault) allowed.push(cfg.app.workDirDefault);
+
+  const resolved = path.resolve(workDir);
+  if (grantedWorkDirs.has(resolved.toLowerCase())) return;
+  for (const dir of allowed) {
+    if (path.resolve(dir) === resolved) return;
+  }
+  throw new Error(`工作目录不在已配置的工作区内：${workDir}`);
 }
 
 async function runAgentLoopForIpc(
@@ -371,13 +691,44 @@ async function runAgentLoopForIpc(
   }
   const history = request.messages.slice(0, -1);
 
+  // P0-2: 创建 AbortController
+  const ctrl = chatStreams.start(streamId);
+  let terminalEventSent = false;
+
   try {
+    // 使用已验证的工作目录（chat:start 已检查 model.workDir 必须存在）
+    const cwd = model.workDir!;
+
+    // 加载 skills（注入 system prompt）
+    let skills: import('../shared/ipc').SkillDef[] = [];
+    try {
+      const { loadSkills } = await import('./agent/skills');
+      skills = await loadSkills(cwd);
+    } catch {
+      // skills 加载失败不影响 agent 运行
+    }
+
     for await (const event of runAgentLoop(last.content, {
       model,
-      cwd: model.workDir ?? process.cwd(),
+      cwd,
       history,
       planMode: request.planMode ?? false,
-      onApproval: async () => true,
+      skills,
+      signal: ctrl.signal,
+      onApproval: async (toolCall) => {
+        // P0-1: 向前端发送审批请求，等待用户响应
+        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const toolName = toolCall.function.name;
+
+        send({
+          type: 'approval_required',
+          approval: { id: approvalId, toolName, args: toolCall.function.arguments, toolCallId: toolCall.id },
+        });
+
+        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
+        const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
+        return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
+      },
       onPlanApproval: async (plan) => {
         const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         send({
@@ -389,11 +740,88 @@ async function runAgentLoopForIpc(
         return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
       },
     })) {
+      // P0-2: 检查是否已 abort
+      if (ctrl.signal.aborted) break;
       send(event);
+      if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
     }
   } catch (err) {
-    send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    if (!ctrl.signal.aborted) {
+      send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    }
+  } finally {
+    // 清理
+    chatStreams.cleanup(streamId);
+    if (!terminalEventSent) send({ type: 'done' });
+
+    // 异步提取记忆（不阻塞会话结束）
+    void extractMemoriesFromSession(request, model).catch(() => {});
   }
+}
+
+/**
+ * 会话结束后异步提取记忆。失败静默忽略。
+ */
+async function extractMemoriesFromSession(
+  request: ChatRequest,
+  model: ModelConfig,
+): Promise<void> {
+  try {
+    const { getMessages, getSession } = await import('./store/db');
+    const { extractMemories } = await import('./memory/memory-extractor');
+    const { OpenAICompatClient } = await import('./llm/openai-compat');
+
+    const messages = getMessages(request.sessionId);
+    if (messages.length < 2) return;
+
+    const session = getSession(request.sessionId);
+    const scope = session?.projectId ? 'project' as const : 'personal' as const;
+    const scopeId = session?.projectId ?? undefined;
+
+    const client = new OpenAICompatClient(model);
+    const llmCall = async (systemPrompt: string, userMessage: string): Promise<string> => {
+      return client.summarize(
+        [{ role: 'user', content: userMessage }],
+        systemPrompt,
+        30_000,
+      );
+    };
+
+    const chatMessages: import('../shared/ipc').ChatMessage[] = messages.map((m) => ({
+      role: m.role as import('../shared/ipc').ChatMessage['role'],
+      content: m.content,
+    }));
+
+    await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall);
+  } catch {
+    // 记忆提取失败不影响用户体验
+  }
+}
+
+/**
+ * Resolve the exact model and work directory bound to a session. A global
+ * active-model change must not silently send an existing session to another
+ * provider or run it in a different workspace.
+ */
+async function resolveSessionExecutionContext(sessionId: string): Promise<ModelConfig> {
+  const [{ getSession, getProject }, { loadConfig }, { getKey }] = await Promise.all([
+    import('./store/db'),
+    import('./config/config-v2'),
+    import('./config/secrets'),
+  ]);
+  return resolveSessionModel(sessionId, {
+    getSession,
+    getProject,
+    loadConfig,
+    getKey,
+    isDirectory: async (candidate) => {
+      try {
+        return (await fs.stat(candidate)).isDirectory();
+      } catch {
+        return false;
+      }
+    },
+  });
 }
 
 // ============================================
@@ -401,6 +829,18 @@ async function runAgentLoopForIpc(
 // ============================================
 
 app.whenReady().then(async () => {
+  const { setAppDataDir, migrateLegacyAppData } = await import('./config/data-dir');
+  const appDataDir = app.getPath('userData');
+  setAppDataDir(appDataDir);
+  try {
+    const copied = await migrateLegacyAppData(appDataDir);
+    if (copied.length > 0) {
+      log.info(`已迁移旧版应用数据：${copied.join(', ')}`);
+    }
+  } catch (err) {
+    log.error('旧版应用数据迁移失败，将使用标准应用数据目录', err);
+  }
+
   await loadEnv();
 
   // W3: 旧 config 迁移 + 初始化 db
@@ -414,8 +854,11 @@ app.whenReady().then(async () => {
     log.error('config 迁移失败', err);
   }
   try {
-    const { initDb } = await import('./store/db');
+    const { initDb, getDb } = await import('./store/db');
     initDb();
+    // Memory OS: 初始化记忆存储
+    const { setMemoryDb } = await import('./memory/memory-store');
+    setMemoryDb(getDb);
   } catch (err) {
     log.error('db 初始化失败', err);
   }

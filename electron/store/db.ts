@@ -1,10 +1,9 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import os from 'node:os';
 import { v4 as uuid } from 'uuid';
+import { getAppDataDir } from '../config/data-dir';
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), '.stellara', 'stellara.db');
-let dbPath: string | null = DEFAULT_DB_PATH;
+let dbPathOverride: string | null = null;
 let _db: Database.Database | null = null;
 
 /** 测试 hook：指定 db 路径；传 null 恢复默认 */
@@ -13,12 +12,12 @@ export function _setDbPath(p: string | null): void {
     _db.close();
     _db = null;
   }
-  dbPath = p;
+  dbPathOverride = p;
 }
 
-function getDb(): Database.Database {
+export function getDb(): Database.Database {
   if (_db) return _db;
-  if (!dbPath) throw new Error('dbPath 未设置');
+  const dbPath = dbPathOverride ?? path.join(getAppDataDir(), 'stellara.db');
   // 同步建目录（initDb 是同步入口）
   const dir = path.dirname(dbPath);
   // 用 sync 因为 better-sqlite3 是同步 API，且 getDb 在 sync 上下文用
@@ -30,14 +29,26 @@ function getDb(): Database.Database {
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
   _db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      work_dir TEXT,
+      entry_file TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       model_id TEXT NOT NULL,
       work_dir TEXT,
+      project_id TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      message_count INTEGER DEFAULT 0
+      message_count INTEGER DEFAULT 0,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +67,85 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, position);
+
+    -- Memory OS: 记忆实体
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,           -- 'personal' | 'project' | 'workspace'
+      scope_id TEXT,                 -- project_id 或 workspace_id（personal 时为 NULL）
+      kind TEXT NOT NULL,            -- 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting'
+      content TEXT NOT NULL,
+      source TEXT,                   -- 'session:{id}' | 'manual' | 'extracted'
+      importance REAL DEFAULT 0.5,
+      confidence REAL DEFAULT 0.8,
+      access_count INTEGER DEFAULT 0,
+      last_accessed_at INTEGER,
+      embedding BLOB,
+      tags TEXT,                     -- JSON 数组
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope, scope_id);
+    CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories(kind);
+    CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
+
+    -- Memory OS: 知识实体
+    CREATE TABLE IF NOT EXISTS knowledge_entities (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL,     -- 'person' | 'project' | 'document' | 'task' | 'code' | 'meeting' | 'decision'
+      name TEXT NOT NULL,
+      description TEXT,
+      metadata TEXT,                 -- JSON
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_entities_type ON knowledge_entities(entity_type);
+
+    -- Memory OS: 实体关系
+    CREATE TABLE IF NOT EXISTS knowledge_relations (
+      id TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL,   -- 'related' | 'created' | 'referenced' | 'depends' | 'belongs_to'
+      weight REAL DEFAULT 1.0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (source_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_id) REFERENCES knowledge_entities(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_relations_source ON knowledge_relations(source_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_target ON knowledge_relations(target_id);
   `);
+
+  // 迁移必须先于 project_id 索引创建。旧版 sessions 表没有该列；
+  // 如果先建索引，整个 schema 初始化会提前报错，迁移永远无法执行。
+  const sessionColumns = _db
+    .prepare('PRAGMA table_info(sessions)')
+    .all() as Array<{ name: string }>;
+  if (!sessionColumns.some((column) => column.name === 'project_id')) {
+    _db.exec('ALTER TABLE sessions ADD COLUMN project_id TEXT');
+  }
+  _db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)');
+
+  const projectColumns = _db
+    .prepare('PRAGMA table_info(projects)')
+    .all() as Array<{ name: string }>;
+  if (!projectColumns.some((column) => column.name === 'entry_file')) {
+    _db.exec('ALTER TABLE projects ADD COLUMN entry_file TEXT');
+  }
+
+  // Memory OS: FTS5 全文搜索表（使用 memory_id UNINDEXED 关联，而非 rowid）
+  try {
+    _db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, content, tags, tokenize='unicode61')");
+  } catch {
+    // 表已存在但 schema 不同 → 尝试重建
+    try {
+      _db.exec('DROP TABLE IF EXISTS memories_fts');
+      _db.exec("CREATE VIRTUAL TABLE memories_fts USING fts5(memory_id UNINDEXED, content, tags, tokenize='unicode61')");
+    } catch {
+      // 忽略
+    }
+  }
+
   return _db;
 }
 
@@ -69,9 +158,19 @@ export interface Session {
   title: string;
   modelId: string;
   workDir?: string;
+  projectId?: string;
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  workDir?: string;
+  entryFile?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface MessageRow {
@@ -93,9 +192,21 @@ function rowToSession(row: Record<string, unknown>): Session {
     title: row.title as string,
     modelId: row.model_id as string,
     workDir: (row.work_dir as string | null) ?? undefined,
+    projectId: (row.project_id as string | null) ?? undefined,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     messageCount: row.message_count as number,
+  };
+}
+
+function rowToProject(row: Record<string, unknown>): Project {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    workDir: (row.work_dir as string | null) ?? undefined,
+    entryFile: (row.entry_file as string | null) ?? undefined,
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
   };
 }
 
@@ -126,13 +237,13 @@ export function getSession(id: string): Session | null {
   return row ? rowToSession(row) : null;
 }
 
-export function createSession(s: { id: string; title: string; modelId: string; workDir?: string }): Session {
+export function createSession(s: { id: string; title: string; modelId: string; workDir?: string; projectId?: string }): Session {
   const now = Date.now();
   getDb()
     .prepare(
-      'INSERT INTO sessions (id, title, model_id, work_dir, created_at, updated_at, message_count) VALUES (?, ?, ?, ?, ?, ?, 0)',
+      'INSERT INTO sessions (id, title, model_id, work_dir, project_id, created_at, updated_at, message_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
     )
-    .run(s.id, s.title, s.modelId, s.workDir ?? null, now, now);
+    .run(s.id, s.title, s.modelId, s.workDir ?? null, s.projectId ?? null, now, now);
   return { ...s, createdAt: now, updatedAt: now, messageCount: 0 };
 }
 
@@ -215,11 +326,92 @@ export function bumpSession(id: string, messageCount: number): void {
     .run(messageCount, Date.now(), id);
 }
 
+// ---- Project CRUD ----
+
+export function listProjects(): Project[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM projects ORDER BY updated_at DESC')
+    .all() as Record<string, unknown>[];
+  return rows.map(rowToProject);
+}
+
+export function getProject(id: string): Project | null {
+  const row = getDb().prepare('SELECT * FROM projects WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? rowToProject(row) : null;
+}
+
+export function createProject(p: { id: string; name: string; workDir?: string; entryFile?: string }): Project {
+  const now = Date.now();
+  getDb()
+    .prepare('INSERT INTO projects (id, name, work_dir, entry_file, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(p.id, p.name, p.workDir ?? null, p.entryFile ?? null, now, now);
+  return { id: p.id, name: p.name, workDir: p.workDir, entryFile: p.entryFile, createdAt: now, updatedAt: now };
+}
+
+export function updateProjectFile(id: string, workDir: string, entryFile: string): Project {
+  const result = getDb()
+    .prepare('UPDATE projects SET work_dir = ?, entry_file = ?, updated_at = ? WHERE id = ?')
+    .run(workDir, entryFile, Date.now(), id);
+  if (result.changes !== 1) throw new Error('项目不存在或已被删除');
+  const project = getProject(id);
+  if (!project) throw new Error('项目更新后无法读取');
+  return project;
+}
+
+export function deleteProject(id: string): void {
+  const db = getDb();
+  const run = db.transaction(() => {
+    // 旧数据库通过 ALTER TABLE 添加 project_id，没有外键约束。
+    // 显式解绑可以兼容新旧 schema，避免会话变成不可见的孤立记录。
+    db.prepare('UPDATE sessions SET project_id = NULL, updated_at = ? WHERE project_id = ?')
+      .run(Date.now(), id);
+    const result = db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    if (result.changes !== 1) throw new Error('项目不存在或已被删除');
+  });
+  run();
+}
+
+export function renameProject(id: string, name: string): void {
+  const nextName = name.trim();
+  if (!nextName) throw new Error('项目名称不能为空');
+  const result = getDb()
+    .prepare('UPDATE projects SET name = ?, updated_at = ? WHERE id = ?')
+    .run(nextName, Date.now(), id);
+  if (result.changes !== 1) throw new Error('项目不存在或已被删除');
+}
+
+export function moveSession(sessionId: string, projectId: string | null): void {
+  getDb().prepare('UPDATE sessions SET project_id = ?, updated_at = ? WHERE id = ?').run(projectId, Date.now(), sessionId);
+}
+
 /** 关 db（app 退出时调，避免文件锁） */
 export function closeDb(): void {
   if (_db) {
+    // 关库前先 checkpoint WAL，把 -wal 文件 truncate 到 0，
+    // 避免长期运行后 WAL 累积（每个 session autosave 都会写）
+    try {
+      _db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch {
+      // ignore — checkpoint 失败也不影响关库
+    }
     _db.close();
     _db = null;
+  }
+}
+
+/**
+ * 主动跑一次 WAL checkpoint（TRUNCATE 模式）。
+ *
+ * 长期运行的 app 中，WAL 文件可能增长到几十 MB。SQLite 默认每 1000 页
+ * 自动 checkpoint，但用户关窗口时未必恰好触发。给外部一个入口在合适
+ * 时机（比如 app will-quit、低优先级时间片）调一下。
+ */
+export function checkpoint(): void {
+  if (!_db) return;
+  try {
+    _db.pragma('wal_checkpoint(TRUNCATE)');
+  } catch {
+    // ignore
   }
 }
 

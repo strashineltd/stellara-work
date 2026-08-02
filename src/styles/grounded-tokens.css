@@ -1,0 +1,153 @@
+/* Stellara Work · Calm Workspace tokens */
+
+:root {
+  color-scheme: light;
+
+  --color-bg-app: #f1f5fb;
+  --color-bg-sidebar: #fbfcff;
+  --color-bg-content: #ffffff;
+  --color-bg-elevated: #ffffff;
+  --color-bg-soft: #f6f8fc;
+  --color-bg-input: #ffffff;
+  --color-bg-code: #f4f7fb;
+  --color-bg-selected: #edf4ff;
+
+  --color-text: #293449;
+  --color-text-strong: #111827;
+  --color-text-soft: #64748b;
+  --color-text-faint: #667085;
+  --color-text-on-dark: #ffffff;
+  --color-text-on-dark-soft: #dbe4f0;
+
+  --color-border: #e6ebf2;
+  --color-border-strong: #dce3ed;
+  --color-border-dark: #c8d2e1;
+
+  --color-primary: #1f2937;
+  --color-accent: #2f7cf4;
+  --color-on-accent: #ffffff;
+  --color-accent-soft: #edf4ff;
+  --color-accent-hover: #2469d8;
+  --color-focus: #2f7cf4;
+  --color-accent-tint: rgba(47, 124, 244, 0.14);
+  --color-hover-overlay: rgba(47, 94, 157, 0.06);
+
+  --color-success: #32845d;
+  --color-on-success: #ffffff;
+  --color-success-bg: #edf8f2;
+  --color-warning: #9a6822;
+  --color-warning-bg: #fff7e8;
+  --color-danger: #c14f57;
+  --color-on-danger: #ffffff;
+  --color-danger-bg: #fff0f1;
+  --color-danger-tint: rgba(193, 79, 87, 0.1);
+  --color-info: #2f7cf4;
+  --color-modal-backdrop: rgba(27, 39, 59, 0.42);
+
+  --shadow-sm: 0 2px 8px rgba(59, 83, 123, 0.08);
+  --shadow-md: 0 14px 38px rgba(59, 83, 123, 0.13);
+  --shadow-lg: 0 30px 80px rgba(64, 94, 145, 0.2);
+
+  --font-sans: "Segoe UI Variable", "Segoe UI", "PingFang SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas,
+    "SFMono-Regular", monospace;
+
+  --fs-xxs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+  --space-8: 48px;
+  --space-9: 64px;
+  --space-input-h: 10px;
+  --space-card-h: 14px;
+  --space-section-h: 18px;
+
+  --radius-xs: 6px;
+  --radius-sm: 9px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --header-height: 72px;
+  --sidebar-width: 216px;
+  --workspace-width: 312px;
+  --content-reading-width: 800px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 18px;
+  --control-height-sm: 30px;
+  --control-height: 36px;
+
+  --z-header: 20;
+  --z-overlay-panel: 40;
+  --z-popover: 100;
+  --z-modal: 200;
+
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 220ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg-app: #111827;
+  --color-bg-sidebar: #182235;
+  --color-bg-content: #1d293d;
+  --color-bg-elevated: #243249;
+  --color-bg-soft: #223047;
+  --color-bg-input: #223047;
+  --color-bg-code: #172236;
+  --color-bg-selected: #253d63;
+
+  --color-text: #e5ebf4;
+  --color-text-strong: #f8fafc;
+  --color-text-soft: #b5c0d0;
+  --color-text-faint: #9daabd;
+  --color-text-on-dark: #ffffff;
+  --color-text-on-dark-soft: #d8e0eb;
+
+  --color-border: #304057;
+  --color-border-strong: #3b4d67;
+  --color-border-dark: #53647c;
+
+  --color-primary: #eef4ff;
+  --color-accent: #78aaf8;
+  --color-on-accent: #10213f;
+  --color-accent-soft: #253d63;
+  --color-accent-hover: #94bcfb;
+  --color-focus: #78aaf8;
+  --color-accent-tint: rgba(120, 170, 248, 0.18);
+  --color-hover-overlay: rgba(255, 255, 255, 0.055);
+
+  --color-success: #83b292;
+  --color-on-success: #172019;
+  --color-success-bg: #2b3b30;
+  --color-warning: #d0aa69;
+  --color-warning-bg: #3c3426;
+  --color-danger: #dc908a;
+  --color-on-danger: #251615;
+  --color-danger-bg: #422c2a;
+  --color-danger-tint: rgba(220, 144, 138, 0.12);
+  --color-info: #8aabb7;
+  --color-modal-backdrop: rgba(8, 9, 8, 0.66);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 14px 38px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.4);
+}

@@ -90,7 +90,7 @@ describe('ApprovalTopBar', () => {
     const { container } = render(
       <ApprovalTopBar request={REQ} onApprove={onApprove} onReject={vi.fn()} />,
     );
-    const btn = getByRole(container, 'button', /同意|approve/i);
+    const btn = getByRole(container, 'button', /允许|approve/i);
     fireClick(btn);
     expect(onApprove).toHaveBeenCalledOnce();
   });

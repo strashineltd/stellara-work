@@ -52,6 +52,13 @@ function render(ui: React.ReactElement) {
   };
 }
 
+function fireClick(el: Element | null) {
+  if (!el) throw new Error('Element not found for click');
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 describe('Header', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -107,6 +114,32 @@ describe('Header', () => {
     expect(header).toBeTruthy();
   });
 
+  it('renders the compact product branding from the reference layout', () => {
+    const { querySelector, getByText } = render(
+      <Header
+        config={MODEL_CONFIG}
+        sidebarOpen={true}
+        workspaceOpen={false}
+        modelList={MODEL_LIST}
+        switchingModel={false}
+        busy={false}
+        hasEntries={true}
+        onToggleSidebar={vi.fn()}
+        onToggleWorkspace={vi.fn()}
+        onChangeWorkDir={vi.fn()}
+        onOpenFileTree={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onReconfigure={vi.fn()}
+        onNewSession={vi.fn()}
+        onNewTask={vi.fn()}
+        onSwitchModel={vi.fn()}
+      />,
+    );
+    expect(querySelector('.header-product')).toBeTruthy();
+    expect(querySelector('.header-product-mark')).toBeTruthy();
+    expect(getByText('Stellara Work')).toBeTruthy();
+  });
+
   it('does not use emoji glyphs in rendered HTML', () => {
     const { container } = render(
       <Header
@@ -130,5 +163,65 @@ describe('Header', () => {
     );
     const html = container.innerHTML;
     expect(html).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+  });
+
+  it('does not duplicate the persistent sidebar settings control in the header', () => {
+    const onOpenSettings = vi.fn();
+    const { container } = render(
+      <Header
+        config={MODEL_CONFIG}
+        sidebarOpen={true}
+        workspaceOpen={false}
+        modelList={MODEL_LIST}
+        switchingModel={false}
+        busy={false}
+        hasEntries={true}
+        onToggleSidebar={vi.fn()}
+        onToggleWorkspace={vi.fn()}
+        onChangeWorkDir={vi.fn()}
+        onOpenFileTree={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onReconfigure={vi.fn()}
+        onNewSession={vi.fn()}
+        onNewTask={vi.fn()}
+        onSwitchModel={vi.fn()}
+      />,
+    );
+    const settingsButtons = container.querySelectorAll('button[aria-label="打开设置"]');
+    expect(settingsButtons.length).toBe(0);
+    fireClick(container.querySelector('.main-model'));
+    fireClick(Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('添加 / 管理模型')) ?? null);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(onOpenSettings).toHaveBeenCalledWith();
+  });
+
+  it('toggles the workspace with synchronized disclosure semantics', () => {
+    const onToggleWorkspace = vi.fn();
+    const { container } = render(
+      <Header
+        config={MODEL_CONFIG}
+        sidebarOpen={true}
+        workspaceOpen={false}
+        modelList={MODEL_LIST}
+        switchingModel={false}
+        busy={false}
+        hasEntries={true}
+        onToggleSidebar={vi.fn()}
+        onToggleWorkspace={onToggleWorkspace}
+        onChangeWorkDir={vi.fn()}
+        onOpenFileTree={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onReconfigure={vi.fn()}
+        onNewSession={vi.fn()}
+        onNewTask={vi.fn()}
+        onSwitchModel={vi.fn()}
+      />,
+    );
+
+    const button = container.querySelector('button[aria-controls="workspace-panel"]');
+    expect(button?.getAttribute('aria-pressed')).toBe('false');
+    expect(button?.getAttribute('aria-expanded')).toBe('false');
+    fireClick(button);
+    expect(onToggleWorkspace).toHaveBeenCalledOnce();
   });
 });

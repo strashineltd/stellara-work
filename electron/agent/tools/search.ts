@@ -29,7 +29,7 @@ export const searchTools: OpenAITool[] = [
     type: 'function',
     function: {
       name: 'search_files',
-      description: '用 glob 模式搜索文件路径（如 "**/*.ts"、"src/**/*.tsx"）。返回匹配的文件相对路径列表。',
+      description: '用 glob 模式搜索文件路径（仅匹配文件名，不搜索文件内容）。自动忽略 node_modules/.git/dist/build/release 目录。最多返回 200 条结果。如需搜索文件内容请用 search_content 工具。',
       parameters: {
         type: 'object',
         properties: {
@@ -37,6 +37,7 @@ export const searchTools: OpenAITool[] = [
           cwd: { type: 'string', description: '搜索根目录（相对工作目录），可选' },
         },
         required: ['pattern'],
+        additionalProperties: false,
       },
     },
   },

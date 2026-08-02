@@ -61,6 +61,7 @@ describe('InputArea', () => {
           onPlanToggle={vi.fn()}
           onSend={vi.fn()}
           onSlashApply={vi.fn()}
+          onSlashOpen={vi.fn()}
           onSlashClose={vi.fn()}
           onSlashIdxChange={vi.fn()}
           onLazyLoadSkills={vi.fn()}
@@ -81,6 +82,7 @@ describe('InputArea', () => {
         onPlanToggle={vi.fn()}
         onSend={vi.fn()}
         onSlashApply={vi.fn()}
+        onSlashOpen={vi.fn()}
         onSlashClose={vi.fn()}
         onSlashIdxChange={vi.fn()}
         onLazyLoadSkills={vi.fn()}
@@ -102,6 +104,7 @@ describe('InputArea', () => {
         onPlanToggle={vi.fn()}
         onSend={vi.fn()}
         onSlashApply={vi.fn()}
+        onSlashOpen={vi.fn()}
         onSlashClose={vi.fn()}
         onSlashIdxChange={vi.fn()}
         onLazyLoadSkills={vi.fn()}
@@ -109,5 +112,35 @@ describe('InputArea', () => {
     );
     const html = container.innerHTML;
     expect(html).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+  });
+
+  it('opens skill suggestions when the user types a slash command', () => {
+    const onSlashOpen = vi.fn();
+    const onLazyLoadSkills = vi.fn();
+    const { querySelector } = render(
+      <InputArea
+        input=""
+        busy={false}
+        planMode={false}
+        slash={EMPTY_SLASH}
+        hasWorkDir={true}
+        onInputChange={vi.fn()}
+        onPlanToggle={vi.fn()}
+        onSend={vi.fn()}
+        onSlashApply={vi.fn()}
+        onSlashOpen={onSlashOpen}
+        onSlashClose={vi.fn()}
+        onSlashIdxChange={vi.fn()}
+        onLazyLoadSkills={onLazyLoadSkills}
+      />,
+    );
+    const textarea = querySelector('.input-chat') as HTMLTextAreaElement;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(textarea, '/');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(onSlashOpen).toHaveBeenCalledOnce();
+    expect(onLazyLoadSkills).toHaveBeenCalledOnce();
   });
 });

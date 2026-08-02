@@ -17,6 +17,7 @@ interface InputAreaProps {
   onPlanToggle: () => void;
   onSend: () => void;
   onSlashApply: (skill: SkillDef) => void;
+  onSlashOpen: () => void;
   onSlashClose: () => void;
   onSlashIdxChange: (idx: number) => void;
   onLazyLoadSkills: () => void;
@@ -30,37 +31,52 @@ export function InputArea(props: InputAreaProps) {
     props.onInputChange(v);
     // `/` 后没空格 → 显示补全菜单
     if (/^\/\S*$/.test(v)) {
-      if (!props.slash.slashOpen) props.onSlashClose; // noop; parent manages state
+      if (!props.slash.slashOpen) props.onSlashOpen();
       if (props.hasWorkDir && !props.slash.skillsLoaded) props.onLazyLoadSkills();
+    } else if (props.slash.slashOpen) {
+      props.onSlashClose();
     }
   }
 
   return (
-    <footer className="main-input">
+    <footer className="main-input" aria-label="任务输入">
       {props.slash.slashOpen && (
-        <div className="slash-menu">
-          {!props.slash.skillsLoaded && <div className="slash-item empty">加载中...</div>}
+        <div className="slash-menu" id="slash-suggestions" role="listbox" aria-label="可用技能">
+          {!props.slash.skillsLoaded && <div className="slash-item empty" role="status">正在加载技能…</div>}
           {props.slash.skillsLoaded && props.slash.slashItems.length === 0 && (
-            <div className="slash-item empty">
-              workDir 下没有 skills/ 目录，或没有 .json skill 文件
+            <div className="slash-item empty" role="status">
+              当前工作目录中没有可用技能
             </div>
           )}
           {props.slash.slashItems.map((s, i) => (
-            <div
+            <button
               key={s.name}
+              id={`slash-option-${i}`}
+              type="button"
+              role="option"
+              aria-selected={i === props.slash.slashIdx}
               className={`slash-item ${i === props.slash.slashIdx ? 'active' : ''}`}
               onClick={() => props.onSlashApply(s)}
               onMouseEnter={() => props.onSlashIdxChange(i)}
             >
               <span className="slash-item-name">/{s.name}</span>
               <span className="slash-item-desc">{s.description}</span>
-            </div>
+            </button>
           ))}
         </div>
       )}
       <textarea
         className="input-chat"
-        placeholder={props.busy ? 'Agent 思考中...' : '输入 / 调 skill，或直接写需求...'}
+        placeholder={props.busy ? '任务正在执行，完成后可继续补充…' : '写下任务目标、涉及范围和完成标准，或输入 / 调用技能…'}
+        aria-label="任务说明"
+        aria-autocomplete="list"
+        aria-controls={props.slash.slashOpen ? 'slash-suggestions' : undefined}
+        aria-expanded={props.slash.slashOpen}
+        aria-activedescendant={
+          props.slash.slashOpen && props.slash.slashItems.length > 0
+            ? `slash-option-${props.slash.slashIdx}`
+            : undefined
+        }
         value={props.input}
         onChange={(e) => handleChange(e.target.value)}
         onKeyDown={(e) => {
@@ -102,7 +118,7 @@ export function InputArea(props: InputAreaProps) {
         rows={3}
       />
       <div className="input-actions">
-        <label className={`plan-toggle ${props.planMode ? 'on' : ''}`} title="Plan 模式：agent 只读文件 / 搜索，不写不执行">
+        <label className={`plan-toggle ${props.planMode ? 'on' : ''}`} title="计划模式只会读取和分析，不会修改文件或执行命令">
           <input
             type="checkbox"
             checked={props.planMode}
@@ -111,15 +127,16 @@ export function InputArea(props: InputAreaProps) {
             }}
             disabled={props.busy}
           />
-          <span>Plan 模式{props.planMode ? '（只读）' : ''}</span>
+          <span>先制定计划{props.planMode ? ' · 只读' : ''}</span>
         </label>
-        <span className="hint">Ctrl+Enter 发送</span>
+        <span className="hint input-shortcut">Ctrl + Enter</span>
         <button
           className="btn btn-primary"
           onClick={() => props.onSend()}
           disabled={props.busy || !props.input.trim()}
+          type="button"
         >
-          {props.busy ? '思考中...' : '发送'}
+          {props.busy ? '执行中…' : '开始执行'}
         </button>
       </div>
     </footer>

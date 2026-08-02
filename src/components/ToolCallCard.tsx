@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from './Icon';
 
 interface ToolCallCardProps {
   name: string;
@@ -33,10 +34,12 @@ export function ToolCallCard({ name, args }: ToolCallCardProps) {
         onClick={() => setOpen((o) => !o)}
         title={open ? '折叠' : '展开参数'}
       >
-        <span className="tool-card-icon">🔧</span>
+        <span className="tool-card-icon"><Icon name="tool" size={14} /></span>
         <span className="tool-card-name">{name}</span>
         {!open && <span className="tool-card-summary">{summary}</span>}
-        <span className="tool-card-chevron">{open ? '▾' : '▸'}</span>
+        <span className="tool-card-chevron">
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
+        </span>
       </button>
       {open && (
         <pre className="tool-card-body">{prettyArgs(args)}</pre>

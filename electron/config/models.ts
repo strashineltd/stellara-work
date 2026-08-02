@@ -1,10 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import type { ModelConfig } from '../../shared/ipc';
+import { getAppDataDir } from './data-dir';
 
-const CONFIG_DIR = path.join(os.homedir(), '.stellara');
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+function configPath(): string {
+  return path.join(getAppDataDir(), 'config.json');
+}
 
 /**
  * 加载当前活跃的 model 配置（v2 + secrets）
@@ -13,7 +14,7 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
  */
 export async function loadModelsConfig(): Promise<ModelConfig | null> {
   try {
-    const text = await fs.readFile(CONFIG_PATH, 'utf-8');
+    const text = await fs.readFile(configPath(), 'utf-8');
     const parsed = JSON.parse(text) as Record<string, unknown>;
     // v2 格式
     if (parsed.schemaVersion === 1 && Array.isArray(parsed.models)) {
@@ -46,8 +47,8 @@ export async function loadModelsConfig(): Promise<ModelConfig | null> {
  * 保存模型配置（v1 兼容用，新代码走 config-v2.addModel / saveConfig）
  */
 export async function saveModelConfig(config: ModelConfig): Promise<void> {
-  await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), {
+  await fs.mkdir(getAppDataDir(), { recursive: true });
+  await fs.writeFile(configPath(), JSON.stringify(config, null, 2), {
     mode: 0o600,
   });
 }

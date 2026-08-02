@@ -2,14 +2,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { initDb, listSessions, getSession, createSession, deleteSession, renameSession, getMessages, appendMessage, saveMessages, bumpSession, _setDbPath } from './db';
+import Database from 'better-sqlite3';
+import {
+  initDb, listSessions, getSession, createSession, deleteSession, renameSession,
+  getMessages, appendMessage, saveMessages, bumpSession, _setDbPath,
+  createProject, getProject, listProjects, renameProject, deleteProject, moveSession, updateProjectFile,
+} from './db';
 
 let tmpDir: string;
+let dbFile: string;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-db-'));
-  _setDbPath(path.join(tmpDir, 'test.db'));
-  initDb();
+  dbFile = path.join(tmpDir, 'test.db');
+  _setDbPath(dbFile);
 });
 
 afterEach(async () => {
@@ -19,7 +25,65 @@ afterEach(async () => {
 
 describe('db', () => {
   it('initDb creates schema (listSessions empty)', () => {
+    initDb();
     expect(listSessions()).toEqual([]);
+  });
+
+  it('migrates a legacy sessions table before creating the project index', () => {
+    const legacyDb = new Database(dbFile);
+    legacyDb.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        work_dir TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        message_count INTEGER DEFAULT 0
+      );
+      INSERT INTO sessions (
+        id, title, model_id, work_dir, created_at, updated_at, message_count
+      ) VALUES (
+        'legacy-session', 'Legacy task', 'm1', NULL, 1, 1, 0
+      );
+    `);
+    legacyDb.close();
+
+    expect(() => initDb()).not.toThrow();
+    expect(getSession('legacy-session')?.projectId).toBeUndefined();
+
+    createProject({ id: 'legacy-project', name: 'Legacy project' });
+    moveSession('legacy-session', 'legacy-project');
+    deleteProject('legacy-project');
+
+    expect(getSession('legacy-session')?.projectId).toBeUndefined();
+    expect(getProject('legacy-project')).toBeNull();
+  });
+
+  it('adds and persists the project entry file for legacy project tables', () => {
+    const legacyDb = new Database(dbFile);
+    legacyDb.exec(`
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        work_dir TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO projects (id, name, work_dir, created_at, updated_at)
+      VALUES ('legacy-project', 'Legacy', 'D:/old', 1, 1);
+    `);
+    legacyDb.close();
+
+    initDb();
+    expect(getProject('legacy-project')?.entryFile).toBeUndefined();
+    const updated = updateProjectFile('legacy-project', 'D:/new', 'D:/new/README.md');
+    expect(updated.workDir).toBe('D:/new');
+    expect(updated.entryFile).toBe('D:/new/README.md');
+
+    const created = createProject({ id: 'new-project', name: 'New', workDir: 'D:/new', entryFile: 'D:/new/index.ts' });
+    expect(created.entryFile).toBe('D:/new/index.ts');
+    expect(getProject('new-project')?.entryFile).toBe('D:/new/index.ts');
   });
 
   it('createSession + listSessions round-trips', () => {
@@ -125,6 +189,26 @@ describe('db', () => {
     deleteSession('s1');
     // The FK ON DELETE CASCADE should have removed the message
     expect(getMessages('s1')).toEqual([]);
+  });
+
+  it('renames a project and rejects missing or empty targets', () => {
+    createProject({ id: 'p1', name: 'Old name', workDir: 'D:/workspace' });
+    expect(getProject('p1')?.workDir).toBe('D:/workspace');
+    renameProject('p1', '  New name  ');
+    expect(getProject('p1')?.name).toBe('New name');
+    expect(() => renameProject('missing', 'Name')).toThrow('项目不存在');
+    expect(() => renameProject('p1', '   ')).toThrow('项目名称不能为空');
+  });
+
+  it('deletes a project and explicitly moves its sessions to unassigned', () => {
+    createProject({ id: 'p1', name: 'Project' });
+    createSession({ id: 's1', title: 'Task', modelId: 'm1', projectId: 'p1' });
+
+    deleteProject('p1');
+
+    expect(listProjects()).toEqual([]);
+    expect(getSession('s1')?.projectId).toBeUndefined();
+    expect(() => deleteProject('p1')).toThrow('项目不存在');
   });
 
   // 复现 user 报的 bug：A 聊完后创建 B，再切回 A，A 的内容不能丢

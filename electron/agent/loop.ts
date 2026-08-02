@@ -271,6 +271,19 @@ export async function* runAgentLoop(
 
     // 并行执行只读工具
     if (readOnlyCalls.length > 0) {
+      // Plan 步骤追踪：执行前标记 in_progress
+      if (options.plan) {
+        for (const toolCall of readOnlyCalls) {
+          let toolArgs: Record<string, unknown> = {};
+          try { toolArgs = JSON.parse(toolCall.function.arguments); } catch { /* ignore */ }
+          const matched = tryMatchToolToPlanStep(options.plan, toolCall.function.name, toolArgs);
+          if (matched && matched.status === 'pending') {
+            matched.status = 'in_progress';
+          }
+        }
+        yield { type: 'plan_progress', planSteps: options.plan.steps.map((s) => ({ description: s.description, status: s.status })) };
+      }
+
       const results = await Promise.all(
         readOnlyCalls.map(async (toolCall) => {
           const toolName = toolCall.function.name;
@@ -379,6 +392,15 @@ export async function* runAgentLoop(
             toolResult: { name: toolName, toolCallId: toolCall.id, result: { ok: false, error: '用户拒绝' } },
           };
           continue;
+        }
+      }
+
+      // Plan 步骤追踪：执行前标记 in_progress
+      if (options.plan) {
+        const matched = tryMatchToolToPlanStep(options.plan, toolName, toolArgs as Record<string, unknown>);
+        if (matched && matched.status === 'pending') {
+          matched.status = 'in_progress';
+          yield { type: 'plan_progress', planSteps: options.plan.steps.map((s) => ({ description: s.description, status: s.status })) };
         }
       }
 

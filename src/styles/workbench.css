@@ -1058,10 +1058,10 @@ kbd {
 
 .project-header {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto 28px;
+  grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
   min-height: 34px;
-  padding: 0 var(--space-1) 0 var(--space-2);
+  padding: 0 var(--space-1);
   color: var(--color-text-soft);
   border-radius: var(--radius-sm);
   transition:
@@ -1069,10 +1069,41 @@ kbd {
     background-color var(--motion-fast) var(--ease-standard);
 }
 
-.project-header:hover,
-.project-header:focus-visible {
+.project-header:hover {
   color: var(--color-text);
   background: var(--color-hover-overlay);
+}
+
+.project-toggle-button {
+  min-width: 0;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--space-1);
+  text-align: left;
+  border-radius: var(--radius-xs);
+}
+
+.project-toggle-button:hover {
+  color: var(--color-text-strong);
+}
+
+.project-toggle-button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.project-toggle-button > .app-icon {
+  justify-self: center;
+  color: var(--color-text-faint);
 }
 
 .project-header__arrow {
@@ -3027,6 +3058,282 @@ kbd {
   padding: var(--space-5);
 }
 
+.project-dialog {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(540px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 48px));
+}
+
+.project-dialog-header,
+.project-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+}
+
+.project-dialog-header {
+  min-height: 64px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.project-dialog-header h2 {
+  margin: 2px 0 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+  font-weight: 680;
+}
+
+.project-dialog-kicker {
+  color: var(--color-primary);
+  font-size: var(--fs-xxs);
+  font-weight: 650;
+}
+
+.project-dialog-name-form {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.project-dialog-name-form > label,
+.project-create-file-form > label {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-xs);
+  font-weight: 620;
+}
+
+.project-dialog-required {
+  margin-left: var(--space-2);
+  color: var(--color-primary);
+  font-size: var(--fs-xxs);
+  font-weight: 650;
+}
+
+.project-dialog-name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.project-dialog-name-row--create {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.project-dialog-name-row input,
+.project-create-file-form input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 var(--space-3);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--color-bg-input);
+  font: inherit;
+}
+
+.project-dialog-name-row input:focus,
+.project-create-file-form input:focus {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 2px var(--color-accent-tint);
+}
+
+.project-dialog-name-form > p,
+.project-dialog-section-heading p {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.project-dialog-files {
+  min-height: 0;
+  padding: var(--space-5);
+  overflow: auto;
+}
+
+.project-dialog-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.project-dialog-section-heading h3 {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+.project-dialog-section-heading code {
+  max-width: 190px;
+  padding: 4px 7px;
+  overflow: hidden;
+  color: var(--color-text-soft);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-soft);
+  font-size: var(--fs-xxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-file-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.project-file-action {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 78px;
+  padding: var(--space-3);
+  color: var(--color-text-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-content);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.project-file-action:hover:not(:disabled),
+.project-file-action[aria-expanded="true"] {
+  color: var(--color-primary);
+  border-color: var(--color-accent);
+  background: var(--color-bg-selected);
+  transform: translateY(-1px);
+}
+
+.project-file-action:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.project-file-action:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.project-file-action > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.project-file-action strong {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: 640;
+}
+
+.project-file-action small {
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.project-dialog-empty,
+.project-dialog-feedback {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.project-dialog-empty {
+  color: var(--color-text-soft);
+  border: 1px dashed var(--color-border-strong);
+  background: var(--color-bg-soft);
+}
+
+.project-create-file-form {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-soft);
+  animation: surface-enter var(--motion-base) var(--ease-out) both;
+}
+
+.project-create-file-form > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--space-2);
+}
+
+.project-selected-file {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  color: var(--color-primary);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-selected);
+}
+
+.project-selected-file > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-selected-file strong,
+.project-selected-file code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-selected-file strong {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+}
+
+.project-selected-file code {
+  color: var(--color-text-soft);
+  font-size: var(--fs-xxs);
+}
+
+.project-dialog-feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.project-dialog-feedback--success {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.project-dialog-feedback--error {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.project-dialog-footer {
+  justify-content: flex-end;
+  min-height: 58px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-soft);
+}
+
 .confirm-modal h3 {
   margin: 0;
   color: var(--color-text-strong);
@@ -3805,6 +4112,48 @@ kbd {
   .file-tree-pane {
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
+  }
+
+  .project-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
+  .project-dialog-header,
+  .project-dialog-footer,
+  .project-dialog-name-form,
+  .project-dialog-files {
+    padding-inline: var(--space-4);
+  }
+
+  .project-dialog-name-row,
+  .project-file-actions,
+  .project-create-file-form > div {
+    grid-template-columns: 1fr;
+  }
+
+  .project-dialog-name-row .btn,
+  .project-create-file-form .btn {
+    justify-self: start;
+  }
+
+  .project-dialog-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .project-dialog-section-heading code {
+    max-width: 100%;
+  }
+
+  .project-selected-file {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .project-selected-file .btn {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .onboarding {

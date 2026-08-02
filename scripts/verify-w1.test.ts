@@ -24,10 +24,15 @@ import { findPreset } from '../electron/llm/presets';
 import { loadModelsConfig } from '../electron/config/models';
 import type { ModelConfig } from '../shared/ipc';
 
+const RUN_LLM_INTEGRATION = process.env.STELLARA_RUN_INTEGRATION === '1';
+const describeIntegration = RUN_LLM_INTEGRATION ? describe : describe.skip;
+
 let model: ModelConfig | null = null;
 let cwd: string;
 
 beforeAll(async () => {
+  cwd = process.cwd();
+  if (!RUN_LLM_INTEGRATION) return;
   // 1. 加载 .env
   const envPath = path.join(os.homedir(), '.stellara', '.env');
   try {
@@ -55,8 +60,6 @@ beforeAll(async () => {
       };
     }
   }
-
-  cwd = process.cwd();
 });
 
 describe('W1 verify - direct tool invocation (no LLM needed)', () => {
@@ -98,17 +101,22 @@ describe('W1 verify - direct tool invocation (no LLM needed)', () => {
 
   it('run_command works', async () => {
     if (!cwd) return;
+    // 使用 node -e 替代 echo（echo 是 shell 内建命令，不能直接 spawn）
     const result = await invokeTool(
       'run_command',
-      { command: 'echo "W1 verify OK"', timeoutMs: 5000 },
+      { command: 'node --version', timeoutMs: 5000 },
       cwd,
     );
+    if (!result.ok) {
+      console.log('[run_command] error:', result.error);
+      console.log('[run_command] output:', result.output);
+    }
     expect(result.ok).toBe(true);
-    expect(result.output).toContain('W1 verify OK');
+    expect(result.output).toContain('v');
   });
 });
 
-describe('W1 verify - agent loop with LLM (requires API key)', () => {
+describeIntegration('W1 verify - agent loop with LLM (requires API key)', () => {
   it('runs a full agent task end-to-end', async () => {
     if (!model) {
       console.log('[SKIP] No API key configured. Set OPENAI_API_KEY in ~/.stellara/.env');

@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-describe('tokens.css', () => {
-  const tokens = readFileSync(resolve(__dirname, 'tokens.css'), 'utf-8');
+describe('grounded design system', () => {
+  const tokens = readFileSync(resolve(__dirname, 'grounded-tokens.css'), 'utf-8');
+  const workbench = readFileSync(resolve(__dirname, 'workbench.css'), 'utf-8');
+  const entry = readFileSync(resolve(__dirname, '../main.tsx'), 'utf-8');
+  const electronMain = readFileSync(resolve(__dirname, '../../electron/main.ts'), 'utf-8');
+  const mainView = readFileSync(resolve(__dirname, '../components/MainView.tsx'), 'utf-8');
 
   const REQUIRED = [
     '--color-bg-app', '--color-bg-sidebar', '--color-bg-content',
@@ -25,5 +29,49 @@ describe('tokens.css', () => {
 
   it('defines a [data-theme="dark"] block with overrides', () => {
     expect(tokens).toMatch(/\[data-theme="dark"\]\s*\{/);
+  });
+
+  it('loads only the new grounded UI styles', () => {
+    expect(entry).toContain("./styles/grounded-tokens.css");
+    expect(entry).toContain("./styles/workbench.css");
+    expect(entry).not.toContain("./styles/global.css");
+  });
+
+  it('avoids sci-fi and AI-template visual effects', () => {
+    expect(workbench).not.toMatch(/(?:linear|radial|conic)-gradient\s*\(/i);
+    expect(workbench).not.toMatch(/text-shadow\s*:/i);
+    expect(workbench).not.toMatch(/backdrop-filter\s*:/i);
+  });
+
+  it('fills the native window client area without an inset outer shell', () => {
+    const mainViewBlocks = [...workbench.matchAll(/\.main-view\s*\{([^}]*)\}/g)];
+    const mainView = mainViewBlocks[0]?.[1] ?? '';
+
+    expect(mainViewBlocks).toHaveLength(1);
+    expect(mainView).toMatch(/width:\s*100%\s*;/);
+    expect(mainView).toMatch(/height:\s*100%\s*;/);
+    expect(mainView).toMatch(/margin:\s*0\s*;/);
+    expect(mainView).toMatch(/border:\s*0\s*;/);
+    expect(mainView).toMatch(/border-radius:\s*0\s*;/);
+    expect(mainView).toMatch(/box-shadow:\s*none\s*;/);
+  });
+
+  it('uses an immersive native title bar without covering header controls', () => {
+    const windowOptions = electronMain.match(/new BrowserWindow\(\{([\s\S]*?)webPreferences:/)?.[1] ?? '';
+    const header = workbench.match(/\.main-header\s*\{([^}]*)\}/)?.[1] ?? '';
+
+    expect(windowOptions).toMatch(/titleBarStyle:\s*'hidden'/);
+    expect(windowOptions).toMatch(/titleBarOverlay:\s*\{/);
+    expect(windowOptions).toMatch(/color:\s*'rgba\(0,\s*0,\s*0,\s*0\)'/);
+    expect(windowOptions).toMatch(/symbolColor:\s*'#65758B'/);
+    expect(windowOptions).toMatch(/height:\s*72/);
+    expect(header).toMatch(/env\(titlebar-area-width/);
+    expect(header).toMatch(/-webkit-app-region:\s*drag/);
+    expect(workbench).toMatch(/\.main-header button,[\s\S]*?-webkit-app-region:\s*no-drag/);
+  });
+
+  it('keeps the workspace inspector available across all main sections', () => {
+    expect(mainView).toMatch(/\{props\.workspaceOpen\s*&&\s*activeWorkDir\s*&&\s*\(/);
+    expect(mainView).not.toMatch(/activeSection\s*===\s*['"]tasks['"]\s*&&\s*props\.workspaceOpen/);
   });
 });

@@ -7,13 +7,15 @@ import { ToolResultCard } from '../ToolResultCard';
 import { DiffCard } from '../DiffCard';
 import { ShellCard } from '../ShellCard';
 import { ErrorBanner } from '../ErrorBanner';
+import { ApprovalTopBar } from '../ApprovalTopBar';
+import { Icon } from '../Icon';
 import { prettyApprovalArgs, type DisplayEntry } from '../../lib/chat-utils';
 
 interface ChatStreamProps {
   entries: DisplayEntry[];
   busy: boolean;
   streamId: string | null;
-  chatRef: RefObject<HTMLElement>;
+  chatRef: RefObject<HTMLElement | null>;
   lastUserForRetry: string | null;
   modelMissing: boolean;
   /** M0：是否可以发起审查（任务完成且修改过文件） */
@@ -32,7 +34,14 @@ interface ChatStreamProps {
 
 export function ChatStream(props: ChatStreamProps) {
   return (
-    <main className="main-chat" ref={props.chatRef}>
+    <main className="main-chat" id="task-stream" ref={props.chatRef} tabIndex={-1}>
+      {props.pendingApproval && (
+        <ApprovalTopBar
+          request={props.pendingApproval}
+          onApprove={() => props.onApprove(true)}
+          onReject={() => props.onApprove(false)}
+        />
+      )}
       {props.modelMissing && (
         <div className="model-missing-banner">
           <span>此会话引用的模型已被删除。</span>
@@ -112,9 +121,10 @@ export function ChatStream(props: ChatStreamProps) {
                 className="btn btn-stop"
                 onClick={() => { if (props.streamId) props.onAbort(); }}
                 type="button"
-                title="中断当前 agent 任务"
+                title="停止当前任务"
               >
-                停止
+                <Icon name="stop" size={14} />
+                <span>停止任务</span>
               </button>
             </div>
           )}
@@ -124,7 +134,7 @@ export function ChatStream(props: ChatStreamProps) {
                 className="btn btn-review"
                 onClick={() => props.onReview!()}
                 type="button"
-                title="调度 reviewer agent 审查本次任务的结果"
+                title="检查本次任务的代码改动"
               >
                 审查代码
               </button>
@@ -141,14 +151,15 @@ export function ChatStream(props: ChatStreamProps) {
 function EmptyChat() {
   return (
     <div className="empty-chat">
-      <h2>开始一个新的任务</h2>
-      <p>在下方输入你的需求，agent 会在工作目录里读 / 写文件、跑命令、汇报结果。</p>
+      <p className="empty-chat-eyebrow">任务起点</p>
+      <h2>把目标和边界写清楚</h2>
+      <p className="empty-chat-copy">说明要完成的工作、涉及范围和验收标准。执行过程、文件改动与验证结果会按顺序记录在这里。</p>
       <div className="empty-examples">
-        <p>试试这些：</p>
+        <p>可以这样开始</p>
         <ul>
-          <li>"读 README.md 然后总结一下"</li>
-          <li>"在 src/utils/ 新增一个 helper.ts 实现字符串反转"</li>
-          <li>"跑 npm test 看哪些挂了"</li>
+          <li>阅读 README.md，梳理项目结构和启动方式</li>
+          <li>检查当前改动，定位仍未解决的类型错误</li>
+          <li>运行测试并解释失败原因，不要直接修改代码</li>
         </ul>
       </div>
     </div>
@@ -158,7 +169,7 @@ function EmptyChat() {
 function UserEntry({ content }: { content: string }) {
   return (
     <div className="message message-user">
-      <div className="message-role">你</div>
+      <div className="message-role">任务简报</div>
       <div className="message-content">
         <pre className="user-text">{content}</pre>
       </div>
@@ -179,16 +190,17 @@ function AssistantEntry({
 }) {
   return (
     <div className="message message-assistant">
-      <div className="message-role">Agent</div>
+      <div className="message-role">执行记录</div>
       <div className="message-content">
         {content
           ? <MarkdownView content={content} />
           : busy
-            ? <span className="thinking">思考中...</span>
+            ? <span className="thinking">正在分析任务…</span>
             : <span className="empty-placeholder">[该消息未生成内容]</span>}
         {canRetry && !busy && (
           <button className="btn btn-secondary btn-retry" onClick={onRetry} type="button">
-            ↻ 再试一次
+            <Icon name="refresh" size={14} />
+            <span>再试一次</span>
           </button>
         )}
       </div>
@@ -208,12 +220,14 @@ function ReportEntry({ entry }: { entry: Extract<DisplayEntry, { kind: 'report' 
       {entry.files.length > 0 && (
         <details className="report-section" open>
           <summary className="report-section-header">
-            Files ({entry.files.length})
+            文件 ({entry.files.length})
           </summary>
           <ul className="report-file-list">
             {entry.files.map((f, i) => (
               <li key={i} className="report-file-item">
-                <span className="report-file-icon">{f.kind === 'write' ? '+' : '~'}</span>
+                <span className="report-file-icon" aria-hidden="true">
+                  <Icon name={f.kind === 'write' ? 'file' : 'edit'} size={13} />
+                </span>
                 <code className="report-file-path">{f.path}</code>
               </li>
             ))}
@@ -223,14 +237,14 @@ function ReportEntry({ entry }: { entry: Extract<DisplayEntry, { kind: 'report' 
       {entry.commands.length > 0 && (
         <details className="report-section">
           <summary className="report-section-header">
-            Commands ({entry.commands.length})
+            命令 ({entry.commands.length})
           </summary>
           <div className="report-command-list">
             {entry.commands.map((c, i) => (
               <div key={i} className={`report-command-item ${c.ok ? 'ok' : 'fail'}`}>
                 <code className="report-command-text">{c.command}</code>
                 <span className="report-command-exit">
-                  exit {c.exitCode} {c.ok ? 'ok' : 'FAIL'}
+                  exit {c.exitCode} · {c.ok ? '通过' : '失败'}
                 </span>
               </div>
             ))}

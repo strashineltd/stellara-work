@@ -52,6 +52,13 @@ function render(ui: React.ReactElement) {
   };
 }
 
+function fireClick(el: Element | null) {
+  if (!el) throw new Error('Element not found for click');
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 describe('SettingsModal workspace mode toggle', () => {
   const props = {
     onClose: vi.fn(),
@@ -88,5 +95,35 @@ describe('SettingsModal workspace mode toggle', () => {
     const tabsRadio = querySelector('input[name="workspaceMode"][value="tabs"]') as HTMLInputElement;
     expect(tabsRadio).toBeTruthy();
     expect(tabsRadio.checked).toBe(false);
+  });
+
+  it('keeps a stable modal shell while switching animated tab panels', () => {
+    const { getByText, querySelector } = render(<SettingsModal {...props} initialTab="providers" />);
+    const modal = querySelector('.settings-modal');
+    expect(modal).toBeTruthy();
+    expect(querySelector('#settings-panel-providers.settings-panel')).toBeTruthy();
+
+    fireClick(getByText('应用'));
+
+    expect(querySelector('.settings-modal')).toBe(modal);
+    expect(querySelector('#settings-panel-app.settings-panel')).toBeTruthy();
+    expect(querySelector('#settings-panel-providers')).toBeNull();
+  });
+
+  it('marks the selected setting category with tab semantics', () => {
+    const { querySelector } = render(<SettingsModal {...props} initialTab="skills" />);
+    const selected = querySelector('#settings-tab-skills') as HTMLButtonElement;
+    expect(selected.getAttribute('role')).toBe('tab');
+    expect(selected.getAttribute('aria-selected')).toBe('true');
+    expect(selected.tabIndex).toBe(0);
+    expect(querySelector('#settings-panel-skills[role="tabpanel"]')).toBeTruthy();
+  });
+
+  it('exposes the settings surface as a labelled modal dialog', () => {
+    const { querySelector } = render(<SettingsModal {...props} initialTab="app" />);
+    const dialog = querySelector('.settings-modal');
+    expect(dialog?.getAttribute('role')).toBe('dialog');
+    expect(dialog?.getAttribute('aria-modal')).toBe('true');
+    expect(dialog?.getAttribute('aria-labelledby')).toBe('settings-title');
   });
 });

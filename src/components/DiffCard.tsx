@@ -1,5 +1,16 @@
-import { useState, useMemo } from 'react';
-import { diffLines, type Change } from 'diff';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { EditorView, keymap } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import { MergeView } from '@codemirror/merge';
+import { defaultKeymap } from '@codemirror/commands';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { javascript } from '@codemirror/lang-javascript';
+import { json } from '@codemirror/lang-json';
+import { html } from '@codemirror/lang-html';
+import { css } from '@codemirror/lang-css';
+import { python } from '@codemirror/lang-python';
+import { markdown } from '@codemirror/lang-markdown';
+import { Icon } from './Icon';
 
 interface DiffCardProps {
   path: string;
@@ -7,29 +18,109 @@ interface DiffCardProps {
   after: string;
 }
 
-/**
- * 文件变更卡片：行级 diff 视图
- * - before = null → 新建文件
- * - 改动 < 5 块 → 默认展开；多了 → 默认折叠
- * - 用 'diff' 包的 diffLines 算行级变更
- */
-export function DiffCard({ path, before, after }: DiffCardProps) {
-  const changes = useMemo<Change[]>(() => diffLines(before ?? '', after), [before, after]);
-  const hasManyChanges = changes.length > 5;
-  const [open, setOpen] = useState(!hasManyChanges);
+function getLangExtension(filePath: string) {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'ts': case 'tsx': case 'mts': case 'cts':
+      return javascript({ typescript: true });
+    case 'js': case 'jsx': case 'mjs': case 'cjs':
+      return javascript();
+    case 'json': case 'jsonc':
+      return json();
+    case 'html': case 'htm':
+      return html();
+    case 'css': case 'scss': case 'less':
+      return css();
+    case 'py':
+      return python();
+    case 'md': case 'markdown':
+      return markdown();
+    default:
+      return [];
+  }
+}
 
-  const stats = useMemo(() => {
-    let added = 0;
-    let removed = 0;
-    for (const c of changes) {
-      const lines = c.value.split('\n').filter((l) => l !== '').length;
-      if (c.added) added += lines;
-      else if (c.removed) removed += lines;
-    }
-    return { added, removed };
-  }, [changes]);
+function isDarkTheme(): boolean {
+  return document.documentElement.dataset.theme === 'dark';
+}
+
+export function DiffCard({ path, before, after }: DiffCardProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<MergeView | EditorView | null>(null);
+  const [open, setOpen] = useState(true);
 
   const isNew = before === null;
+
+  const stats = useMemo(() => {
+    if (isNew) return null;
+    const beforeLines = (before ?? '').split('\n');
+    const afterLines = after.split('\n');
+    let added = 0;
+    let removed = 0;
+    const maxLen = Math.max(beforeLines.length, afterLines.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i >= beforeLines.length) added++;
+      else if (i >= afterLines.length) removed++;
+      else if (beforeLines[i] !== afterLines[i]) {
+        added++;
+        removed++;
+      }
+    }
+    return { added, removed };
+  }, [before, after, isNew]);
+
+  useEffect(() => {
+    if (!containerRef.current || !open) return;
+
+    // Destroy previous view
+    if (viewRef.current) {
+      viewRef.current.destroy();
+      viewRef.current = null;
+    }
+    containerRef.current.innerHTML = '';
+
+    const dark = isDarkTheme();
+    const langExt = getLangExtension(path);
+    const themeExtensions = dark ? [oneDark] : [];
+    const baseExtensions = [
+      EditorState.readOnly.of(true),
+      EditorView.editable.of(false),
+      keymap.of(defaultKeymap),
+      langExt,
+      ...themeExtensions,
+    ];
+
+    if (isNew || !before) {
+      // New file: show read-only editor with after content
+      const state = EditorState.create({
+        doc: after,
+        extensions: [...baseExtensions, EditorView.lineWrapping],
+      });
+      const view = new EditorView({
+        state,
+        parent: containerRef.current,
+      });
+      viewRef.current = view;
+    } else {
+      // Modified file: show merge view
+      const mergeView = new MergeView({
+        a: { doc: before, extensions: baseExtensions },
+        b: { doc: after, extensions: baseExtensions },
+        parent: containerRef.current,
+        orientation: 'a-b',
+        highlightChanges: true,
+        gutter: true,
+      });
+      viewRef.current = mergeView;
+    }
+
+    return () => {
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
+    };
+  }, [path, before, after, open, isNew]);
 
   return (
     <div className="tool-card tool-card-diff">
@@ -39,35 +130,22 @@ export function DiffCard({ path, before, after }: DiffCardProps) {
         onClick={() => setOpen((o) => !o)}
         title={open ? '折叠' : '展开 diff'}
       >
-        <span className="tool-card-icon">{isNew ? '✚' : '✎'}</span>
+        <span className="tool-card-icon"><Icon name={isNew ? 'file' : 'edit'} size={14} /></span>
         <span className="tool-card-name">{path}</span>
         <span className="tool-card-summary">
-          {isNew ? '新文件' : (
+          {isNew ? '新文件' : stats && (
             <>
               <span className="diff-add">+{stats.added}</span>{' '}
               <span className="diff-remove">-{stats.removed}</span>
             </>
           )}
         </span>
-        <span className="tool-card-chevron">{open ? '▾' : '▸'}</span>
+        <span className="tool-card-chevron">
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
+        </span>
       </button>
       {open && (
-        <pre className="diff-body">
-          {changes.map((c, i) => {
-            const lines = c.value.split('\n');
-            // 最后一行如果是空字符串（split 末尾的 \n 产生的），去掉
-            if (lines[lines.length - 1] === '') lines.pop();
-            return lines.map((line, j) => (
-              <div
-                key={`${i}-${j}`}
-                className={`diff-line ${c.added ? 'diff-added' : ''} ${c.removed ? 'diff-removed' : ''}`}
-              >
-                <span className="diff-sign">{c.added ? '+' : c.removed ? '-' : ' '}</span>
-                <span className="diff-text">{line || ' '}</span>
-              </div>
-            ));
-          })}
-        </pre>
+        <div className="diff-codemirror-container" ref={containerRef} />
       )}
     </div>
   );

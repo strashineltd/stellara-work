@@ -54,3 +54,6 @@ coverage/
 
 # Tauri / Electron dev
 *.hot-update.json
+
+# Claude Code
+.claude/

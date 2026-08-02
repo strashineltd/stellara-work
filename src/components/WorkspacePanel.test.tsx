@@ -78,6 +78,7 @@ describe('WorkspacePanel', () => {
     );
     const panel = querySelector('.workspace-panel');
     expect(panel).toBeTruthy();
+    expect(panel?.id).toBe('workspace-panel');
   });
 
   it('shows section header labels without emoji', () => {
@@ -105,5 +106,20 @@ describe('WorkspacePanel', () => {
       />,
     );
     expect(getByText('Test goal')).toBeTruthy();
+  });
+
+  it('announces progress with native progressbar semantics', () => {
+    const { querySelector } = render(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={[]}
+        touchedFiles={new Set()}
+      />,
+    );
+    const progressbar = querySelector('[role="progressbar"]');
+    expect(progressbar?.getAttribute('aria-valuenow')).toBe('33');
+    expect(progressbar?.getAttribute('aria-valuemax')).toBe('100');
   });
 });

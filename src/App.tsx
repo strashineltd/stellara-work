@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type {
-  AppInfo, ModelConfig, ModelPreset, SessionSummary, ThemeName,
+  AppInfo, ModelConfig, ModelPreset, SessionSummary, ProjectSummary, ThemeName,
 } from '../shared/ipc';
 import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
@@ -24,6 +24,7 @@ type AppState =
       kind: 'ready';
       config: ModelConfig;
       info: AppInfo;
+      projects: ProjectSummary[];
       sessions: SessionSummary[];
       activeSessionId: string | null;
       sidebarOpen: boolean;
@@ -44,7 +45,7 @@ export default function App() {
     setSettingsOpen(true);
   }
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
-  const [theme, setTheme] = useState<ThemeName>('dark'); // v0.9 主推暗色
+  const [theme, setTheme] = useState<ThemeName>('light');
   const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('sidebar');
 
   // 主题写到 documentElement.dataset.theme（global.css 用 [data-theme="dark"] 选择器）
@@ -69,9 +70,10 @@ export default function App() {
       window.electronAPI.app.getInfo(),
       window.electronAPI.models.list(),
       window.electronAPI.sessions.list(),
+      window.electronAPI.projects.list(),
       window.electronAPI.settings.get(),
     ])
-      .then(([info, modelList, sessions, settings]) => {
+      .then(([info, modelList, sessions, projects, settings]) => {
         if (settings.shortcuts) setShortcuts({ ...DEFAULT_SHORTCUTS, ...settings.shortcuts });
         if (settings.theme) setTheme(settings.theme);
         if (settings.workspaceMode) setWorkspaceMode(settings.workspaceMode);
@@ -81,6 +83,7 @@ export default function App() {
             kind: 'ready',
             config: modelList.configured,
             info,
+            projects,
             sessions,
             activeSessionId: activeId,
             sidebarOpen: true,
@@ -95,7 +98,10 @@ export default function App() {
       });
   }, []);
 
-  // 快捷键：左 sidebar + 右 workspace（MainView 自己处理 Plan / Send / Esc）
+  // Tab 快捷键需要的 closed-tab history
+  const [closedTabHistory, setClosedTabHistory] = useState<string[]>([]);
+
+  // 快捷键：左 sidebar + 右 workspace + tab 操作
   useShortcuts(shortcuts, {
     toggleSidebar: () => {
       setState((s) => s.kind === 'ready' ? { ...s, sidebarOpen: !s.sidebarOpen } : s);
@@ -103,7 +109,51 @@ export default function App() {
     toggleWorkspace: () => {
       setState((s) => s.kind === 'ready' ? { ...s, workspaceOpen: !s.workspaceOpen } : s);
     },
+    switchTab1: () => switchToTab(0),
+    switchTab2: () => switchToTab(1),
+    switchTab3: () => switchToTab(2),
+    switchTab4: () => switchToTab(3),
+    switchTab5: () => switchToTab(4),
+    switchTab6: () => switchToTab(5),
+    switchTab7: () => switchToTab(6),
+    switchTab8: () => switchToTab(7),
+    switchTab9: () => switchToTab(8),
+    closeActiveTab: () => {
+      if (state.kind !== 'ready' || !state.activeSessionId) return;
+      const id = state.activeSessionId;
+      // 仅从 UI 列表移除，不删除数据库记录
+      setClosedTabHistory((h) => [id, ...h]);
+      const remaining = state.sessions.filter((x) => x.id !== id);
+      const nextId = remaining[0]?.id ?? null;
+      setState({ ...state, sessions: remaining, activeSessionId: nextId });
+      // 不调用 sessions.delete —— session 保留在数据库中，可通过 Ctrl+Shift+T 恢复
+    },
+    reopenClosedTab: () => {
+      if (closedTabHistory.length === 0) return;
+      const [id, ...rest] = closedTabHistory;
+      setClosedTabHistory(rest);
+      void window.electronAPI.sessions.get(id).then((result) => {
+        if (result?.session) {
+          const s = result.session;
+          const summary: SessionSummary = { id: s.id, title: s.title, modelId: s.modelId, messageCount: s.messageCount, updatedAt: s.updatedAt, workDir: s.workDir, projectId: s.projectId };
+          setState((prev) => {
+            if (prev.kind !== 'ready') return prev;
+            return {
+              ...prev,
+              sessions: [summary, ...prev.sessions],
+              activeSessionId: s.id,
+            };
+          });
+        }
+      }).catch(() => {});
+    },
   });
+
+  function switchToTab(index: number) {
+    if (state.kind !== 'ready') return;
+    const session = state.sessions[index];
+    if (session) setState({ ...state, activeSessionId: session.id });
+  }
 
   if (state.kind === 'loading') {
     return (
@@ -129,16 +179,19 @@ export default function App() {
         presets={state.presets}
         initialConfig={state.initialConfig}
         onComplete={(config) => {
-          // Onboarding 完成后建一个新会话
-          window.electronAPI.sessions.create({ modelId: config.id, workDir: config.workDir })
-            .then(async (session) => {
-              const sessions = await window.electronAPI.sessions.list();
+          // 模型配置与项目分离：首次完成后保持空工作台，由用户创建项目。
+          Promise.all([
+            window.electronAPI.sessions.list(),
+            window.electronAPI.projects.list(),
+          ])
+            .then(([sessions, projects]) => {
               setState({
                 kind: 'ready',
                 config,
                 info: state.info,
+                projects,
                 sessions,
-                activeSessionId: session.id,
+                activeSessionId: sessions[0]?.id ?? null,
                 sidebarOpen: true,
                 workspaceOpen: false,
               });
@@ -161,6 +214,7 @@ export default function App() {
         theme={theme}
         onThemeChange={setTheme}
         activeSessionId={state.activeSessionId}
+        projects={state.projects}
         sessions={state.sessions}
         onToggleSidebar={() => setState((s) => s.kind === 'ready' ? { ...s, sidebarOpen: !s.sidebarOpen } : s)}
         onToggleWorkspace={() => setState((s) => s.kind === 'ready' ? { ...s, workspaceOpen: !s.workspaceOpen } : s)}
@@ -174,7 +228,37 @@ export default function App() {
             });
           });
         }}
-        onOpenSettings={(tab?: SettingsTab) => { openSettingsAt(tab ?? 'providers'); }}
+        // MainView 的回调会被按钮直接调用；显式包一层，避免 MouseEvent 被误当成设置 tab。
+        onOpenSettings={() => openSettingsAt('providers')}
+        onProjectCreated={(project) => {
+          setState((s) => s.kind === 'ready'
+            ? { ...s, projects: [{ id: project.id, name: project.name, workDir: project.workDir, entryFile: project.entryFile, updatedAt: project.updatedAt, sessionCount: 0 }, ...s.projects] }
+            : s);
+        }}
+        onProjectDeleted={(id) => {
+          setState((s) => {
+            if (s.kind !== 'ready') return s;
+            // 把被删项目的会话移到未分组
+            const sessions = s.sessions.map((sess) => sess.projectId === id ? { ...sess, projectId: undefined } : sess);
+            const projects = s.projects.filter((p) => p.id !== id);
+            return { ...s, projects, sessions };
+          });
+        }}
+        onProjectRenamed={(id, name) => {
+          setState((s) => s.kind === 'ready'
+            ? { ...s, projects: s.projects.map((p) => p.id === id ? { ...p, name } : p) }
+            : s);
+        }}
+        onProjectFileUpdated={(project) => {
+          setState((s) => s.kind === 'ready'
+            ? {
+                ...s,
+                projects: s.projects.map((item) => item.id === project.id
+                  ? { ...item, workDir: project.workDir, entryFile: project.entryFile, updatedAt: project.updatedAt }
+                  : item),
+              }
+            : s);
+        }}
         onSessionCreated={(session) => {
           setState((s) => s.kind === 'ready'
             ? { ...s, sessions: [session, ...s.sessions], activeSessionId: session.id }
@@ -209,16 +293,6 @@ export default function App() {
         onModelChanged={(newConfig) => {
           setState((s) => s.kind === 'ready' ? { ...s, config: newConfig } : s);
         }}
-        onChangeWorkDir={async () => {
-          const dir = await window.electronAPI.dialog.openDirectory();
-          if (!dir) return;
-          try {
-            await window.electronAPI.models.updateWorkDir(state.config.id, dir);
-            setState((s) => s.kind === 'ready' ? { ...s, config: { ...s.config, workDir: dir } } : s);
-          } catch (e) {
-            console.error('设置 workDir 失败:', e);
-          }
-        }}
       />
       {settingsOpen && (
         <SettingsModal
@@ -231,7 +305,12 @@ export default function App() {
           }}
           theme={theme}
           onThemeChanged={setTheme}
-          workDir={state.kind === 'ready' ? state.config.workDir : undefined}
+          onWorkspaceModeChanged={setWorkspaceMode}
+          workDir={state.kind === 'ready'
+            ? state.projects.find((project) => project.id === state.sessions.find((session) => session.id === state.activeSessionId)?.projectId)?.workDir
+              ?? state.sessions.find((session) => session.id === state.activeSessionId)?.workDir
+              ?? state.config.workDir
+            : undefined}
           initialTab={settingsInitialTab}
         />
       )}

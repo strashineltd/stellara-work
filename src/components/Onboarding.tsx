@@ -3,12 +3,12 @@ import type { ModelPreset, ModelConfig, PresetModelId } from '../../shared/ipc';
 
 interface OnboardingProps {
   presets: ModelPreset[];
-  /** 已有配置（用于"重新配置"模式：保留 workDir 和原 model 的 key，提示已配） */
+  /** 已有配置（用于"重新配置"模式：保留原 model 的 key，提示已配） */
   initialConfig?: ModelConfig | null;
   onComplete: (config: ModelConfig) => void;
 }
 
-/** Two-page wizard: page 1 = model pick, page 2 = workdir pick */
+/** Two-page wizard: page 1 = model pick, page 2 = connection details */
 export function Onboarding({ presets, initialConfig, onComplete }: OnboardingProps) {
   const [step, setStep] = useState<'pick' | 'workdir'>(
     initialConfig ? 'workdir' : 'pick',
@@ -19,8 +19,7 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
   const [apiKey, setApiKey] = useState(initialConfig?.apiKey ?? '');
   const [baseUrl, setBaseUrl] = useState(initialConfig?.baseUrl ?? '');
   const [model, setModel] = useState(initialConfig?.model ?? '');
-  const [workDir, setWorkDir] = useState<string>(initialConfig?.workDir ?? '');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'fail'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'testing' | 'saving' | 'ok' | 'fail'>('idle');
   const [saveError, setSaveError] = useState('');
 
   // Seed baseUrl + model from selected preset (unless custom)
@@ -32,19 +31,9 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
     }
   }, [selectedId, presets]);
 
-  async function handlePickDir() {
-    const dir = await window.electronAPI.dialog.openDirectory();
-    if (dir) setWorkDir(dir);
-  }
-
   async function handleComplete() {
     if (!apiKey && !initialConfig?.apiKey) {
-      setSaveError('Please enter an API key');
-      setSaveStatus('fail');
-      return;
-    }
-    if (!workDir) {
-      setSaveError('Please select a working directory');
+      setSaveError('请输入 API 密钥');
       setSaveStatus('fail');
       return;
     }
@@ -52,12 +41,11 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
     if (!preset) return;
     const finalApiKey = apiKey || initialConfig?.apiKey || '';
     if (!finalApiKey) {
-      setSaveError('API key is required');
+      setSaveError('API 密钥为必填项');
       setSaveStatus('fail');
       return;
     }
 
-    setSaveStatus('saving');
     setSaveError('');
     const config: ModelConfig = {
       id: preset.id,
@@ -66,16 +54,26 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
       model: model || preset.model,
       apiKey: finalApiKey,
       isCustom: preset.isCustom,
-      workDir,
     };
 
+    // Phase 1: 测试连接
+    setSaveStatus('testing');
+    const testResult = await window.electronAPI.models.test(config);
+    if (!testResult.ok) {
+      setSaveStatus('fail');
+      setSaveError(testResult.error ?? '连接测试失败');
+      return;
+    }
+
+    // Phase 2: 保存配置
+    setSaveStatus('saving');
     const result = await window.electronAPI.models.configure(config);
     if (result.ok) {
       setSaveStatus('ok');
       onComplete(config);
     } else {
       setSaveStatus('fail');
-      setSaveError(result.error ?? 'Save failed');
+      setSaveError(result.error ?? '保存失败');
     }
   }
 
@@ -90,48 +88,23 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
           onPick={setSelectedId}
           onNext={() => setStep('workdir')}
           onSkip={() => setStep('workdir')}
-          activeStep={1}
         />
       ) : (
-        <WorkdirPage
+        <ConnectionPage
           apiKey={apiKey}
           onApiKeyChange={setApiKey}
           baseUrl={baseUrl}
           onBaseUrlChange={setBaseUrl}
           model={model}
           onModelChange={setModel}
-          workDir={workDir}
           isCustom={isCustom}
           initialConfig={initialConfig}
           saveStatus={saveStatus}
           saveError={saveError}
-          onPickDir={handlePickDir}
           onComplete={handleComplete}
           onBack={() => setStep('pick')}
-          activeStep={2}
         />
       )}
-    </div>
-  );
-}
-
-// ---- Progress indicator ----
-
-function StepPills({ active }: { active: number }) {
-  return (
-    <div className="step-pills">
-      <span
-        data-step-pill="1"
-        className={`step-pill ${active === 1 ? 'active' : ''}`}
-      >
-        Step 1
-      </span>
-      <span
-        data-step-pill="2"
-        className={`step-pill ${active === 2 ? 'active' : ''}`}
-      >
-        Step 2
-      </span>
     </div>
   );
 }
@@ -144,22 +117,21 @@ function PickPage({
   onPick,
   onNext,
   onSkip,
-  activeStep,
 }: {
   presets: ModelPreset[];
   selectedId: PresetModelId;
   onPick: (id: PresetModelId) => void;
   onNext: () => void;
   onSkip: () => void;
-  activeStep: number;
 }) {
   return (
     <div className="onboarding-page">
-      <StepPills active={activeStep} />
-
-      <div className="onboarding-body">
-        <h1 className="onboarding-title">Select a model</h1>
-        <p className="onboarding-subtitle">Pick a provider to get started</p>
+      <div className="onboarding-body onboarding-body--centered">
+        <div className="onboarding-brand">
+          <p className="onboarding-brand-kicker">Stellara Work</p>
+          <h1 className="onboarding-brand-title">建立你的工作环境</h1>
+          <p className="onboarding-brand-subtitle">先选择模型连接，之后可随时在设置中调整。</p>
+        </div>
 
         <div className="model-grid">
           {presets.map((p) => (
@@ -174,7 +146,7 @@ function PickPage({
                 {p.label}
               </span>
               <span className="model-card-base">
-                {p.isCustom ? 'OpenAI compatible' : 'zh-CN'}
+                {p.isCustom ? 'OpenAI 兼容' : '中文模型'}
               </span>
             </button>
           ))}
@@ -183,34 +155,31 @@ function PickPage({
 
       <div className="onboarding-footer">
         <button className="btn btn-secondary" onClick={onSkip} type="button">
-          Skip
+          跳过
         </button>
         <button className="btn btn-primary" onClick={onNext} type="button">
-          Next
+          下一步
         </button>
       </div>
     </div>
   );
 }
 
-// ---- Page 2: Workdir ----
+// ---- Page 2: Connection details ----
 
-function WorkdirPage({
+function ConnectionPage({
   apiKey,
   onApiKeyChange,
   baseUrl,
   onBaseUrlChange,
   model,
   onModelChange,
-  workDir,
   isCustom,
   initialConfig,
   saveStatus,
   saveError,
-  onPickDir,
   onComplete,
   onBack,
-  activeStep,
 }: {
   apiKey: string;
   onApiKeyChange: (v: string) => void;
@@ -218,59 +187,37 @@ function WorkdirPage({
   onBaseUrlChange: (v: string) => void;
   model: string;
   onModelChange: (v: string) => void;
-  workDir: string;
   isCustom: boolean;
   initialConfig?: ModelConfig | null;
   saveStatus: string;
   saveError: string;
-  onPickDir: () => void;
   onComplete: () => void;
   onBack: () => void;
-  activeStep: number;
 }) {
   const isReconfig = !!initialConfig;
 
   return (
     <div className="onboarding-page">
-      <StepPills active={activeStep} />
-
       <div className="onboarding-body">
         <button className="btn btn-ghost onboarding-back" onClick={onBack} type="button">
-          Back
+          返回
         </button>
 
-        <h1 className="onboarding-title">Configure workspace</h1>
-        <p className="onboarding-subtitle">Set your API key and working directory</p>
-
-        {/* Work directory */}
-        <div className="onboarding-field">
-          <label className="onboarding-label">Working directory</label>
-          <div className="dir-picker">
-            <input
-              className="input dir-input"
-              type="text"
-              placeholder="Choose a folder for the agent"
-              value={workDir}
-              readOnly
-            />
-            <button className="btn btn-secondary" onClick={onPickDir} type="button">
-              Browse...
-            </button>
-          </div>
-        </div>
+        <h1 className="onboarding-title">配置模型连接</h1>
+        <p className="onboarding-subtitle">这里只保存模型连接。项目和本地文件将在进入程序后由你分别设置。</p>
 
         {/* API key */}
         <div className="onboarding-field">
-          <label className="onboarding-label">API key</label>
+          <label className="onboarding-label">API 密钥</label>
           {isReconfig && (
             <p className="field-hint">
-              Currently configured: <code>{initialConfig?.id}</code>. Leave blank to keep the old key.
+              当前配置: <code>{initialConfig?.id}</code>。留空则保留旧密钥。
             </p>
           )}
           <input
             className="input"
             type="password"
-            placeholder={isReconfig ? 'Leave blank to keep old key' : 'sk-xxx or provider API key'}
+            placeholder={isReconfig ? '留空保留旧密钥' : 'sk-xxx 或提供商 API 密钥'}
             value={apiKey}
             onChange={(e) => onApiKeyChange(e.target.value)}
             autoComplete="off"
@@ -280,18 +227,18 @@ function WorkdirPage({
         {/* Custom model fields */}
         {isCustom && (
           <div className="onboarding-field">
-            <label className="onboarding-label">Custom endpoint</label>
+            <label className="onboarding-label">自定义端点</label>
             <input
               className="input"
               type="text"
-              placeholder="Base URL (any OpenAI-compatible endpoint)"
+              placeholder="Base URL（任意 OpenAI 兼容端点）"
               value={baseUrl}
               onChange={(e) => onBaseUrlChange(e.target.value)}
             />
             <input
               className="input"
               type="text"
-              placeholder="Model name (e.g. my-custom-model)"
+              placeholder="模型名称（如 my-custom-model）"
               value={model}
               onChange={(e) => onModelChange(e.target.value)}
               style={{ marginTop: 8 }}
@@ -300,17 +247,20 @@ function WorkdirPage({
         )}
 
         {/* Status */}
+        {saveStatus === 'testing' && (
+          <div className="status-busy" role="status">正在测试连接…</div>
+        )}
         {saveStatus === 'saving' && (
-          <div className="status-busy">Testing connection and saving...</div>
+          <div className="status-busy" role="status">正在保存配置…</div>
         )}
         {saveStatus === 'ok' && (
-          <div className="status-ok">Configuration saved</div>
+          <div className="status-ok">配置已保存</div>
         )}
         {saveStatus === 'fail' && (
           <div className="status-fail">
             {saveError}
             <div className="status-fail-hint">
-              Connection test failed. Check: API key / base URL / network.
+              连接测试失败。请检查：API 密钥 / Base URL / 网络。
             </div>
           </div>
         )}
@@ -318,15 +268,15 @@ function WorkdirPage({
 
       <div className="onboarding-footer">
         <button className="btn btn-secondary" onClick={onComplete} type="button">
-          Skip
+          暂时跳过
         </button>
         <button
           className="btn btn-primary"
           onClick={onComplete}
-          disabled={saveStatus === 'saving'}
+          disabled={saveStatus === 'saving' || saveStatus === 'testing'}
           type="button"
         >
-          {saveStatus === 'saving' ? 'Saving...' : 'Complete'}
+          {saveStatus === 'testing' ? '测试中…' : saveStatus === 'saving' ? '保存中…' : '完成配置'}
         </button>
       </div>
     </div>

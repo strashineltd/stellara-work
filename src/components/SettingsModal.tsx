@@ -13,6 +13,7 @@ import {
   type ShortcutAction,
 } from '../../shared/shortcuts';
 import { ModelCard } from './ModelCard';
+import { Icon } from './Icon';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -24,6 +25,8 @@ interface SettingsModalProps {
   theme?: ThemeName;
   /** 用户改主题 → 通知父组件（同时持久化） */
   onThemeChanged?: (theme: ThemeName) => void;
+  /** 用户改工作区模式 → 通知父组件（同时持久化） */
+  onWorkspaceModeChanged?: (mode: 'sidebar' | 'tabs') => void;
   /** 当前工作目录（用于加载 skills） */
   workDir?: string;
   /** 打开时默认选中的 tab（默认 'providers'） */
@@ -32,19 +35,28 @@ interface SettingsModalProps {
 
 export type Tab = 'providers' | 'sessions' | 'app' | 'shortcuts' | 'skills';
 
+const SETTINGS_TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'providers', label: '模型' },
+  { id: 'sessions', label: '会话' },
+  { id: 'app', label: '应用' },
+  { id: 'skills', label: '技能' },
+  { id: 'shortcuts', label: '快捷键' },
+];
+
 /**
  * 设置 Modal（4 tab：Providers / Sessions / App / Shortcuts）
  * - Providers：列出 model、添加、编辑 key、设活跃、删除
  * - Sessions：列出所有会话、删除、清空全部
- * - App：默认 workDir、数据目录、日志、清空所有数据（危险区）
+ * - App：界面、标准应用数据目录、日志、清空所有数据（危险区）
  * - Shortcuts：用户自定义快捷键
  */
-export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, theme, onThemeChanged, workDir, initialTab }: SettingsModalProps) {
+export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, theme, onThemeChanged, onWorkspaceModeChanged, workDir, initialTab }: SettingsModalProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'providers');
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [presets, setPresets] = useState<ModelPreset[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [settings, setSettings] = useState<AppSettings>({});
+  const [dataDir, setDataDir] = useState('');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingKeyValue, setEditingKeyValue] = useState('');
   const [confirmClear, setConfirmClear] = useState('');
@@ -59,7 +71,6 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
   const [addApiKey, setAddApiKey] = useState('');
   const [addBaseUrl, setAddBaseUrl] = useState('');
   const [addModelName, setAddModelName] = useState('');
-  const [addWorkDir, setAddWorkDir] = useState('');
   const [addBusy, setAddBusy] = useState(false);
   const [addTest, setAddTest] = useState<'idle' | 'saving' | 'ok' | 'fail'>('idle');
   const [addError, setAddError] = useState<string | null>(null);
@@ -96,17 +107,18 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
   useEffect(() => {
     void (async () => {
       try {
-        const [m, list, s, st] = await Promise.all([
+        const [m, list, s, st, info] = await Promise.all([
           window.electronAPI.models.getAll(),
           window.electronAPI.models.list(),
           window.electronAPI.sessions.list(),
           window.electronAPI.settings.get(),
+          window.electronAPI.app.getInfo(),
         ]);
         setModels(m);
         setPresets(list.presets);
         setSessions(s);
         setSettings(st);
-        setAddWorkDir(st.workDirDefault ?? '');
+        setDataDir(info.appDataPath);
         if (st.shortcuts) setShortcutBindings({ ...DEFAULT_SHORTCUTS, ...st.shortcuts });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -130,7 +142,6 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
     setAddApiKey('');
     setAddBaseUrl('');
     setAddModelName('');
-    setAddWorkDir(settings.workDirDefault ?? '');
     setAddBusy(false);
     setAddTest('idle');
     setAddError(null);
@@ -189,33 +200,10 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
     }
   }
 
-  async function handleUpdateWorkDir(id: string) {
-    const dir = await window.electronAPI.dialog.openDirectory();
-    if (!dir) return;
-    try {
-      await window.electronAPI.models.updateWorkDir(id, dir);
-      await refreshModels();
-      // 如果是当前活跃 model，通知 App 同步
-      const stillActive = (await window.electronAPI.models.getAll()).find((m) => m.id === id && m.isActive);
-      if (stillActive) {
-        const list = await window.electronAPI.models.list();
-        if (list.configured) onModelChanged(list.configured);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function handlePickAddWorkDir() {
-    const dir = await window.electronAPI.dialog.openDirectory();
-    if (dir) setAddWorkDir(dir);
-  }
-
   async function handleSaveAdd() {
     const p = presets.find((x) => x.id === addPresetId);
     if (!p) return;
     if (!addApiKey) { setAddError('请填 API key'); setAddTest('fail'); return; }
-    if (!addWorkDir) { setAddError('请选工作目录'); setAddTest('fail'); return; }
     setAddBusy(true);
     setAddError(null);
     setAddTest('saving');
@@ -226,7 +214,6 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
       model: addModelName || p.model,
       apiKey: addApiKey,
       isCustom: p.isCustom,
-      workDir: addWorkDir,
     };
     // 后端会自动先测连接再保存；测试不通过 → 不写入
     const r = await window.electronAPI.models.configure(config);
@@ -344,20 +331,63 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="settings-header">
-          <h3>设置</h3>
-          <button className="btn-icon" onClick={onClose} type="button" title="关闭">×</button>
+          <h3 id="settings-title">设置</h3>
+          <button className="btn-icon" onClick={onClose} type="button" title="关闭" aria-label="关闭设置">
+            <Icon name="x" />
+          </button>
         </div>
-        <div className="settings-tabs">
-          <button className={tab === 'providers' ? 'active' : ''} onClick={() => setTab('providers')} type="button">Providers</button>
-          <button className={tab === 'sessions' ? 'active' : ''} onClick={() => setTab('sessions')} type="button">Sessions</button>
-          <button className={tab === 'app' ? 'active' : ''} onClick={() => setTab('app')} type="button">App</button>
-          <button className={tab === 'skills' ? 'active' : ''} onClick={() => setTab('skills')} type="button">Skills</button>
-          <button className={tab === 'shortcuts' ? 'active' : ''} onClick={() => setTab('shortcuts')} type="button">快捷键</button>
+        <div className="settings-tabs" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+          {SETTINGS_TABS.map((item, index) => (
+            <button
+              key={item.id}
+              id={`settings-tab-${item.id}`}
+              className={tab === item.id ? 'active' : ''}
+              onClick={() => setTab(item.id)}
+              onKeyDown={(e) => {
+                if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+                e.preventDefault();
+                let nextIndex = index;
+                if (e.key === 'ArrowUp') nextIndex = (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+                if (e.key === 'ArrowDown') nextIndex = (index + 1) % SETTINGS_TABS.length;
+                if (e.key === 'Home') nextIndex = 0;
+                if (e.key === 'End') nextIndex = SETTINGS_TABS.length - 1;
+                const next = SETTINGS_TABS[nextIndex]!;
+                setTab(next.id);
+                requestAnimationFrame(() => document.getElementById(`settings-tab-${next.id}`)?.focus());
+              }}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              aria-controls={`settings-panel-${item.id}`}
+              tabIndex={tab === item.id ? 0 : -1}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
         <div className="settings-body">
-          {error && <div className="error-banner"><span className="error-icon">⚠</span><span className="error-text">{error}</span></div>}
+          {error && (
+            <div className="error-banner" role="alert">
+              <span className="error-icon"><Icon name="alert" size={17} /></span>
+              <span className="error-text">{error}</span>
+            </div>
+          )}
+          <div
+            key={tab}
+            id={`settings-panel-${tab}`}
+            className="settings-panel"
+            role="tabpanel"
+            aria-labelledby={`settings-tab-${tab}`}
+            tabIndex={0}
+          >
           {tab === 'providers' && (
             <div className="providers-list">
               <div className="providers-actions">
@@ -367,7 +397,8 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                   type="button"
                   aria-expanded={showAdd}
                 >
-                  {showAdd ? '▲ 收起' : '▼ 添加模型'}
+                  <Icon name={showAdd ? 'chevron-down' : 'chevron-right'} size={14} />
+                  <span>{showAdd ? '收起' : '添加模型'}</span>
                 </button>
               </div>
 
@@ -380,7 +411,10 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                       onClick={resetAddForm}
                       type="button"
                       title="收起"
-                    >×</button>
+                      aria-label="收起添加模型表单"
+                    >
+                      <Icon name="x" size={14} />
+                    </button>
                   </div>
                   <div className="model-grid">
                     {presets.map((p) => (
@@ -393,8 +427,9 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                     ))}
                   </div>
                   <div className="settings-row">
-                    <label>API key</label>
+                    <label htmlFor="add-model-api-key">API key</label>
                     <input
+                      id="add-model-api-key"
                       type="password"
                       placeholder="sk-xxx 或对应厂商的 key"
                       value={addApiKey}
@@ -405,8 +440,9 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                   {addPresetId === 'custom' ? (
                     <>
                       <div className="settings-row">
-                        <label>Base URL</label>
+                        <label htmlFor="add-model-base-url">Base URL</label>
                         <input
+                          id="add-model-base-url"
                           type="text"
                           placeholder="任意 OpenAI 兼容 endpoint"
                           value={addBaseUrl}
@@ -414,8 +450,9 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                         />
                       </div>
                       <div className="settings-row">
-                        <label>Model</label>
+                        <label htmlFor="add-model-name">Model</label>
                         <input
+                          id="add-model-name"
                           type="text"
                           placeholder="model 名（如 my-custom-model）"
                           value={addModelName}
@@ -435,21 +472,9 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                       </div>
                     </div>
                   )}
-                  <div className="settings-row">
-                    <label>工作目录</label>
-                    <div className="dir-picker">
-                      <input
-                        type="text"
-                        value={addWorkDir}
-                        readOnly
-                        placeholder="选个目录"
-                      />
-                      <button className="btn btn-secondary" onClick={() => void handlePickAddWorkDir()} type="button">选择…</button>
-                    </div>
-                  </div>
                   {addError && (
-                    <div className="error-banner">
-                      <span className="error-icon">⚠</span>
+                    <div className="error-banner" role="alert">
+                      <span className="error-icon"><Icon name="alert" size={17} /></span>
                       <div>
                         <div className="error-text">{addError}</div>
                         <div className="status-fail-hint">
@@ -459,7 +484,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                     </div>
                   )}
                   {addTest === 'saving' && (
-                    <div className="status-busy">⏳ 正在测试连接并保存...</div>
+                    <div className="status-busy" role="status">正在测试连接并保存…</div>
                   )}
                   <div className="form-actions">
                     <button className="btn btn-primary" onClick={() => void handleSaveAdd()} disabled={addBusy || !addApiKey} type="button">
@@ -477,14 +502,15 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                     <div className="provider-name">{m.label} {m.isActive && <span className="badge">活跃</span>}</div>
                     <code className="provider-base">{m.baseUrl}</code>
                     <code className="provider-model">model: {m.model}</code>
-                    {m.workDir && <code className="provider-workdir">workdir: {m.workDir}</code>}
                     <div className={`provider-key ${m.hasKey ? '' : 'missing'}`}>
-                      {m.hasKey ? '✓ API key 已配' : '✗ 缺 key'}
+                      <Icon name={m.hasKey ? 'check' : 'x'} size={13} />
+                      <span>{m.hasKey ? 'API key 已配置' : '缺少 API key'}</span>
                     </div>
                     <div className="provider-context-row">
                       <span className="provider-context-label">上下文窗口</span>
                       <select
                         className="provider-context-select"
+                        aria-label={`${m.label} 上下文窗口`}
                         value={m.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
                         onChange={(e) => void handleUpdateContextWindow(m.id, Number(e.target.value))}
                       >
@@ -502,6 +528,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                         <input
                           type="password"
                           placeholder="新 API key"
+                          aria-label={`更新 ${m.label} 的 API key`}
                           value={editingKeyValue}
                           onChange={(e) => setEditingKeyValue(e.target.value)}
                           autoComplete="off"
@@ -511,9 +538,6 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                       </>
                     ) : (
                       <>
-                        <button className="btn btn-secondary" onClick={() => void handleUpdateWorkDir(m.id)} type="button" title={m.workDir ?? '未选'}>
-                          📂 workdir
-                        </button>
                         <button className="btn btn-secondary" onClick={() => setEditingKey(m.id)} type="button">改 key</button>
                         {!m.isActive && <button className="btn btn-primary" onClick={() => void handleSetActive(m.id)} type="button">设活跃</button>}
                         <button className="btn btn-danger" onClick={() => void handleRemove(m.id)} type="button">删除</button>
@@ -552,6 +576,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                       onChange={() => {
                         setSettings((s) => ({ ...s, workspaceMode: 'sidebar' }));
                         void window.electronAPI.settings.update({ workspaceMode: 'sidebar' });
+                        onWorkspaceModeChanged?.('sidebar');
                       }}
                     />
                     {' '}紧凑 sidebar
@@ -565,6 +590,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                       onChange={() => {
                         setSettings((s) => ({ ...s, workspaceMode: 'tabs' }));
                         void window.electronAPI.settings.update({ workspaceMode: 'tabs' });
+                        onWorkspaceModeChanged?.('tabs');
                       }}
                     />
                     {' '}Tab 栏
@@ -572,24 +598,12 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                 </div>
               </div>
               <div className="settings-row">
-                <label>默认工作目录</label>
-                <input
-                  type="text"
-                  value={settings.workDirDefault ?? ''}
-                  placeholder="新 model 默认的 workDir（可空）"
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSettings((s) => ({ ...s, workDirDefault: v }));
-                    void window.electronAPI.settings.update({ workDirDefault: v });
-                  }}
-                />
-              </div>
-              <div className="settings-row">
                 <label>数据目录</label>
-                <code className="data-dir-path">~/.stellara</code>
+                <code className="data-dir-path" title={dataDir}>{dataDir || '正在读取…'}</code>
                 <button className="btn btn-secondary" onClick={() => void window.electronAPI.settings.openDataDir()} type="button">
                   在资源管理器打开
                 </button>
+                <p className="field-hint">配置、密钥和会话保存在系统标准应用数据目录中；项目文件仍保留在你选择的位置。</p>
               </div>
               <div className="settings-row">
                 <label>日志</label>
@@ -598,8 +612,9 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                 </button>
               </div>
               <div className="settings-row">
-                <label>主题</label>
+                <label htmlFor="theme-select">主题</label>
                 <select
+                  id="theme-select"
                   className="input theme-select"
                   value={theme ?? 'dark'}
                   onChange={(e) => {
@@ -622,13 +637,15 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                   type="button"
                   title="复制版本 / 系统 / DB / 日志尾巴到剪贴板，方便上报 bug"
                 >
-                  {copyingDiag ? '采集中...' : diagCopied ? '✓ 已复制' : '📋 复制诊断信息'}
+                  {copyingDiag ? '采集中…' : diagCopied ? '已复制' : '复制诊断信息'}
                 </button>
               </div>
               <div className="danger-zone">
                 <h4>危险区</h4>
                 <p>清空所有数据（config.json + .env + stellara.db）后需重启 app。</p>
+                <label className="danger-confirm-label" htmlFor="clear-all-confirm">输入 DELETE 以确认</label>
                 <input
+                  id="clear-all-confirm"
                   type="text"
                   placeholder='输入 "DELETE" 确认'
                   value={confirmClear}
@@ -704,7 +721,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                         type="button"
                         title="从磁盘重新读取所有 skill JSON 文件"
                       >
-                        ↻ 重新加载
+                        重新加载
                       </button>
                       <button
                         className="btn btn-secondary btn-small"
@@ -712,7 +729,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                         type="button"
                         title="在文件管理器打开 skills 目录"
                       >
-                        📂 打开目录
+                        打开目录
                       </button>
                     </div>
                   </div>
@@ -730,7 +747,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                         <li key={s.name} className="skill-card">
                           <div className="skill-card-header">
                             <div className="skill-card-title">
-                              <span className="skill-card-icon">🎯</span>
+                              <span className="skill-card-icon" aria-hidden="true"><Icon name="tool" size={14} /></span>
                               <span className="skill-card-name">/{s.name}</span>
                             </div>
                             <button
@@ -746,7 +763,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                               title={isOpen ? '收起 prompt' : '展开 prompt'}
                               type="button"
                             >
-                              {isOpen ? '▾' : '▸'}
+                              <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={14} />
                             </button>
                           </div>
                           <div className="skill-card-desc">{s.description}</div>
@@ -765,6 +782,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
               )}
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

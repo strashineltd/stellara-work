@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FsNode } from '../../shared/ipc';
 import { FileTreeNode } from './FileTreeNode';
+import { Icon } from './Icon';
 
 /**
  * 右侧工作区 sidebar（4 个垂直堆叠区域）：
  * - 目标：plan 步骤 或 首条 user 消息
  * - 进度：tool_call 总数 / 已完成 / 当前在跑
  * - 交付物：本次会话 write_file / edit_file 产物
- * - 文件：workDir 文件树 + agent 动过的文件标记
+ * - 文件：workDir 文件树 + 当前任务修改过的文件标记
  *
  * 数据由父组件 (MainView) 算好传过来；本组件只渲染。
  */
@@ -87,8 +88,30 @@ export function WorkspacePanel({
   }, [onWidthChange]);
 
   return (
-    <aside className="workspace-panel" ref={panelRef} style={{ width }}>
-      <div className="workspace-resize-handle" onMouseDown={onMouseDown} />
+    <aside id="workspace-panel" className="workspace-panel" ref={panelRef} style={{ width }} aria-label="任务详情">
+      <div
+        className="workspace-resize-handle"
+        onMouseDown={onMouseDown}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          e.preventDefault();
+          const delta = e.key === 'ArrowLeft' ? 16 : -16;
+          const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width + delta));
+          setWidth(next);
+          onWidthChange?.(next);
+        }}
+        role="separator"
+        aria-label="调整任务详情宽度"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={MAX_WIDTH}
+        aria-valuenow={width}
+        tabIndex={0}
+      />
+      <div className="workspace-panel-header">
+        <span className="workspace-panel-kicker">检查器</span>
+        <strong>任务详情</strong>
+      </div>
       <GoalSection goal={goal} stepStatus={stepStatus} onStepToggle={onStepToggle} />
       <ProgressSection progress={progress} goal={goal} stepStatus={stepStatus} />
       <DeliverablesSection deliverables={deliverables} />
@@ -125,11 +148,22 @@ function GoalSection({
                 key={i}
                 className={`goal-step-item ${s}`}
                 onClick={() => onStepToggle?.(i)}
-                title="点击切换：待做 → 完成 → 失败 → 待做"
+                onKeyDown={(event) => {
+                  if (!onStepToggle || (event.key !== 'Enter' && event.key !== ' ')) return;
+                  event.preventDefault();
+                  onStepToggle(i);
+                }}
+                role={onStepToggle ? 'button' : undefined}
+                tabIndex={onStepToggle ? 0 : undefined}
+                aria-label={onStepToggle ? `切换步骤 ${i + 1} 状态，当前为${s === 'done' ? '完成' : s === 'failed' ? '失败' : '待做'}` : undefined}
+                title={onStepToggle ? '切换状态：待做 → 完成 → 失败' : undefined}
               >
                 <span className="goal-step-num">{i + 1}</span>
                 <span className="goal-step-text">{step}</span>
-                <span className="goal-step-badge">{s === 'done' ? '+' : s === 'failed' ? '!' : ''}</span>
+                <span className="goal-step-badge" aria-hidden="true">
+                  {s === 'done' && <Icon name="check" size={13} />}
+                  {s === 'failed' && <Icon name="alert" size={13} />}
+                </span>
               </li>
             );
           })}
@@ -163,20 +197,29 @@ function ProgressSection({
       </summary>
       {total > 0 && (
         <div className="progress-bar-wrap">
-          <div className="progress-bar" style={{ width: `${pct}%` }} />
+          <div
+            className="progress-meter"
+            role="progressbar"
+            aria-label="任务进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={pct}
+          >
+            <div className="progress-bar" style={{ width: `${pct}%` }} />
+          </div>
           <span className="progress-bar-text">{pct}%</span>
         </div>
       )}
       <div className="progress-summary">
         {isPlan
           ? `步骤 ${doneCount} / ${total}`
-          : `已完成 ${progress.completed} / ${progress.total} 个工具调用`}
+          : `已完成 ${progress.completed} / ${progress.total} 项操作`}
       </div>
       {progress.currentName && (
         <div className="progress-current">{progress.currentName}</div>
       )}
       {total === 0 && (
-        <div className="empty-hint">暂无工具调用</div>
+        <div className="empty-hint">任务开始后会显示进度</div>
       )}
     </details>
   );
@@ -191,7 +234,9 @@ function DeliverablesSection({ deliverables }: { deliverables: Deliverable[] }) 
       {deliverables.length === 0 && <div className="empty-hint">还没有写过的文件</div>}
       {deliverables.map((d, i) => (
         <div key={`${d.path}-${i}`} className="deliverable-item" title={d.path}>
-          <span className="deliverable-icon">{d.kind === 'write' ? '+' : '~'}</span>
+          <span className="deliverable-icon" aria-hidden="true">
+            <Icon name={d.kind === 'write' ? 'file' : 'edit'} size={13} />
+          </span>
           <span className="deliverable-path">{d.path}</span>
         </div>
       ))}
@@ -224,7 +269,7 @@ function FileSection({ workDir, touchedFiles }: { workDir: string; touchedFiles:
     });
   }
 
-  /** agent 动过的文件 → emoji 标记 */
+  /** Files touched by the current task receive a compact marker. */
   function badge(node: FsNode): string | undefined {
     if (node.type === 'dir') return undefined;
     return touchedFiles.has(node.path) ? '*' : undefined;
@@ -236,8 +281,8 @@ function FileSection({ workDir, touchedFiles }: { workDir: string; touchedFiles:
         <span>文件</span>
       </summary>
       <div className="workspace-files-tree">
-        {treeError && <p className="empty-hint">Error: {treeError}</p>}
-        {!treeError && !tree && <p className="empty-hint">加载中...</p>}
+        {treeError && <p className="empty-hint" role="alert">文件加载失败：{treeError}</p>}
+        {!treeError && !tree && <p className="empty-hint" role="status">正在加载文件…</p>}
         {tree && (
           <ul className="ftree">
             <FileTreeNode

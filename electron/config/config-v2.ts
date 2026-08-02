@@ -1,13 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { setKey } from './secrets';
+import { getAppDataDir } from './data-dir';
+import type { ThemeName } from '../../shared/ipc';
 
-const DEFAULT_CONFIG_DIR = path.join(os.homedir(), '.stellara');
 let _overrideConfigDir: string | null = null;
 
 function configDir(): string {
-  return _overrideConfigDir ?? DEFAULT_CONFIG_DIR;
+  return _overrideConfigDir ?? getAppDataDir();
 }
 
 function configPath(): string {
@@ -30,12 +30,19 @@ export interface ModelEntry {
   model: string;
   workDir?: string;
   createdAt: string;
+  /** 模型上下文窗口（token 数）。默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
+  contextWindow?: number;
 }
 
 export interface AppConfig {
   activeModelId: string | null;
   models: ModelEntry[];
-  app: { workDirDefault?: string };
+  app: {
+    workDirDefault?: string;
+    shortcuts?: Partial<Record<string, string>>;
+    theme?: ThemeName;
+    workspaceMode?: 'sidebar' | 'tabs';
+  };
   schemaVersion: 1;
 }
 
@@ -67,7 +74,10 @@ export async function loadConfig(): Promise<AppConfig> {
 
 export async function saveConfig(cfg: AppConfig): Promise<void> {
   await fs.mkdir(configDir(), { recursive: true });
-  await fs.writeFile(configPath(), JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  const tmpPath = configPath() + '.tmp';
+  // 原子写入：先写临时文件，再 rename（防止崩溃损坏）
+  await fs.writeFile(tmpPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  await fs.rename(tmpPath, configPath());
 }
 
 export async function addModel(entry: ModelEntry): Promise<AppConfig> {
@@ -117,6 +127,7 @@ export async function upsertModel(entry: ModelEntry): Promise<AppConfig> {
       baseUrl: entry.baseUrl,
       model: entry.model,
       workDir: entry.workDir,
+      contextWindow: entry.contextWindow,
     };
   } else {
     cfg.models.push(entry);
@@ -124,6 +135,17 @@ export async function upsertModel(entry: ModelEntry): Promise<AppConfig> {
   cfg.activeModelId = entry.id;
   await saveConfig(cfg);
   return cfg;
+}
+
+/**
+ * 只更新 contextWindow
+ */
+export async function updateContextWindow(id: string, contextWindow: number): Promise<void> {
+  const cfg = await loadConfig();
+  const idx = cfg.models.findIndex((m) => m.id === id);
+  if (idx < 0) throw new Error(`Model 不存在: ${id}`);
+  cfg.models[idx] = { ...cfg.models[idx]!, contextWindow };
+  await saveConfig(cfg);
 }
 
 export async function migrateFromV1(): Promise<boolean> {

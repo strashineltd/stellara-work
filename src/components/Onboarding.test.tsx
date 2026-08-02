@@ -73,6 +73,7 @@ describe('Onboarding', () => {
       },
       models: {
         configure: vi.fn().mockResolvedValue({ ok: true }),
+        test: vi.fn().mockResolvedValue({ ok: true }),
       },
     };
   });
@@ -113,19 +114,6 @@ describe('Onboarding', () => {
     expect(updated!.className).toMatch(/selected/);
   });
 
-  it('shows a progress indicator with 2 step pills', () => {
-    const { querySelectorAll } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
-    const pills = querySelectorAll('[data-step-pill]');
-    expect(pills.length).toBe(2);
-  });
-
-  it('highlights step 1 as active on page 1', () => {
-    const { querySelector } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
-    const step1 = querySelector('[data-step-pill="1"]');
-    expect(step1).toBeTruthy();
-    expect(step1!.className).toMatch(/active/);
-  });
-
   it('does not show the welcome screen if initialConfig is provided', () => {
     const init: ModelConfig = { id: 'glm-5.2', label: 'GLM-5.2', baseUrl: 'x', model: 'g', isCustom: false, apiKey: '', contextWindow: 256000, workDir: '/test' };
     const { queryByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
@@ -152,27 +140,18 @@ describe('Onboarding', () => {
   });
 
   it('navigates to page 2 when Next is clicked', () => {
-    const { getByText, querySelector } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
     const nextBtn = getByText(/next|下一步/i);
     fireClick(nextBtn);
-    // Should now be on workdir page
-    expect(querySelector('[data-step-pill="2"]')?.className).toMatch(/active/);
+    expect(getByText(/配置模型连接/i)).toBeTruthy();
   });
 
-  // --- Page 2: Workdir ---
+  // --- Page 2: Connection details ---
 
-  it('shows workdir page when initialConfig is provided', () => {
+  it('shows connection details when initialConfig is provided', () => {
     const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
-    // Should show workdir-related UI
-    expect(getByText(/workdir|工作目录|directory|目录/i)).toBeTruthy();
-  });
-
-  it('shows step 2 as active on the workdir page', () => {
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing' };
-    const { querySelector } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
-    const step2 = querySelector('[data-step-pill="2"]');
-    expect(step2!.className).toMatch(/active/);
+    expect(getByText(/配置模型连接/i)).toBeTruthy();
   });
 
   it('has a back button on page 2', () => {
@@ -194,13 +173,13 @@ describe('Onboarding', () => {
   });
 
   it('navigates back to page 1 when Back is clicked', () => {
-    const { getByText, querySelector } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
     // Go to page 2 first
     fireClick(getByText(/next|下一步/i));
-    expect(querySelector('[data-step-pill="2"]')?.className).toMatch(/active/);
+    expect(getByText(/配置模型连接/i)).toBeTruthy();
     // Go back
     fireClick(getByText(/back|返回|上一步/i));
-    expect(querySelector('[data-step-pill="1"]')?.className).toMatch(/active/);
+    expect(getByText(/建立你的工作环境/i)).toBeTruthy();
   });
 
   it('skips from page 1 directly to completing with defaults', () => {
@@ -219,17 +198,16 @@ describe('Onboarding', () => {
     // We can check that configure was attempted
   });
 
-  it('pre-fills workdir from initialConfig', () => {
+  it('does not expose the legacy model workdir during reconfiguration', () => {
     const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing/path' };
     const { container } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
-    // The workdir input should show the pre-filled path
-    const inputs = container.querySelectorAll('input');
-    const dirInput = Array.from(inputs).find((i) => (i as HTMLInputElement).value === '/existing/path');
-    expect(dirInput).toBeTruthy();
+    expect(container.textContent).not.toContain('/existing/path');
+    expect(container.textContent).not.toContain('工作目录');
   });
 
   it('calls onComplete after successful configure', async () => {
     const onComplete = vi.fn();
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
     (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
     const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-key', contextWindow: 256000, workDir: '/test' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={onComplete} />);
@@ -244,6 +222,7 @@ describe('Onboarding', () => {
 
   it('shows error when configure fails', async () => {
     const onComplete = vi.fn();
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
     (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: false, error: 'Connection refused' });
     const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-key', contextWindow: 256000, workDir: '/test' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={onComplete} />);

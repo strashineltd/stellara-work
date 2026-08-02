@@ -17,17 +17,16 @@ export function MarkdownView({ content }: MarkdownViewProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // 行内代码
-          code({ inline, className, children, ...props }: {
-            inline?: boolean;
+          // 行内代码（react-markdown v10: inline prop 已移除，用 className 判断）
+          code({ className, children, ...props }: {
             className?: string;
             children?: React.ReactNode;
           } & React.HTMLAttributes<HTMLElement>) {
-            if (inline) {
+            if (!className) {
               return <code className="md-inline-code" {...props}>{children}</code>;
             }
             return (
-              <code className={className ?? 'md-code-block'} {...props}>
+              <code className={className} {...props}>
                 {children}
               </code>
             );

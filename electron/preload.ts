@@ -45,9 +45,9 @@ function makeStreamIterator<T>(channel: string, filter: (payload: any) => boolea
 
   ipcRenderer.on(channel, handler);
 
-  // done 事件（payload.event.type === 'done'）关闭流
+  // terminal 事件关闭流，避免 error 路径遗留 renderer listener。
   const closer = (_e: unknown, payload: any) => {
-    if (filter(payload) && payload?.event?.type === 'done') {
+    if (filter(payload) && (payload?.event?.type === 'done' || payload?.event?.type === 'error')) {
       closed = true;
       ipcRenderer.removeListener(channel, handler);
       ipcRenderer.removeListener(channel, closer);
@@ -89,6 +89,8 @@ const api: ElectronAPI = {
     setActive: (modelId: string) => ipcRenderer.invoke('models:setActive', modelId),
     updateKey: (modelId: string, newKey: string) => ipcRenderer.invoke('models:updateKey', modelId, newKey),
     updateWorkDir: (modelId: string, workDir: string) => ipcRenderer.invoke('models:updateWorkDir', modelId, workDir),
+    updateContextWindow: (modelId: string, contextWindow: number) =>
+      ipcRenderer.invoke('models:updateContextWindow', modelId, contextWindow),
   },
   chat: {
     start: async (request: ChatRequest): Promise<{ streamId: string; events: AsyncIterable<ChatStreamEvent> }> => {
@@ -100,7 +102,13 @@ const api: ElectronAPI = {
       return { streamId, events };
     },
     cancel: () => {
-      // W2 不实现：暂时 noop
+      // deprecated
+    },
+    abort: (streamId: string) => {
+      ipcRenderer.send('chat:abort', streamId);
+    },
+    approve: (approvalId: string, approved: boolean) => {
+      ipcRenderer.send('approval:respond', approvalId, approved);
     },
   },
   tools: {
@@ -109,6 +117,16 @@ const api: ElectronAPI = {
   },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
+    openFile: (workDir: string): Promise<string | null> => ipcRenderer.invoke('dialog:openFile', workDir),
+    selectProjectFile: () => ipcRenderer.invoke('dialog:selectProjectFile'),
+    createProjectFile: () => ipcRenderer.invoke('dialog:createProjectFile'),
+  },
+  projects: {
+    list: () => ipcRenderer.invoke('projects:list'),
+    create: (args: { name: string; workDir: string; entryFile: string }) => ipcRenderer.invoke('projects:create', args),
+    delete: (id: string) => ipcRenderer.invoke('projects:delete', id),
+    rename: (id: string, name: string) => ipcRenderer.invoke('projects:rename', id, name),
+    updateFile: (id: string, selection: { path: string; workDir: string }) => ipcRenderer.invoke('projects:updateFile', id, selection),
   },
   sessions: {
     list: (): Promise<SessionSummary[]> => ipcRenderer.invoke('sessions:list'),
@@ -120,6 +138,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('sessions:saveMessages', id, messages),
     appendMessage: (id: string, message: MessageRow) =>
       ipcRenderer.invoke('sessions:appendMessage', id, message),
+    move: (sessionId: string, projectId: string | null) =>
+      ipcRenderer.invoke('sessions:move', sessionId, projectId),
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
@@ -127,6 +147,10 @@ const api: ElectronAPI = {
     clearAllData: () => ipcRenderer.invoke('settings:clearAllData'),
     openDataDir: () => ipcRenderer.invoke('settings:openDataDir'),
     openLogFile: (name: 'main' | 'renderer') => ipcRenderer.invoke('settings:openLogFile', name),
+    collectDiagnostics: () => ipcRenderer.invoke('settings:collectDiagnostics'),
+  },
+  skills: {
+    list: (workDir: string) => ipcRenderer.invoke('skills:list', workDir),
   },
   fs: {
     listTree: (cwd: string, maxDepth?: number): Promise<FsNode> =>
@@ -135,6 +159,22 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('fs:readFile', workDir, filePath, maxBytes),
     openPath: (workDir: string, filePath: string): Promise<boolean> =>
       ipcRenderer.invoke('fs:openPath', workDir, filePath),
+    createFile: (workDir: string, relativePath: string): Promise<{ path: string }> =>
+      ipcRenderer.invoke('fs:createFile', workDir, relativePath),
+  },
+  memory: {
+    search: (query: string, options?: { scope?: string; kind?: string; limit?: number }) =>
+      ipcRenderer.invoke('memory:search', query, options),
+    list: (options?: { scope?: string; kind?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('memory:list', options),
+    save: (memory: { scope: string; scopeId?: string; kind: string; content: string; source?: string; importance?: number; confidence?: number; tags?: string[] }) =>
+      ipcRenderer.invoke('memory:save', memory),
+    update: (id: string, patch: { content?: string; importance?: number; tags?: string[] }) =>
+      ipcRenderer.invoke('memory:update', id, patch),
+    delete: (id: string) =>
+      ipcRenderer.invoke('memory:delete', id),
+    stats: () =>
+      ipcRenderer.invoke('memory:stats'),
   },
 };
 

@@ -8,7 +8,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    target: 'chrome120',
+    target: 'chrome134',
     sourcemap: process.env.NODE_ENV !== 'production',
   },
   server: {
