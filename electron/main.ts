@@ -529,19 +529,31 @@ function registerIpcHandlers(): void {
     } catch {
       // ignore
     }
-    const { getAppDataDir } = await import('./config/data-dir');
+    const { getAppDataDir, getLegacyDataDir } = await import('./config/data-dir');
     const dir = getAppDataDir();
+    const legacyDir = getLegacyDataDir();
+    const filesToDelete = [
+      'config.json', 'config.json.bak', '.env',
+      'stellara.db', 'stellara.db-wal', 'stellara.db-shm',
+    ];
     try {
-      await Promise.all([
-        'config.json', 'config.json.bak', '.env',
-        'stellara.db', 'stellara.db-wal', 'stellara.db-shm',
-      ].map((name) => fs.rm(path.join(dir, name), { force: true })));
+      await Promise.all(
+        filesToDelete.map((name) => fs.rm(path.join(dir, name), { force: true })),
+      );
     } catch (err) {
       // Windows 文件锁失败时返回清晰错误
       if ((err as NodeJS.ErrnoException).code === 'EBUSY' || (err as NodeJS.ErrnoException).code === 'EPERM') {
         throw new Error('无法删除数据目录：文件被占用。请关闭应用后重试。');
       }
       throw err;
+    }
+    // 同时删除遗留目录的数据文件（防止下次启动被 migrateLegacyAppData 重新迁移）
+    try {
+      await Promise.all(
+        filesToDelete.map((name) => fs.rm(path.join(legacyDir, name), { force: true })),
+      );
+    } catch {
+      // 遗留目录删除失败不影响重置
     }
     // 重新初始化空数据库 + 记忆存储
     try {
