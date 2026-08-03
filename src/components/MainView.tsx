@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
-  AppInfo, ApprovalRequest, ModelConfig, ModelListItem,
+  AppInfo, ApprovalRequest, ConfiguredModel, ModelListItem,
   SessionSummary, Session, SkillDef, Project, ProjectFileSelection,
 } from '../../shared/ipc';
 import {
@@ -21,7 +21,7 @@ import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 
 interface MainViewProps {
-  config: ModelConfig;
+  config: ConfiguredModel;
   info: AppInfo;
   sidebarOpen: boolean;
   workspaceMode?: 'sidebar' | 'tabs';
@@ -44,7 +44,7 @@ interface MainViewProps {
   onSessionDeleted: (id: string) => void;
   onSessionRenamed: (id: string, title: string) => void;
   onSessionsChanged: (sessions: SessionSummary[]) => void;
-  onModelChanged: (config: ModelConfig) => void;
+  onModelChanged: (config: ConfiguredModel) => void;
   onThemeChange?: (theme: import('../../shared/ipc').ThemeName) => void;
 }
 
@@ -390,7 +390,8 @@ export function MainView(props: MainViewProps) {
     void handleNewSession(projectId);
   }
 
-  async function handleDeleteSession(id: string) {
+  async function handleDeleteSession(id: string, skipConfirm = false) {
+    if (!skipConfirm && !window.confirm('删除该会话？该操作不可撤销，聊天记录将一并清除。')) return;
     try {
       await window.electronAPI.sessions.delete(id);
       onSessionDeleted(id);
@@ -489,9 +490,10 @@ export function MainView(props: MainViewProps) {
                     }
                   }}
                   onCloseOthers={(keepId) => {
-                    for (const s of sessions) {
-                      if (s.id !== keepId) void handleDeleteSession(s.id);
-                    }
+                    const others = sessions.filter((s) => s.id !== keepId);
+                    if (others.length === 0) return;
+                    if (!window.confirm(`关闭并删除其他 ${others.length} 个会话？该操作不可撤销。`)) return;
+                    for (const s of others) void handleDeleteSession(s.id, true);
                   }}
                 />
               )}
