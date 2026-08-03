@@ -557,8 +557,8 @@ export interface ElectronAPI {
     list: (workDir: string) => Promise<SkillDef[]>;
   };
   memory: {
-    search: (query: string, options?: { scope?: string; kind?: string; limit?: number }) => Promise<Memory[]>;
-    list: (options?: { scope?: string; kind?: string; limit?: number; offset?: number }) => Promise<Memory[]>;
+    search: (query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => Promise<Memory[]>;
+    list: (options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) => Promise<Memory[]>;
     save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) => Promise<Memory>;
     update: (id: string, patch: Partial<Pick<Memory, 'content' | 'importance' | 'tags'>>) => Promise<void>;
     delete: (id: string) => Promise<void>;

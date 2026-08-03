@@ -16,6 +16,7 @@ import type {
   CreateSessionArgs,
   AppSettings,
   FsNode,
+  Memory,
 } from '../shared/ipc';
 
 /**
@@ -162,11 +163,11 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('fs:createFile', workDir, relativePath),
   },
   memory: {
-    search: (query: string, options?: { scope?: string; kind?: string; limit?: number }) =>
+    search: (query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) =>
       ipcRenderer.invoke('memory:search', query, options),
-    list: (options?: { scope?: string; kind?: string; limit?: number; offset?: number }) =>
+    list: (options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('memory:list', options),
-    save: (memory: { scope: string; scopeId?: string; kind: string; content: string; source?: string; importance?: number; confidence?: number; tags?: string[] }) =>
+    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) =>
       ipcRenderer.invoke('memory:save', memory),
     update: (id: string, patch: { content?: string; importance?: number; tags?: string[] }) =>
       ipcRenderer.invoke('memory:update', id, patch),

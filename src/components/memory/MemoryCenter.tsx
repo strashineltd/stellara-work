@@ -8,8 +8,8 @@ export function MemoryCenter() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterScope, setFilterScope] = useState<string>('');
-  const [filterKind, setFilterKind] = useState<string>('');
+  const [filterScope, setFilterScope] = useState<Memory['scope'] | ''>('');
+  const [filterKind, setFilterKind] = useState<Memory['kind'] | ''>('');
   const [loading, setLoading] = useState(false);
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -113,7 +113,7 @@ export function MemoryCenter() {
         <select
           className="memory-center__filter-select"
           value={filterScope}
-          onChange={(e) => setFilterScope(e.target.value)}
+          onChange={(e) => setFilterScope(e.target.value as Memory['scope'] | '')}
           aria-label="按作用域筛选"
         >
           <option value="">全部作用域</option>
@@ -124,7 +124,7 @@ export function MemoryCenter() {
         <select
           className="memory-center__filter-select"
           value={filterKind}
-          onChange={(e) => setFilterKind(e.target.value)}
+          onChange={(e) => setFilterKind(e.target.value as Memory['kind'] | '')}
           aria-label="按类型筛选"
         >
           <option value="">全部类型</option>
