@@ -326,6 +326,12 @@ export function bumpSession(id: string, messageCount: number): void {
     .run(messageCount, Date.now(), id);
 }
 
+/** 全部会话的消息总数（诊断用） */
+export function countAllMessages(): number {
+  const row = getDb().prepare('SELECT COUNT(*) AS c FROM messages').get() as { c: number };
+  return row?.c ?? 0;
+}
+
 // ---- Project CRUD ----
 
 export function listProjects(): Project[] {
@@ -369,6 +375,23 @@ export function deleteProject(id: string): void {
     if (result.changes !== 1) throw new Error('项目不存在或已被删除');
   });
   run();
+}
+
+/** 删除所有会话及其消息（CASCADE） */
+export function deleteAllSessions(): number {
+  const result = getDb().prepare('DELETE FROM sessions').run();
+  return result.changes;
+}
+
+/** 删除所有项目（会话的 project_id 置 NULL） */
+export function deleteAllProjects(): number {
+  const db = getDb();
+  const run = db.transaction(() => {
+    db.prepare('UPDATE sessions SET project_id = NULL, updated_at = ?').run(Date.now());
+    const result = db.prepare('DELETE FROM projects').run();
+    return result.changes;
+  });
+  return run();
 }
 
 export function renameProject(id: string, name: string): void {

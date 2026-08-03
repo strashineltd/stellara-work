@@ -7,7 +7,6 @@ import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { resolveSessionModel } from './chat/session-context';
-import { findPreset } from './llm/presets';
 import type {
   AppInfo,
   ModelConfig,
@@ -155,22 +154,8 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('models:configure', async (_e, config: ModelConfig) => {
     try {
-      const preset = findPreset(config.id);
-      const { upsertModel } = await import('./config/config-v2');
-      const { setKey } = await import('./config/secrets');
-      const entry = {
-        id: config.id,
-        label: config.label,
-        baseUrl: config.baseUrl || preset?.baseUrl || '',
-        model: config.model || preset?.model || '',
-        workDir: config.workDir,
-        createdAt: new Date().toISOString(),
-      };
-      await upsertModel(entry);
-      if (config.apiKey) {
-        await setKey(config.id, config.apiKey);
-      }
-      return { ok: true };
+      const { configureModel } = await import('./config/model-configure');
+      return await configureModel(config);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -667,11 +652,28 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:collectDiagnostics', async () => {
     const { loadConfig } = await import('./config/config-v2');
-    const { listSessions } = await import('./store/db');
+    const { listSessions, countAllMessages } = await import('./store/db');
     const { listKeys } = await import('./config/secrets');
     const cfg = await loadConfig();
     const sessions = listSessions();
     const keys = await listKeys();
+    // 真实数据（不再硬编码桩值）
+    let dbSizeBytes = 0;
+    let logTail = '';
+    try {
+      const { getDb } = await import('./store/db');
+      const dbFile = getDb().name;
+      dbSizeBytes = (await fs.stat(dbFile)).size;
+    } catch {
+      // db 文件不可读时保持 0
+    }
+    try {
+      const logFile = path.join(app.getPath('logs'), 'main.log');
+      const raw = await fs.readFile(logFile, 'utf8');
+      logTail = raw.slice(-2000);
+    } catch {
+      // 日志不存在时保持空
+    }
     // 脱敏：不包含 API key
     return {
       version: app.getVersion(),
@@ -683,13 +685,13 @@ function registerIpcHandlers(): void {
       appDataPath: app.getPath('userData'),
       envPath: getEnvPath(),
       logPath: app.getPath('logs'),
-      dbSizeBytes: 0,
+      dbSizeBytes,
       sessionCount: sessions.length,
-      messageCount: 0,
+      messageCount: countAllMessages(),
       modelCount: cfg.models.length,
       activeModelId: cfg.activeModelId,
       modelsWithKey: cfg.models.filter((m) => !!keys[m.id]).map((m) => m.id),
-      logTail: '',
+      logTail,
       collectedAt: new Date().toISOString(),
     };
   });

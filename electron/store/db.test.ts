@@ -7,6 +7,7 @@ import {
   initDb, listSessions, getSession, createSession, deleteSession, renameSession,
   getMessages, appendMessage, saveMessages, bumpSession, _setDbPath,
   createProject, getProject, listProjects, renameProject, deleteProject, moveSession, updateProjectFile,
+  countAllMessages,
 } from './db';
 
 let tmpDir: string;
@@ -248,5 +249,15 @@ describe('db', () => {
     expect(msgs).toHaveLength(2);
     expect(msgs[0]?.content).toBe('q');
     expect(msgs[1]?.content).toBe('a');
+  });
+
+  it('countAllMessages returns the total message count across sessions', () => {
+    initDb();
+    createSession({ id: 'a', title: 'A', modelId: 'm' });
+    createSession({ id: 'b', title: 'B', modelId: 'm' });
+    appendMessage({ sessionId: 'a', position: 0, role: 'user', content: 'hi', createdAt: Date.now() });
+    appendMessage({ sessionId: 'a', position: 1, role: 'assistant', content: 'yo', createdAt: Date.now() });
+    appendMessage({ sessionId: 'b', position: 0, role: 'user', content: 'x', createdAt: Date.now() });
+    expect(countAllMessages()).toBe(3);
   });
 });
