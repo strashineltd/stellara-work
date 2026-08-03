@@ -44,9 +44,16 @@ export interface ModelConfig extends ModelPreset {
   workDir?: string;
 }
 
+/**
+ * models:list 返回的已配置模型视图。
+ * 刻意不含 apiKey —— 渲染进程永远拿不到原始 key（key 只在主进程）。
+ * hasKey 告知 UI 是否已配置密钥（Onboarding 据此允许留空保留旧 key）。
+ */
+export type ConfiguredModel = Omit<ModelConfig, 'apiKey'> & { hasKey: boolean };
+
 export interface ModelListResponse {
   presets: ModelPreset[];
-  configured: ModelConfig | null;
+  configured: ConfiguredModel | null;
 }
 
 // ============================================
@@ -542,6 +549,7 @@ export interface ElectronAPI {
     get: () => Promise<AppSettings>;
     update: (partial: Partial<AppSettings>) => Promise<void>;
     clearAllData: () => Promise<void>;
+    resetSelective: (level: 'sessions' | 'memories' | 'all') => Promise<{ cleared: string; count?: number } | void>;
     openDataDir: () => Promise<void>;
     openLogFile: (name: 'main' | 'renderer') => Promise<void>;
     collectDiagnostics: () => Promise<DiagnosticsInfo>;

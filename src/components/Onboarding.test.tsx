@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { Onboarding } from './Onboarding';
-import type { ModelPreset, ModelConfig } from '../../shared/ipc';
+import type { ModelPreset, ConfiguredModel } from '../../shared/ipc';
 
 const PRESETS: ModelPreset[] = [
   { id: 'glm-5.2', label: 'GLM-5.2 (智谱)', baseUrl: 'https://x', model: 'g', isCustom: false },
@@ -115,7 +115,7 @@ describe('Onboarding', () => {
   });
 
   it('does not show the welcome screen if initialConfig is provided', () => {
-    const init: ModelConfig = { id: 'glm-5.2', label: 'GLM-5.2', baseUrl: 'x', model: 'g', isCustom: false, apiKey: '', contextWindow: 256000, workDir: '/test' };
+    const init: ConfiguredModel = { id: 'glm-5.2', label: 'GLM-5.2', baseUrl: 'x', model: 'g', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/test' };
     const { queryByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
     // Should go straight to workdir step, not show pick page content
     expect(queryByText(/welcome|Welcome/i)).toBeNull();
@@ -149,25 +149,25 @@ describe('Onboarding', () => {
   // --- Page 2: Connection details ---
 
   it('shows connection details when initialConfig is provided', () => {
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
     expect(getByText(/配置模型连接/i)).toBeTruthy();
   });
 
   it('has a back button on page 2', () => {
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
     expect(getByText(/back|返回|上一步/i)).toBeTruthy();
   });
 
   it('has a skip button on page 2', () => {
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
     expect(getByText(/skip|跳过/i)).toBeTruthy();
   });
 
   it('has a complete button on page 2', () => {
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
     expect(getByText(/complete|完成/i)).toBeTruthy();
   });
@@ -199,7 +199,7 @@ describe('Onboarding', () => {
   });
 
   it('does not expose the legacy model workdir during reconfiguration', () => {
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-old', contextWindow: 256000, workDir: '/existing/path' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing/path' };
     const { container } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
     expect(container.textContent).not.toContain('/existing/path');
     expect(container.textContent).not.toContain('工作目录');
@@ -209,7 +209,7 @@ describe('Onboarding', () => {
     const onComplete = vi.fn();
     (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
     (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-key', contextWindow: 256000, workDir: '/test' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/test' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={onComplete} />);
     const completeBtn = getByText(/complete|完成/i);
     fireClick(completeBtn);
@@ -224,7 +224,7 @@ describe('Onboarding', () => {
     const onComplete = vi.fn();
     (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
     (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: false, error: 'Connection refused' });
-    const init: ModelConfig = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, apiKey: 'sk-key', contextWindow: 256000, workDir: '/test' };
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/test' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={onComplete} />);
     const completeBtn = getByText(/complete|完成/i);
     fireClick(completeBtn);
@@ -233,5 +233,25 @@ describe('Onboarding', () => {
     });
     expect(onComplete).not.toHaveBeenCalled();
     expect(getByText(/Connection refused/)).toBeTruthy();
+  });
+
+  it('reconfigure with existing key: empty key input preserves the old key without receiving it', async () => {
+    const onComplete = vi.fn();
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
+    // initialConfig from models:list must NOT contain apiKey, only hasKey
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/test' };
+    expect('apiKey' in init).toBe(false);
+    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={onComplete} />);
+    const completeBtn = getByText(/complete|完成/i);
+    fireClick(completeBtn);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    // No validation error: empty key is allowed when a key already exists
+    expect((window as any).electronAPI.models.test).toHaveBeenCalled();
+    const sent = (window as any).electronAPI.models.configure.mock.calls[0]?.[0];
+    expect(sent?.apiKey).toBe('');
+    expect(onComplete).toHaveBeenCalledOnce();
   });
 });

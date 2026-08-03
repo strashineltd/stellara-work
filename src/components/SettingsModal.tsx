@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type {
-  ModelListItem, AppSettings, SessionSummary, ModelConfig,
+  ModelListItem, AppSettings, SessionSummary, ModelConfig, ConfiguredModel,
   ModelPreset, PresetModelId, DiagnosticsInfo, ThemeName, SkillDef,
 } from '../../shared/ipc';
 import { CONTEXT_WINDOW_OPTIONS, DEFAULT_CONTEXT_WINDOW } from '../../shared/context-window';
@@ -18,7 +18,7 @@ import { Icon } from './Icon';
 interface SettingsModalProps {
   onClose: () => void;
   /** 切换活跃 model 后通知父组件更新 */
-  onModelChanged: (config: ModelConfig) => void;
+  onModelChanged: (config: ConfiguredModel) => void;
   /** 用户改了快捷键 → 通知父组件 */
   onShortcutsChanged?: (shortcuts: ShortcutBindings) => void;
   /** 当前主题 */
@@ -60,6 +60,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingKeyValue, setEditingKeyValue] = useState('');
   const [confirmClear, setConfirmClear] = useState('');
+  const [resetLevel, setResetLevel] = useState<'sessions' | 'memories' | 'all'>('sessions');
   const [error, setError] = useState<string | null>(null);
   // 快捷键：本地 state（用户点录制 / 重置才更新）
   const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
@@ -237,10 +238,10 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
     }
   }
 
-  async function handleClearAll() {
+  async function handleReset() {
     if (confirmClear !== 'DELETE') return;
-    await window.electronAPI.settings.clearAllData();
-    window.close();
+    await window.electronAPI.settings.resetSelective(resetLevel);
+    window.location.reload();
   }
 
   // 诊断信息：版本 / 系统 / DB 状态 / 日志尾巴 → 拼成可读文本 → 复制到剪贴板
@@ -641,8 +642,49 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                 </button>
               </div>
               <div className="danger-zone">
-                <h4>危险区</h4>
-                <p>清空所有数据（config.json + .env + stellara.db）后需重启 app。</p>
+                <h4>重置程序</h4>
+                <p>选择要清除的数据范围：</p>
+                <div className="reset-options">
+                  <label className="reset-option">
+                    <input
+                      type="radio"
+                      name="resetLevel"
+                      value="sessions"
+                      checked={resetLevel === 'sessions'}
+                      onChange={() => setResetLevel('sessions')}
+                    />
+                    <span className="reset-option-content">
+                      <span className="reset-option-title">清除会话</span>
+                      <span className="reset-option-desc">删除所有会话记录和聊天历史。保留项目、模型配置、记忆和设置。</span>
+                    </span>
+                  </label>
+                  <label className="reset-option">
+                    <input
+                      type="radio"
+                      name="resetLevel"
+                      value="memories"
+                      checked={resetLevel === 'memories'}
+                      onChange={() => setResetLevel('memories')}
+                    />
+                    <span className="reset-option-content">
+                      <span className="reset-option-title">清除记忆</span>
+                      <span className="reset-option-desc">删除记忆系统中的所有记忆。保留会话、项目、模型配置和设置。</span>
+                    </span>
+                  </label>
+                  <label className="reset-option">
+                    <input
+                      type="radio"
+                      name="resetLevel"
+                      value="all"
+                      checked={resetLevel === 'all'}
+                      onChange={() => setResetLevel('all')}
+                    />
+                    <span className="reset-option-content">
+                      <span className="reset-option-title">完全重置</span>
+                      <span className="reset-option-desc">删除所有数据，恢复到全新安装状态。包括会话、项目、记忆、模型配置和 API 密钥。</span>
+                    </span>
+                  </label>
+                </div>
                 <label className="danger-confirm-label" htmlFor="clear-all-confirm">输入 DELETE 以确认</label>
                 <input
                   id="clear-all-confirm"
@@ -654,10 +696,10 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                 <button
                   className="btn btn-danger"
                   disabled={confirmClear !== 'DELETE'}
-                  onClick={() => void handleClearAll()}
+                  onClick={() => void handleReset()}
                   type="button"
                 >
-                  清空所有数据
+                  重置程序
                 </button>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import type { ModelConfig, ProjectSummary, SessionSummary } from '../../shared/ipc';
+import type { ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
 import { basename } from '../lib/chat-utils';
 import { Icon } from './Icon';
 
@@ -6,7 +6,7 @@ export type DashboardSection = 'home' | 'projects';
 
 interface HomeDashboardProps {
   section: DashboardSection;
-  config: ModelConfig;
+  config: ConfiguredModel;
   workDir?: string;
   projectName?: string;
   projects: ProjectSummary[];

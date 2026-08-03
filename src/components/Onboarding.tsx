@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import type { ModelPreset, ModelConfig, PresetModelId } from '../../shared/ipc';
+import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId } from '../../shared/ipc';
 
 interface OnboardingProps {
   presets: ModelPreset[];
-  /** 已有配置（用于"重新配置"模式：保留原 model 的 key，提示已配） */
-  initialConfig?: ModelConfig | null;
-  onComplete: (config: ModelConfig) => void;
+  /** 已有配置（用于"重新配置"模式：无 apiKey，仅 hasKey 提示已配） */
+  initialConfig?: ConfiguredModel | null;
+  onComplete: (config: ConfiguredModel) => void;
 }
 
 /** Two-page wizard: page 1 = model pick, page 2 = connection details */
@@ -16,7 +16,7 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
   const [selectedId, setSelectedId] = useState<PresetModelId>(
     initialConfig?.id ?? 'deepseek-v4-pro',
   );
-  const [apiKey, setApiKey] = useState(initialConfig?.apiKey ?? '');
+  const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState(initialConfig?.baseUrl ?? '');
   const [model, setModel] = useState(initialConfig?.model ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'testing' | 'saving' | 'ok' | 'fail'>('idle');
@@ -32,22 +32,25 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
   }, [selectedId, presets]);
 
   async function handleComplete() {
-    if (!apiKey && !initialConfig?.apiKey) {
+    // 渲染进程拿不到旧 key：initialConfig 只有 hasKey；留空 = 保留主进程中的旧 key
+    const hasExistingKey = !!initialConfig?.hasKey;
+    if (!apiKey && !hasExistingKey) {
       setSaveError('请输入 API 密钥');
       setSaveStatus('fail');
       return;
     }
     const preset = presets.find((p) => p.id === selectedId);
     if (!preset) return;
-    const finalApiKey = apiKey || initialConfig?.apiKey || '';
-    if (!finalApiKey) {
+    const finalApiKey = apiKey || '';
+    if (!finalApiKey && !hasExistingKey) {
       setSaveError('API 密钥为必填项');
       setSaveStatus('fail');
       return;
     }
 
     setSaveError('');
-    const config: ModelConfig = {
+    // 提交载荷带 apiKey（只经 models.test/configure IPC 传主进程）
+    const submitConfig: ModelConfig = {
       id: preset.id,
       label: preset.label,
       baseUrl: baseUrl || preset.baseUrl,
@@ -58,7 +61,7 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
 
     // Phase 1: 测试连接
     setSaveStatus('testing');
-    const testResult = await window.electronAPI.models.test(config);
+    const testResult = await window.electronAPI.models.test(submitConfig);
     if (!testResult.ok) {
       setSaveStatus('fail');
       setSaveError(testResult.error ?? '连接测试失败');
@@ -67,10 +70,18 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
 
     // Phase 2: 保存配置
     setSaveStatus('saving');
-    const result = await window.electronAPI.models.configure(config);
+    const result = await window.electronAPI.models.configure(submitConfig);
     if (result.ok) {
       setSaveStatus('ok');
-      onComplete(config);
+      // onComplete 传不含 apiKey 的视图（key 永远留在主进程）
+      onComplete({
+        id: submitConfig.id,
+        label: submitConfig.label,
+        baseUrl: submitConfig.baseUrl,
+        model: submitConfig.model,
+        isCustom: submitConfig.isCustom,
+        hasKey: !!submitConfig.apiKey,
+      });
     } else {
       setSaveStatus('fail');
       setSaveError(result.error ?? '保存失败');
@@ -188,7 +199,7 @@ function ConnectionPage({
   model: string;
   onModelChange: (v: string) => void;
   isCustom: boolean;
-  initialConfig?: ModelConfig | null;
+  initialConfig?: ConfiguredModel | null;
   saveStatus: string;
   saveError: string;
   onComplete: () => void;
@@ -209,9 +220,9 @@ function ConnectionPage({
         {/* API key */}
         <div className="onboarding-field">
           <label className="onboarding-label">API 密钥</label>
-          {isReconfig && (
+          {isReconfig && initialConfig?.hasKey && (
             <p className="field-hint">
-              当前配置: <code>{initialConfig?.id}</code>。留空则保留旧密钥。
+              当前配置: <code>{initialConfig?.id}</code>。已配置密钥，留空保持不变。
             </p>
           )}
           <input

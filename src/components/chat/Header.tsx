@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { ModelConfig, ModelListItem } from '../../../shared/ipc';
+import type { ConfiguredModel, ModelListItem } from '../../../shared/ipc';
 import { basename } from '../../lib/chat-utils';
 import { Icon } from '../Icon';
 
 const brandIconUrl = new URL('../../../assets/icon-256.png', import.meta.url).href;
 
 interface HeaderProps {
-  config: ModelConfig;
+  config: ConfiguredModel;
   sidebarOpen: boolean;
   workspaceOpen: boolean;
   modelList: ModelListItem[];

@@ -11,6 +11,7 @@ import { findPreset } from './llm/presets';
 import type {
   AppInfo,
   ModelConfig,
+  ConfiguredModel,
   ModelListResponse,
   ChatRequest,
   ChatStreamEvent,
@@ -137,15 +138,17 @@ function registerIpcHandlers(): void {
     if (!active) {
       return { presets: MODEL_PRESETS, configured: null };
     }
+    // 安全：渲染进程拿不到原始 key，只告知是否已配置
     const key = getKey(active.id) ?? '';
-    const configured: ModelConfig = {
-      id: active.id as ModelConfig['id'],
+    const configured: ConfiguredModel = {
+      id: active.id as ConfiguredModel['id'],
       label: active.label,
       baseUrl: active.baseUrl,
       model: active.model,
-      apiKey: key,
       workDir: active.workDir,
       isCustom: false,
+      contextWindow: active.contextWindow,
+      hasKey: !!key,
     };
     return { presets: MODEL_PRESETS, configured };
   });
@@ -523,38 +526,55 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:clearAllData', async () => {
     try {
-      // 先 checkpoint 和关闭数据库，避免文件锁
       const { closeDb } = await import('./store/db');
       closeDb();
     } catch {
       // ignore
     }
     const { getAppDataDir, getLegacyDataDir } = await import('./config/data-dir');
+    const { resetEnvCache } = await import('./config/env');
     const dir = getAppDataDir();
     const legacyDir = getLegacyDataDir();
     const filesToDelete = [
       'config.json', 'config.json.bak', '.env',
       'stellara.db', 'stellara.db-wal', 'stellara.db-shm',
     ];
-    try {
-      await Promise.all(
-        filesToDelete.map((name) => fs.rm(path.join(dir, name), { force: true })),
-      );
-    } catch (err) {
-      // Windows 文件锁失败时返回清晰错误
-      if ((err as NodeJS.ErrnoException).code === 'EBUSY' || (err as NodeJS.ErrnoException).code === 'EPERM') {
-        throw new Error('无法删除数据目录：文件被占用。请关闭应用后重试。');
+    // 顺序删除 runtime dir 文件，带重试（Windows 文件锁）
+    for (const name of filesToDelete) {
+      const filePath = path.join(dir, name);
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await fs.rm(filePath, { force: true });
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          const code = (err as NodeJS.ErrnoException).code;
+          if (attempt < 2 && (code === 'EBUSY' || code === 'EPERM')) {
+            await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
+            continue;
+          }
+        }
       }
-      throw err;
+      if (lastErr) {
+        const code = (lastErr as NodeJS.ErrnoException).code;
+        if (code === 'EBUSY' || code === 'EPERM') {
+          throw new Error('无法删除数据文件：文件被占用。请关闭应用后重试。');
+        }
+        throw lastErr;
+      }
     }
-    // 同时删除遗留目录的数据文件（防止下次启动被 migrateLegacyAppData 重新迁移）
+    // 遗留目录清理（独立 try，不受 runtime dir 错误影响）
     try {
       await Promise.all(
         filesToDelete.map((name) => fs.rm(path.join(legacyDir, name), { force: true })),
       );
     } catch {
-      // 遗留目录删除失败不影响重置
+      // 遗留目录删除失败不阻塞重置
     }
+    // 重置 env 缓存
+    resetEnvCache();
     // 重新初始化空数据库 + 记忆存储
     try {
       const { initDb, getDb } = await import('./store/db');
@@ -563,6 +583,71 @@ function registerIpcHandlers(): void {
       setMemoryDb(getDb);
     } catch {
       // ignore - will be re-initialized on next access
+    }
+  });
+
+  ipcMain.handle('settings:resetSelective', async (_e, level: 'sessions' | 'memories' | 'all') => {
+    if (level === 'all') {
+      // 复用 clearAllData 逻辑：手动触发同一个 handler
+      // 直接调用函数避免 IPC 递归
+      const { closeDb } = await import('./store/db');
+      try { closeDb(); } catch { /* ignore */ }
+      const { getAppDataDir, getLegacyDataDir } = await import('./config/data-dir');
+      const { resetEnvCache } = await import('./config/env');
+      const dir = getAppDataDir();
+      const legacyDir = getLegacyDataDir();
+      const filesToDelete = [
+        'config.json', 'config.json.bak', '.env',
+        'stellara.db', 'stellara.db-wal', 'stellara.db-shm',
+      ];
+      for (const name of filesToDelete) {
+        const filePath = path.join(dir, name);
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await fs.rm(filePath, { force: true });
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            const code = (err as NodeJS.ErrnoException).code;
+            if (attempt < 2 && (code === 'EBUSY' || code === 'EPERM')) {
+              await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
+              continue;
+            }
+          }
+        }
+        if (lastErr) {
+          const code = (lastErr as NodeJS.ErrnoException).code;
+          if (code === 'EBUSY' || code === 'EPERM') {
+            throw new Error('无法删除数据文件：文件被占用。请关闭应用后重试。');
+          }
+          throw lastErr;
+        }
+      }
+      try {
+        await Promise.all(
+          filesToDelete.map((name) => fs.rm(path.join(legacyDir, name), { force: true })),
+        );
+      } catch { /* 遗留目录删除失败不阻塞 */ }
+      resetEnvCache();
+      try {
+        const { initDb, getDb } = await import('./store/db');
+        initDb();
+        const { setMemoryDb } = await import('./memory/memory-store');
+        setMemoryDb(getDb);
+      } catch { /* ignore */ }
+      return { cleared: 'all' as const };
+    }
+    if (level === 'sessions') {
+      const { deleteAllSessions } = await import('./store/db');
+      const count = deleteAllSessions();
+      return { cleared: 'sessions' as const, count };
+    }
+    if (level === 'memories') {
+      const { deleteAllMemories } = await import('./memory/memory-store');
+      const count = deleteAllMemories();
+      return { cleared: 'memories' as const, count };
     }
   });
 

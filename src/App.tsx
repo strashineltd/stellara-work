@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type {
-  AppInfo, ModelConfig, ModelPreset, SessionSummary, ProjectSummary, ThemeName,
+  AppInfo, ConfiguredModel, ModelPreset, SessionSummary, ProjectSummary, ThemeName,
 } from '../shared/ipc';
 import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
@@ -19,10 +19,10 @@ function resolveTheme(theme: ThemeName): 'light' | 'dark' {
 type AppState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; initialConfig?: ModelConfig | null }
+  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; initialConfig?: ConfiguredModel | null }
   | {
       kind: 'ready';
-      config: ModelConfig;
+      config: ConfiguredModel;
       info: AppInfo;
       projects: ProjectSummary[];
       sessions: SessionSummary[];

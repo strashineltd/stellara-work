@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { Header } from './Header';
-import type { ModelConfig, ModelListItem } from '../../../shared/ipc';
+import type { ConfiguredModel, ModelListItem } from '../../../shared/ipc';
 
-const MODEL_CONFIG: ModelConfig = {
+const MODEL_CONFIG: ConfiguredModel = {
   id: 'deepseek-v4-pro',
   label: 'DeepSeek v4',
   model: 'deepseek-v4-pro',
   workDir: 'D:/test',
-  apiKey: 'sk-test',
+  hasKey: true,
   isCustom: false,
   baseUrl: 'https://api.deepseek.com',
   contextWindow: 128000,

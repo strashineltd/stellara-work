@@ -1,12 +1,12 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ModelConfig, ProjectSummary, SessionSummary } from '../../shared/ipc';
+import type { ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
 import { HomeDashboard } from './HomeDashboard';
 
-const CONFIG: ModelConfig = {
+const CONFIG: ConfiguredModel = {
   id: 'custom', label: '本地模型', model: 'local-model', baseUrl: 'http://127.0.0.1',
-  apiKey: 'test-only', isCustom: true, workDir: 'D:/Stellara Work', contextWindow: 128000,
+  hasKey: true, isCustom: true, workDir: 'D:/Stellara Work', contextWindow: 128000,
 };
 
 const PROJECTS: ProjectSummary[] = [

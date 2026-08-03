@@ -4,7 +4,7 @@ import type {
   FsNode,
   Memory,
   MessageRow,
-  ModelConfig,
+  ConfiguredModel,
   ModelListItem,
   Project,
   ProjectSummary,
@@ -15,13 +15,13 @@ import type {
 const now = Date.now();
 const previewWorkDir = 'D:\\Stellara Work';
 
-const previewModel: ModelConfig = {
+const previewModel: ConfiguredModel = {
   id: 'custom',
   label: '本地模型',
   baseUrl: 'http://127.0.0.1:11434/v1',
   model: 'workbench-local',
   isCustom: true,
-  apiKey: 'preview-only',
+  hasKey: true,
   contextWindow: 256_000,
 };
 
@@ -145,7 +145,7 @@ export function installDevPreviewApi(): void {
       createFile: async (workDir, relativePath) => ({ path: `${workDir}\\${relativePath.replace(/\//g, '\\')}` }),
     },
     settings: {
-      get: async () => ({ theme: 'light', workspaceMode: 'sidebar' }), update: async () => {}, clearAllData: async () => {},
+      get: async () => ({ theme: 'light', workspaceMode: 'sidebar' }), update: async () => {}, clearAllData: async () => {}, resetSelective: async () => {},
       openDataDir: async () => {}, openLogFile: async () => {}, collectDiagnostics: async () => emptyDiagnostics(),
     },
     skills: { list: async () => [] },
