@@ -502,7 +502,6 @@ export interface ElectronAPI {
   chat: {
     /** 启动一个流式 chat，返回 { streamId, events } - events 是 AsyncIterable<ChatStreamEvent> */
     start: (request: ChatRequest) => Promise<ChatStream>;
-    cancel: () => void;
     /** 中断当前 chat（通过 streamId） */
     abort: (streamId: string) => void;
     /** 回应一次批准请求（true=同意，false=拒绝） */

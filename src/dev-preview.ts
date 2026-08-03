@@ -93,7 +93,7 @@ export function installDevPreviewApi(): void {
     },
     chat: {
       start: async () => ({ streamId: 'preview-stream', events: (async function* () { yield { type: 'done' as const }; })() }),
-      cancel: () => {}, abort: () => {}, approve: () => {},
+      abort: () => {}, approve: () => {},
     },
     tools: { invoke: async () => ({ ok: true, output: 'Preview' }) },
     dialog: {

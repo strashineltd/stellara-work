@@ -101,9 +101,6 @@ const api: ElectronAPI = {
       );
       return { streamId, events };
     },
-    cancel: () => {
-      // deprecated
-    },
     abort: (streamId: string) => {
       ipcRenderer.send('chat:abort', streamId);
     },
@@ -145,6 +142,8 @@ const api: ElectronAPI = {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     update: (partial: Partial<AppSettings>) => ipcRenderer.invoke('settings:update', partial),
     clearAllData: () => ipcRenderer.invoke('settings:clearAllData'),
+    resetSelective: (level: 'sessions' | 'memories' | 'all') =>
+      ipcRenderer.invoke('settings:resetSelective', level),
     openDataDir: () => ipcRenderer.invoke('settings:openDataDir'),
     openLogFile: (name: 'main' | 'renderer') => ipcRenderer.invoke('settings:openLogFile', name),
     collectDiagnostics: () => ipcRenderer.invoke('settings:collectDiagnostics'),

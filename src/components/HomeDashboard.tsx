@@ -73,7 +73,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
                 key={project.id}
                 onClick={() => props.onOpenProject(project.id)}
               >
-                <span className="project-dashboard-card__icon"><Icon name="folder" size={18} /></span>
+                <span className="project-dashboard-card__icon"><Icon name="folder" size={16} /></span>
                 <span className="project-dashboard-card__body">
                   <strong>{project.name}</strong>
                   <span>{project.sessionCount} 条工作记录 · {formatRelativeTime(project.updatedAt)}更新</span>
@@ -87,7 +87,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
           </div>
         ) : (
           <div className="dashboard-empty-state">
-            <span><Icon name="folder" size={22} /></span>
+            <span><Icon name="folder" size={16} /></span>
             <h2>还没有项目</h2>
             <p>创建一个项目，把相关工作记录整理在一起。</p>
             <button className="btn btn-secondary" type="button" onClick={props.onCreateProject}>创建第一个项目</button>
@@ -130,7 +130,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
               disabled={props.busy || !props.input.trim()}
               onClick={props.onSend}
             >
-              <Icon name="send" size={17} />
+              <Icon name="send" size={16} />
             </button>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
         <article className="dashboard-card dashboard-card--workspace">
           <header><h2>本地工作区</h2><span>{effectiveWorkDir ? '已连接' : '未选择'}</span></header>
           <div className="dashboard-card__content">
-            <div className="workspace-summary-icon"><Icon name="folder" size={20} /></div>
+            <div className="workspace-summary-icon"><Icon name="folder" size={16} /></div>
             <strong className="workspace-summary-name">{props.projectName ?? workDirName}</strong>
             <p>{props.config.label} · {props.sessions.length} 条工作记录</p>
           </div>

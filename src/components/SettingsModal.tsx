@@ -608,9 +608,14 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
               </div>
               <div className="settings-row">
                 <label>日志</label>
-                <button className="btn btn-secondary" onClick={() => void window.electronAPI.settings.openLogFile('main')} type="button">
-                  查看主日志
-                </button>
+                <div className="settings-row-actions">
+                  <button className="btn btn-secondary" onClick={() => void window.electronAPI.settings.openLogFile('main')} type="button">
+                    查看主日志
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => void window.electronAPI.settings.openLogFile('renderer')} type="button">
+                    查看渲染日志
+                  </button>
+                </div>
               </div>
               <div className="settings-row">
                 <label htmlFor="theme-select">主题</label>

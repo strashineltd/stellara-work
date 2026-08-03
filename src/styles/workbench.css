@@ -118,7 +118,7 @@ kbd {
 .app-icon {
   display: block;
   flex: 0 0 auto;
-  stroke-width: 1.6;
+  stroke-width: 1.5;
 }
 
 .skip-link {
@@ -894,7 +894,7 @@ kbd {
 
 .sidebar-primary-item--active {
   color: var(--color-accent);
-  border-color: rgba(47, 124, 244, 0.08);
+  border-color: var(--color-accent-tint);
   background: var(--color-accent-soft);
   font-weight: 650;
 }
@@ -1315,7 +1315,7 @@ kbd {
 
 .dashboard-composer:focus-within {
   border-color: var(--color-accent);
-  box-shadow: 0 12px 32px rgba(47, 124, 244, 0.13);
+  box-shadow: var(--shadow-md);
 }
 
 .dashboard-composer textarea {
@@ -1363,7 +1363,7 @@ kbd {
   color: var(--color-on-accent);
   border-radius: 10px;
   background: var(--color-accent);
-  box-shadow: 0 4px 12px rgba(47, 124, 244, 0.24);
+  box-shadow: var(--shadow-sm);
   transition:
     background-color var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-out),
@@ -1372,7 +1372,7 @@ kbd {
 
 .dashboard-send-button:hover:not(:disabled) {
   background: var(--color-accent-hover);
-  box-shadow: 0 6px 16px rgba(47, 124, 244, 0.28);
+  box-shadow: var(--shadow-md);
   transform: translateY(-1px);
 }
 

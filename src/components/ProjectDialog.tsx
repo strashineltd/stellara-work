@@ -227,7 +227,7 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
 
           <div className="project-file-actions">
             <button type="button" className="project-file-action" onClick={() => void handlePickFile()} disabled={isBusy}>
-              <Icon name="folder" size={18} />
+              <Icon name="folder" size={16} />
               <span>
                 <strong>{busyAction === 'pick' ? '正在选择…' : '选择文件'}</strong>
                 <small>从电脑中选择已有文件</small>
@@ -239,7 +239,7 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
               onClick={() => void handleCreateFile()}
               disabled={isBusy}
             >
-              <Icon name="plus" size={18} />
+              <Icon name="plus" size={16} />
               <span>
                 <strong>{busyAction === 'create' ? '正在新建…' : '新建文件'}</strong>
                 <small>选择保存位置并创建空文件</small>
@@ -253,7 +253,7 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
 
           {selectedFile && projectWorkDir && (
             <div className="project-selected-file">
-              <Icon name="file" size={17} />
+              <Icon name="file" size={16} />
               <div>
                 <strong>{basename(selectedFile)}</strong>
                 <code title={selectedFile}>{displayPath(projectWorkDir, selectedFile)}</code>
