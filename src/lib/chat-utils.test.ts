@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyStreamEventToEntries, type DisplayEntry } from './chat-utils';
+import { applyStreamEventToEntries, formatRelativeTime, type DisplayEntry } from './chat-utils';
 import type { ChatStreamEvent, PlanApprovalRequest } from '../../shared/ipc';
 
 function apply(prev: DisplayEntry[], ev: ChatStreamEvent) {
@@ -50,5 +50,26 @@ describe('applyStreamEventToEntries — plan events', () => {
   it('verify event pushes a verify entry', () => {
     const { next } = apply([], { type: 'verify', phase: 'post_edit', target: 'src/a.ts' });
     expect(next?.at(-1)).toEqual({ kind: 'verify', phase: 'post_edit', target: 'src/a.ts' });
+  });
+});
+
+describe('formatRelativeTime', () => {
+  const now = Date.now();
+
+  it('returns 刚刚 for timestamps under a minute old', () => {
+    expect(formatRelativeTime(now - 10_000)).toBe('刚刚');
+  });
+
+  it('returns minutes ago for timestamps under an hour old', () => {
+    expect(formatRelativeTime(now - 5 * 60_000)).toBe('5 分钟前');
+  });
+
+  it('returns hours ago for timestamps under a day old', () => {
+    expect(formatRelativeTime(now - 3 * 3_600_000)).toBe('3 小时前');
+  });
+
+  it('returns a month/day date for older timestamps', () => {
+    const older = new Date(2026, 0, 15).getTime();
+    expect(formatRelativeTime(older)).toBe('1 月 15 日');
   });
 });

@@ -1,5 +1,5 @@
 import type { ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
-import { basename } from '../lib/chat-utils';
+import { basename, formatRelativeTime } from '../lib/chat-utils';
 import { Icon } from './Icon';
 
 export type DashboardSection = 'home' | 'projects';
@@ -28,24 +28,15 @@ const QUICK_TASKS = [
   { label: '整理交付清单', prompt: '请整理当前项目的交付清单，并标注仍需验证或补充的内容。', icon: 'file' as const },
 ];
 
-function formatRelativeTime(timestamp: number): string {
-  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  const date = new Date(timestamp);
-  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
-}
-
-function projectProgress(project: ProjectSummary, index: number): number {
-  if (project.sessionCount === 0) return 12;
-  return Math.min(88, 34 + project.sessionCount * 13 + index * 7);
+function projectBarWidth(sessionCount: number, maxCount: number): number {
+  if (maxCount <= 0 || sessionCount <= 0) return 0;
+  return Math.max(6, Math.min(100, Math.round((sessionCount / maxCount) * 100)));
 }
 
 export function HomeDashboard(props: HomeDashboardProps) {
   const recentSessions = props.sessions.slice(0, 3);
   const visibleProjects = props.projects.slice(0, props.section === 'projects' ? 12 : 3);
+  const maxSessionCount = Math.max(1, ...visibleProjects.map((p) => p.sessionCount));
   const effectiveWorkDir = props.workDir ?? props.config.workDir;
   const workDirName = effectiveWorkDir ? basename(effectiveWorkDir) : '尚未选择项目';
 
@@ -66,7 +57,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
 
         {visibleProjects.length > 0 ? (
           <div className="project-dashboard-grid">
-            {visibleProjects.map((project, index) => (
+            {visibleProjects.map((project) => (
               <button
                 className="project-dashboard-card"
                 type="button"
@@ -79,8 +70,8 @@ export function HomeDashboard(props: HomeDashboardProps) {
                   <span>{project.sessionCount} 条工作记录 · {formatRelativeTime(project.updatedAt)}更新</span>
                 </span>
                 <Icon className="project-dashboard-card__arrow" name="chevron-right" size={15} />
-                <span className="project-dashboard-card__progress" aria-label={`项目活跃度 ${projectProgress(project, index)}%`}>
-                  <span style={{ width: `${projectProgress(project, index)}%` }} />
+                <span className="project-dashboard-card__progress" aria-label={`${project.sessionCount} 条工作记录`}>
+                  <span style={{ width: `${projectBarWidth(project.sessionCount, maxSessionCount)}%` }} />
                 </span>
               </button>
             ))}
@@ -149,10 +140,10 @@ export function HomeDashboard(props: HomeDashboardProps) {
         <article className="dashboard-card dashboard-card--projects">
           <header><h2>项目概览</h2><span>{props.projects.length} 个项目</span></header>
           <div className="dashboard-card__content">
-            {visibleProjects.length > 0 ? visibleProjects.map((project, index) => (
+            {visibleProjects.length > 0 ? visibleProjects.map((project) => (
               <button className="dashboard-project-row" key={project.id} type="button" onClick={() => props.onOpenProject(project.id)}>
                 <span><strong>{project.name}</strong><small>{project.sessionCount} 条记录</small></span>
-                <span className="dashboard-progress"><span style={{ width: `${projectProgress(project, index)}%` }} /></span>
+                <span className="dashboard-progress" aria-label={`${project.sessionCount} 条工作记录`}><span style={{ width: `${projectBarWidth(project.sessionCount, maxSessionCount)}%` }} /></span>
               </button>
             )) : <p className="dashboard-card__empty">创建项目后，会在这里显示进展。</p>}
           </div>

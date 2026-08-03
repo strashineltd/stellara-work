@@ -28,6 +28,17 @@ export function basename(p: string): string {
   return m ? m[0] : p;
 }
 
+/** 相对时间展示（刚刚 / N 分钟前 / N 小时前 / M 月 D 日） */
+export function formatRelativeTime(timestamp: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const date = new Date(timestamp);
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
 /** 把 tool approval 的 JSON args 美化显示 */
 export function prettyApprovalArgs(args: string): string {
   try {

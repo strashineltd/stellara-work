@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { SessionSummary, Project, ProjectFileSelection, ProjectSummary } from '../../shared/ipc';
 import { Icon } from './Icon';
 import { ProjectDialog } from './ProjectDialog';
+import { formatRelativeTime } from '../lib/chat-utils';
 
 interface SidebarProps {
   projects: ProjectSummary[];
@@ -52,17 +53,6 @@ function truncateTitle(title: string, maxLen = 28): string {
   return title.slice(0, maxLen) + '…';
 }
 
-/** Format a timestamp into a short relative string. */
-function formatRelativeTime(ts: number): string {
-  const diffMs = Date.now() - ts;
-  const mins = Math.floor(diffMs / 60_000);
-  if (mins < 1) return '刚刚';
-  if (mins < 60) return `${mins} 分钟前`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} 小时前`;
-  const d = new Date(ts);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
 
 // 默认展开所有项目
 function initExpanded(projects: ProjectSummary[]): Record<string, boolean> {

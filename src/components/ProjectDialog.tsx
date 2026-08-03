@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Project, ProjectFileSelection, ProjectSummary } from '../../shared/ipc';
 import { Icon } from './Icon';
+import { basename } from '../lib/chat-utils';
 
 interface ProjectDialogProps {
   mode?: 'create' | 'edit';
@@ -29,10 +30,6 @@ function displayPath(workDir: string, filePath: string): string {
     return file.slice(root.length + 1);
   }
   return filePath;
-}
-
-function basename(filePath: string): string {
-  return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
 }
 
 export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRename, onUpdateFile, onClose }: ProjectDialogProps) {
