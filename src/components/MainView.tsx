@@ -19,6 +19,8 @@ import { TabBar, type TabBarTab } from './chat/TabBar';
 import { HomeDashboard } from './HomeDashboard';
 import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
+import { CommandPalette } from './CommandPalette';
+import { useShortcuts } from '../hooks/useShortcuts';
 
 interface MainViewProps {
   config: ConfiguredModel;
@@ -80,11 +82,13 @@ export function MainView(props: MainViewProps) {
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
+  // 仅当会话引用的模型已从配置中删除时才提示（切换活跃模型不算）
+  const modelMissing = !!activeSession && !modelList.some((m) => m.id === activeSession.modelId);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
-  const [modelMissing, setModelMissing] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks' | 'memory'>('home');
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
@@ -140,14 +144,13 @@ export function MainView(props: MainViewProps) {
       }
       if (cancelled) return;
       entriesSessionRef.current = null;
-      void window.electronAPI.sessions.get(activeSessionId).then(({ session, messages }) => {
+      void window.electronAPI.sessions.get(activeSessionId).then(({ messages }) => {
         if (cancelled) return;
         setEntries(messagesToEntries(messages));
         entriesSessionRef.current = activeSessionId;
         setPlanMode(false);
         setLastUserForRetry(null);
         setPendingPlanApproval(null);
-        setModelMissing(session.modelId !== config.id);
       }).catch((e) => {
         console.error('Failed to load session:', e);
       });
@@ -332,6 +335,25 @@ export function MainView(props: MainViewProps) {
     setLastUserForRetry(null);
     requestAnimationFrame(() => { void handleSend(); });
   }
+
+  // ---- 快捷键（plan 模式 / 发送 / 拒绝批准 / 命令面板；其余在 App）----
+  useShortcuts(
+    props.shortcuts,
+    {
+      togglePlanMode: () => setPlanMode((v) => !v),
+      sendMessage: () => {
+        if (!busy && input.trim()) void handleSend();
+      },
+      rejectApproval: () => {
+        if (pendingApproval) {
+          window.electronAPI.chat.approve(pendingApproval.id, false);
+          setPendingApproval(null);
+        }
+      },
+      openCommandPalette: () => setCommandPaletteOpen(true),
+    },
+    !commandPaletteOpen,
+  );
 
   // ---- Slash / Skills ----
   function handleLoadSkills() {
@@ -608,6 +630,28 @@ export function MainView(props: MainViewProps) {
         <FileTreeModal
           workDir={activeWorkDir}
           onClose={() => setFileTreeOpen(false)}
+        />
+      )}
+
+      {commandPaletteOpen && (
+        <CommandPalette
+          onClose={() => setCommandPaletteOpen(false)}
+          sessions={sessions}
+          modelList={modelList}
+          activeSessionId={activeSessionId}
+          activeModelId={config.id}
+          theme={props.theme ?? 'light'}
+          onSelectSession={handleSelectSession}
+          onNewSession={() => void handleNewSession()}
+          onDeleteSession={(id) => void handleDeleteSession(id)}
+          onSetActiveModel={(id) => void handleSwitchModel(id)}
+          onSetTheme={(t) => props.onThemeChange?.(t)}
+          onOpenSettings={() => props.onOpenSettings()}
+          onOpenFileTree={() => setFileTreeOpen(true)}
+          onToggleSidebar={props.onToggleSidebar}
+          onToggleWorkspace={props.onToggleWorkspace}
+          onTogglePlanMode={() => setPlanMode((v) => !v)}
+          onNewTask={handleNewTask}
         />
       )}
 

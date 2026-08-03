@@ -28,7 +28,6 @@ interface CommandPaletteProps {
   onSetTheme: (t: ThemeName) => void;
   onOpenSettings: (tab?: string) => void;
   onOpenFileTree: () => void;
-  onChangeWorkDir: () => void;
   onToggleSidebar: () => void;
   onToggleWorkspace: () => void;
   onTogglePlanMode: () => void;
@@ -91,15 +90,6 @@ export function CommandPalette(props: CommandPaletteProps) {
         group: 'navigation',
         keywords: ['files', 'tree', 'browse', '目录'],
         run: () => { props.onOpenFileTree(); },
-      },
-      {
-        id: 'change-workdir',
-        label: '切换工作目录',
-        hint: '打开原生目录选择器',
-        icon: commandIcon('folder'),
-        group: 'navigation',
-        keywords: ['workdir', 'folder', '工作目录'],
-        run: () => { props.onChangeWorkDir(); },
       },
       // session
       {

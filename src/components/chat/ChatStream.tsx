@@ -18,13 +18,10 @@ interface ChatStreamProps {
   chatRef: RefObject<HTMLElement | null>;
   lastUserForRetry: string | null;
   modelMissing: boolean;
-  /** M0：是否可以发起审查（任务完成且修改过文件） */
-  reviewRequested?: boolean;
   onOpenSettings: () => void;
   onRetry: () => void;
   onAbort: () => void;
   onApprove: (approved: boolean) => void;
-  onReview?: () => void;
   pendingApproval: ApprovalRequest | null;
   /** 等待计划批准（plan_approval_required） */
   pendingPlanApproval?: PlanApprovalRequest | null;
@@ -125,18 +122,6 @@ export function ChatStream(props: ChatStreamProps) {
               >
                 <Icon name="stop" size={14} />
                 <span>停止任务</span>
-              </button>
-            </div>
-          )}
-          {!props.busy && props.reviewRequested && props.onReview && (
-            <div className="busy-actions">
-              <button
-                className="btn btn-review"
-                onClick={() => props.onReview!()}
-                type="button"
-                title="检查本次任务的代码改动"
-              >
-                审查代码
               </button>
             </div>
           )}
