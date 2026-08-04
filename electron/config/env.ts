@@ -12,8 +12,20 @@ export function getEnvPath(): string {
 /**
  * 从标准应用数据目录加载 .env 到 process.env
  *
- * 文件权限 0600，明文（用户决策，v0.9 用 .env 方案）
+ * 注意：STELLARA_KEY_* 条目在 Windows 上经 safeStorage（DPAPI）加密存储
+ * （见 secrets.ts），此处仅做 dotenv 载入，真实密钥一律通过 secrets 模块
+ * 解密读取，不要从 process.env 取密钥。
  */
+/** 重置 env 缓存（clearAllData 后调用，清除 process.env 中残留的旧 key） */
+export function resetEnvCache(): void {
+  loaded = false;
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('STELLARA_KEY_')) {
+      delete process.env[key];
+    }
+  }
+}
+
 export async function loadEnv(): Promise<void> {
   if (loaded) return;
 

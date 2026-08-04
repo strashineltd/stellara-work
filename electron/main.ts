@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import log from 'electron-log/main';
@@ -838,6 +838,29 @@ app.whenReady().then(async () => {
   }
 
   await loadEnv();
+
+  // API key 加密：Windows 上用 safeStorage（DPAPI）加密存储；不可用时降级明文并警告
+  try {
+    const { _setCipher, migrateLegacyKeys } = await import('./config/secrets');
+    if (safeStorage.isEncryptionAvailable()) {
+      _setCipher({
+        encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
+        decrypt: (b) => safeStorage.decryptString(Buffer.from(b, 'base64')),
+      });
+    } else {
+      log.warn('safeStorage 不可用，API key 将以明文存储（当前环境不支持加密）');
+    }
+    try {
+      const migrated = await migrateLegacyKeys();
+      if (migrated > 0) {
+        log.info(`已将 ${migrated} 个 API key 加密迁移`);
+      }
+    } catch (err) {
+      log.error('API key 加密迁移失败', err);
+    }
+  } catch (err) {
+    log.error('API key 加密初始化失败', err);
+  }
 
   // W3: 旧 config 迁移 + 初始化 db
   try {

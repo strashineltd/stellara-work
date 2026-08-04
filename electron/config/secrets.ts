@@ -4,6 +4,39 @@ import { getAppDataDir } from './data-dir';
 
 let _overrideSecretsDir: string | null = null;
 const PREFIX = 'STELLARA_KEY_';
+const ENC_PREFIX = 'enc:v1:';
+
+/**
+ * 密钥加密适配器（生产用 Electron safeStorage，Windows = DPAPI）。
+ * secrets.ts 不直接 import electron（vitest 环境无法加载），由 main.ts 在
+ * app.whenReady 后注入；测试注入可逆 fake cipher。
+ */
+export interface KeyCipher {
+  encrypt(plain: string): string;
+  decrypt(blob: string): string;
+}
+
+let _cipher: KeyCipher | null = null;
+
+/** 测试 / 主进程接线 hook：注入或清除密码器（null = 明文模式，向后兼容）。 */
+export function _setCipher(cipher: KeyCipher | null): void {
+  _cipher = cipher;
+}
+
+/** 加密值 → 明文；明文 → 原样返回。 */
+function decodeStored(value: string): string | null {
+  if (value.startsWith(ENC_PREFIX)) {
+    // 加密值但无 cipher：宁可不给，不给错值
+    return _cipher ? _cipher.decrypt(value.slice(ENC_PREFIX.length)) : null;
+  }
+  // 迁移前的明文（容错）
+  return value;
+}
+
+/** 明文 → 存储值（有 cipher 加密，否则明文）。 */
+function encodeStored(plain: string): string {
+  return _cipher ? ENC_PREFIX + _cipher.encrypt(plain) : plain;
+}
 
 function secretsDir(): string {
   return _overrideSecretsDir ?? getAppDataDir();
@@ -69,7 +102,7 @@ export function getKey(modelId: string): string | null {
           (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1);
       }
-      return value || null;
+      return decodeStored(value);
     }
   } catch {
     // ignore
@@ -79,7 +112,7 @@ export function getKey(modelId: string): string | null {
 
 export async function setKey(modelId: string, key: string): Promise<void> {
   const map = await readEnv();
-  map.set(envKeyName(modelId), key);
+  map.set(envKeyName(modelId), encodeStored(key));
   await writeEnv(map);
 }
 
@@ -96,8 +129,28 @@ export async function listKeys(): Promise<Record<string, string>> {
   for (const [k, v] of map.entries()) {
     if (k.startsWith(PREFIX)) {
       const modelId = k.slice(PREFIX.length);
-      result[modelId] = v;
+      const decoded = decodeStored(v);
+      if (decoded !== null) result[modelId] = decoded;
     }
   }
   return result;
+}
+
+/**
+ * 一次性迁移：把 .env 里仍是明文的 key 加密重写。
+ * 主进程启动时调用（getKey 保持同步只读，迁移只发生在启动期）。
+ * 返回迁移条数；无 cipher（明文模式）时返回 0。
+ */
+export async function migrateLegacyKeys(): Promise<number> {
+  if (!_cipher) return 0;
+  const map = await readEnv();
+  let migrated = 0;
+  for (const [k, v] of map.entries()) {
+    if (k.startsWith(PREFIX) && !v.startsWith(ENC_PREFIX)) {
+      map.set(k, encodeStored(v));
+      migrated++;
+    }
+  }
+  if (migrated > 0) await writeEnv(map);
+  return migrated;
 }
