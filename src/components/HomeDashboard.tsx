@@ -90,19 +90,19 @@ export function HomeDashboard(props: HomeDashboardProps) {
 
   return (
     <main className="dashboard dashboard--home" aria-labelledby="home-dashboard-title">
-      <section className="dashboard-hero">
-        <div className="dashboard-intro">
-          <h1 id="home-dashboard-title">你好，今天想推进什么？</h1>
-          <p>从一个清楚的任务开始；如果还没有项目，先选择或新建一个本地文件。</p>
+      <section className="task-deck">
+        <div className="task-deck-intro">
+          <h1 id="home-dashboard-title">把任务交给 Agent</h1>
+          <p>描述目标、范围和完成标准；Agent 会在当前工作区执行并逐条记录结果。</p>
         </div>
 
         <div className="dashboard-composer">
           <textarea
-            rows={3}
+            rows={4}
             value={props.input}
             disabled={props.busy}
             aria-label="输入任务"
-            placeholder={props.busy ? '任务正在执行…' : '描述任务目标、涉及范围和完成标准…'}
+            placeholder={props.busy ? '任务正在执行…' : '例如：阅读 README.md，梳理项目结构和启动方式'}
             onChange={(event) => props.onInputChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -116,12 +116,13 @@ export function HomeDashboard(props: HomeDashboardProps) {
             <button
               className="dashboard-send-button"
               type="button"
-              aria-label="开始执行任务"
-              title="开始执行任务"
+              aria-label="交给 Agent"
+              title="交给 Agent"
               disabled={props.busy || !props.input.trim()}
               onClick={props.onSend}
             >
-              <Icon name="send" size={16} />
+              <span>交给 Agent</span>
+              <Icon name="send" size={15} />
             </button>
           </div>
         </div>
@@ -134,43 +135,39 @@ export function HomeDashboard(props: HomeDashboardProps) {
             </button>
           ))}
         </div>
-      </section>
 
-      <section className="dashboard-cards" aria-label="工作概览">
-        <article className="dashboard-card dashboard-card--projects">
-          <header><h2>项目概览</h2><span>{props.projects.length} 个项目</span></header>
-          <div className="dashboard-card__content">
-            {visibleProjects.length > 0 ? visibleProjects.map((project) => (
-              <button className="dashboard-project-row" key={project.id} type="button" onClick={() => props.onOpenProject(project.id)}>
-                <span><strong>{project.name}</strong><small>{project.sessionCount} 条记录</small></span>
-                <span className="dashboard-progress" aria-label={`${project.sessionCount} 条工作记录`}><span style={{ width: `${projectBarWidth(project.sessionCount, maxSessionCount)}%` }} /></span>
-              </button>
-            )) : <p className="dashboard-card__empty">创建项目后，会在这里显示进展。</p>}
-          </div>
-          <button className="dashboard-card__link" type="button" onClick={props.onCreateProject}>新建项目 <Icon name="chevron-right" size={13} /></button>
-        </article>
-
-        <article className="dashboard-card">
-          <header><h2>最近工作记录</h2><span>{props.sessions.length} 条记录</span></header>
-          <div className="dashboard-card__content">
-            {recentSessions.length > 0 ? recentSessions.map((session) => (
-              <button className="dashboard-session-row" key={session.id} type="button" onClick={() => props.onSelectSession(session.id)}>
-                <span className="dashboard-session-check"><Icon name="check" size={12} /></span>
-                <span><strong>{session.title}</strong><small>{formatRelativeTime(session.updatedAt)}</small></span>
-              </button>
-            )) : <p className="dashboard-card__empty">新建工作记录后，可从这里继续处理。</p>}
-          </div>
-        </article>
-
-        <article className="dashboard-card dashboard-card--workspace">
-          <header><h2>本地工作区</h2><span>{effectiveWorkDir ? '已连接' : '未选择'}</span></header>
-          <div className="dashboard-card__content">
-            <div className="workspace-summary-icon"><Icon name="folder" size={16} /></div>
-            <strong className="workspace-summary-name">{props.projectName ?? workDirName}</strong>
-            <p>{props.config.label} · {props.sessions.length} 条工作记录</p>
-          </div>
-          <button className="dashboard-card__link" type="button" onClick={props.onOpenFiles}>{effectiveWorkDir ? '浏览本地文件' : '创建项目'} <Icon name="chevron-right" size={13} /></button>
-        </article>
+        <section className="continue-band" aria-label="继续工作">
+          <h2 className="continue-band__title">继续工作</h2>
+          {recentSessions.length > 0 ? (
+            <div className="continue-band__list">
+              {recentSessions.map((session) => (
+                <button className="continue-row" key={session.id} type="button" onClick={() => props.onSelectSession(session.id)}>
+                  <span className="continue-row__icon"><Icon name="check" size={13} /></span>
+                  <span className="continue-row__body">
+                    <strong>{session.title}</strong>
+                    <small>{formatRelativeTime(session.updatedAt)}</small>
+                  </span>
+                  <Icon className="continue-row__arrow" name="chevron-right" size={14} />
+                </button>
+              ))}
+            </div>
+          ) : visibleProjects.length > 0 ? (
+            <div className="continue-band__list">
+              {visibleProjects.map((project) => (
+                <button className="continue-row" key={project.id} type="button" onClick={() => props.onOpenProject(project.id)}>
+                  <span className="continue-row__icon continue-row__icon--folder"><Icon name="folder" size={14} /></span>
+                  <span className="continue-row__body">
+                    <strong>{project.name}</strong>
+                    <small>{project.sessionCount} 条工作记录</small>
+                  </span>
+                  <Icon className="continue-row__arrow" name="chevron-right" size={14} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="continue-band__empty">创建项目或发送第一个任务后，可从这里继续。</p>
+          )}
+        </section>
       </section>
     </main>
   );

@@ -19,7 +19,7 @@ function resolveTheme(theme: ThemeName): 'light' | 'dark' {
 type AppState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; initialConfig?: ConfiguredModel | null }
+  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; projects: ProjectSummary[]; initialConfig?: ConfiguredModel | null }
   | {
       kind: 'ready';
       config: ConfiguredModel;
@@ -90,7 +90,7 @@ export default function App() {
             workspaceOpen: false,
           });
         } else {
-          setState({ kind: 'onboarding', presets: modelList.presets, info });
+          setState({ kind: 'onboarding', presets: modelList.presets, info, projects });
         }
       })
       .catch((e) => {
@@ -177,21 +177,25 @@ export default function App() {
     return (
       <Onboarding
         presets={state.presets}
+        projects={state.projects}
         initialConfig={state.initialConfig}
-        onComplete={(config) => {
-          // 模型配置与项目分离：首次完成后保持空工作台，由用户创建项目。
+        onComplete={(config, projectId) => {
+          // 模型配置与项目分离：首次完成后进入空工作台或已选项目，由用户继续创建。
           Promise.all([
             window.electronAPI.sessions.list(),
             window.electronAPI.projects.list(),
           ])
             .then(([sessions, projects]) => {
+              const projectSession = projectId
+                ? sessions.find((s) => s.projectId === projectId)
+                : undefined;
               setState({
                 kind: 'ready',
                 config,
                 info: state.info,
                 projects,
                 sessions,
-                activeSessionId: sessions[0]?.id ?? null,
+                activeSessionId: projectSession?.id ?? sessions[0]?.id ?? null,
                 sidebarOpen: true,
                 workspaceOpen: false,
               });
@@ -224,6 +228,7 @@ export default function App() {
               kind: 'onboarding',
               presets: modelList.presets,
               info: state.info,
+              projects: state.projects,
               initialConfig: state.config,
             });
           });

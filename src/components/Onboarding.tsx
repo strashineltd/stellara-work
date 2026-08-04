@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react';
-import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId } from '../../shared/ipc';
+import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId, ProjectSummary } from '../../shared/ipc';
+import { Icon } from './Icon';
 
 interface OnboardingProps {
   presets: ModelPreset[];
   /** 已有配置（用于"重新配置"模式：无 apiKey，仅 hasKey 提示已配） */
   initialConfig?: ConfiguredModel | null;
-  onComplete: (config: ConfiguredModel) => void;
+  /** 已有项目列表（环境初始化步骤选择工作目录用） */
+  projects?: ProjectSummary[];
+  onComplete: (config: ConfiguredModel, projectId?: string) => void;
 }
 
-/** Two-page wizard: page 1 = model pick, page 2 = connection details */
-export function Onboarding({ presets, initialConfig, onComplete }: OnboardingProps) {
-  const [step, setStep] = useState<'pick' | 'workdir'>(
-    initialConfig ? 'workdir' : 'pick',
+/** Wizard: welcome → model pick → connection details → environment init */
+export function Onboarding({ presets, initialConfig, projects, onComplete }: OnboardingProps) {
+  const [step, setStep] = useState<'welcome' | 'pick' | 'workdir' | 'env'>(
+    initialConfig ? 'workdir' : 'welcome',
   );
   const [selectedId, setSelectedId] = useState<PresetModelId>(
     initialConfig?.id ?? 'deepseek-v4-pro',
@@ -21,6 +24,8 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
   const [model, setModel] = useState(initialConfig?.model ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'testing' | 'saving' | 'ok' | 'fail'>('idle');
   const [saveError, setSaveError] = useState('');
+  const [savedConfig, setSavedConfig] = useState<ConfiguredModel | null>(null);
+  const [envProjectId, setEnvProjectId] = useState<string | null>(null);
 
   // Seed baseUrl + model from selected preset (unless custom)
   useEffect(() => {
@@ -74,14 +79,22 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
     if (result.ok) {
       setSaveStatus('ok');
       // onComplete 传不含 apiKey 的视图（key 永远留在主进程）
-      onComplete({
+      const view: ConfiguredModel = {
         id: submitConfig.id,
         label: submitConfig.label,
         baseUrl: submitConfig.baseUrl,
         model: submitConfig.model,
         isCustom: submitConfig.isCustom,
         hasKey: !!submitConfig.apiKey,
-      });
+      };
+      if (initialConfig) {
+        // 重新配置：跳过环境初始化，直接完成
+        onComplete(view);
+      } else {
+        // 首次配置：进入环境初始化（选择工作目录）
+        setSavedConfig(view);
+        setStep('env');
+      }
     } else {
       setSaveStatus('fail');
       setSaveError(result.error ?? '保存失败');
@@ -92,13 +105,23 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
 
   return (
     <div className="onboarding">
-      {step === 'pick' ? (
+      {step === 'welcome' ? (
+        <WelcomePage onStart={() => setStep('pick')} />
+      ) : step === 'pick' ? (
         <PickPage
           presets={presets}
           selectedId={selectedId}
           onPick={setSelectedId}
           onNext={() => setStep('workdir')}
           onSkip={() => setStep('workdir')}
+        />
+      ) : step === 'env' && savedConfig ? (
+        <EnvPage
+          projects={projects ?? []}
+          selectedId={envProjectId}
+          onSelect={setEnvProjectId}
+          onComplete={() => onComplete(savedConfig, envProjectId ?? undefined)}
+          onSkip={() => onComplete(savedConfig)}
         />
       ) : (
         <ConnectionPage
@@ -288,6 +311,90 @@ function ConnectionPage({
           type="button"
         >
           {saveStatus === 'testing' ? '测试中…' : saveStatus === 'saving' ? '保存中…' : '完成配置'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Page 0: Welcome ----
+
+function WelcomePage({ onStart }: { onStart: () => void }) {
+  return (
+    <div className="onboarding-page">
+      <div className="onboarding-body onboarding-body--centered">
+        <div className="onboarding-brand">
+          <p className="onboarding-brand-kicker">Stellara Work</p>
+          <h1 className="onboarding-brand-title">本地优先的 AI 任务工作台</h1>
+          <p className="onboarding-brand-subtitle">
+            把任务交给 Agent，它会在你的本地工作区执行并记录结果。
+          </p>
+        </div>
+      </div>
+
+      <div className="onboarding-footer">
+        <button className="btn btn-primary" onClick={onStart} type="button">
+          开始配置
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Page 3: Environment init (choose workdir) ----
+
+function EnvPage({
+  projects,
+  selectedId,
+  onSelect,
+  onComplete,
+  onSkip,
+}: {
+  projects: ProjectSummary[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onComplete: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <div className="onboarding-page">
+      <div className="onboarding-body">
+        <h1 className="onboarding-title">选择工作目录</h1>
+        <p className="onboarding-subtitle">
+          选择一个已有项目作为当前工作区；也可以稍后在首页创建。
+        </p>
+
+        {projects.length === 0 ? (
+          <p className="env-empty">还没有项目。进入程序后可在首页创建项目。</p>
+        ) : (
+          <div className="env-project-list">
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`env-project-row ${p.id === selectedId ? 'selected' : ''}`}
+                onClick={() => onSelect(p.id)}
+              >
+                <span className="env-project-row__icon"><Icon name="folder" size={15} /></span>
+                <span className="env-project-row__body">
+                  <strong>{p.name}</strong>
+                  <small>{p.sessionCount} 条工作记录</small>
+                </span>
+                {p.id === selectedId && (
+                  <span className="env-project-row__check"><Icon name="check" size={13} /></span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="onboarding-footer">
+        <button className="btn btn-secondary" onClick={onSkip} type="button">
+          跳过
+        </button>
+        <button className="btn btn-primary" onClick={onComplete} type="button">
+          完成
         </button>
       </div>
     </div>

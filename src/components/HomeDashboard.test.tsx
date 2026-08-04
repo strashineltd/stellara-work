@@ -62,10 +62,8 @@ describe('HomeDashboard', () => {
 
   it('renders a local workspace home without account or registration UI', () => {
     const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} />);
-    expect(container.textContent).toContain('你好，今天想推进什么？');
-    expect(container.textContent).toContain('项目概览');
-    expect(container.textContent).toContain('最近工作记录');
-    expect(container.textContent).toContain('本地工作区');
+    expect(container.textContent).toContain('把任务交给 Agent');
+    expect(container.textContent).toContain('继续工作');
     expect(container.textContent).not.toMatch(/登录|注册|账户|头像|个人中心|团队成员/);
   });
 
@@ -81,6 +79,27 @@ describe('HomeDashboard', () => {
     const { getByText } = render(<HomeDashboard section="home" {...BASE_PROPS} onSelectSession={onSelectSession} />);
     fireClick(getByText('重做桌面端界面'));
     expect(onSelectSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('labels the send action as handing the task to the Agent', () => {
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} />);
+    expect(container.textContent).toContain('交给 Agent');
+  });
+
+  it('falls back to recent projects when there are no sessions', () => {
+    const onOpenProject = vi.fn();
+    const { getByText } = render(
+      <HomeDashboard section="home" {...BASE_PROPS} sessions={[]} onOpenProject={onOpenProject} />,
+    );
+    fireClick(getByText('桌面端产品'));
+    expect(onOpenProject).toHaveBeenCalledWith('p1');
+  });
+
+  it('shows a hint when there is nothing to continue', () => {
+    const { container } = render(
+      <HomeDashboard section="home" {...BASE_PROPS} sessions={[]} projects={[]} />,
+    );
+    expect(container.textContent).toContain('创建项目或发送第一个任务后，可从这里继续。');
   });
 
   it('renders the project page and creates a project', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { Onboarding } from './Onboarding';
-import type { ModelPreset, ConfiguredModel } from '../../shared/ipc';
+import type { ModelPreset, ConfiguredModel, ProjectSummary } from '../../shared/ipc';
 
 const PRESETS: ModelPreset[] = [
   { id: 'glm-5.2', label: 'GLM-5.2 (智谱)', baseUrl: 'https://x', model: 'g', isCustom: false },
@@ -61,7 +61,24 @@ function fireClick(el: Element | null) {
   });
 }
 
-// (fireInput helper removed — unused)
+/** 首次配置：从欢迎页点「开始配置」进入选模型页 */
+function renderFirstTime(
+  onComplete: (config: ConfiguredModel, projectId?: string) => void = vi.fn(),
+  projects: ProjectSummary[] = [],
+) {
+  const result = render(<Onboarding presets={PRESETS} initialConfig={null} projects={projects} onComplete={onComplete} />);
+  fireClick(result.getByText(/开始配置/));
+  return result;
+}
+
+/** React 受控 input：用原生 value setter 写入再派发 input 事件 */
+function typeInto(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  act(() => {
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
 
 describe('Onboarding', () => {
   beforeEach(() => {
@@ -78,16 +95,35 @@ describe('Onboarding', () => {
     };
   });
 
+  // --- Page 0: Welcome ---
+
+  it('shows the welcome page before the model pick for first-time setup', () => {
+    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    expect(getByText(/本地优先的 AI 任务工作台/)).toBeTruthy();
+    expect(getByText(/开始配置/)).toBeTruthy();
+    expect(getByText(/GLM-5\.2/)).toBeNull();
+  });
+
+  it('moves from welcome to the model pick when started', () => {
+    const result = renderFirstTime();
+    expect(result.getByText(/GLM-5\.2/)).toBeTruthy();
+  });
+
+  it('renders no emoji glyphs on the welcome page', () => {
+    const { container } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    expect(container.innerHTML).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+  });
+
   // --- Page 1: Model Pick ---
 
   it('renders model cards on page 1', () => {
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = renderFirstTime();
     expect(getByText(/GLM-5\.2/)).toBeTruthy();
     expect(getByText(/DeepSeek/)).toBeTruthy();
   });
 
   it('renders all four preset cards on page 1', () => {
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = renderFirstTime();
     expect(getByText(/GLM-5\.2/)).toBeTruthy();
     expect(getByText(/DeepSeek-v4-Pro/)).toBeTruthy();
     expect(getByText(/Kimi-K3/)).toBeTruthy();
@@ -95,7 +131,7 @@ describe('Onboarding', () => {
   });
 
   it('highlights the selected card with accent border and background', () => {
-    const { querySelectorAll } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { querySelectorAll } = renderFirstTime();
     // First card (deepseek-v4-pro is default) should have selected class
     const cards = querySelectorAll('[data-model-id]');
     const selectedCard = Array.from(cards).find((c) => c.getAttribute('data-model-id') === 'deepseek-v4-pro');
@@ -104,7 +140,7 @@ describe('Onboarding', () => {
   });
 
   it('updates selection when a different card is clicked', () => {
-    const { querySelector, querySelectorAll } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { querySelector, querySelectorAll } = renderFirstTime();
     const glmCard = querySelector('[data-model-id="glm-5.2"]');
     expect(glmCard).toBeTruthy();
     fireClick(glmCard);
@@ -125,22 +161,22 @@ describe('Onboarding', () => {
   });
 
   it('renders no emoji glyphs', () => {
-    const { container } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { container } = renderFirstTime();
     expect(container.innerHTML).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
   });
 
   it('has a skip button on page 1', () => {
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = renderFirstTime();
     expect(getByText(/skip|跳过/i)).toBeTruthy();
   });
 
   it('has a next button on page 1', () => {
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = renderFirstTime();
     expect(getByText(/next|下一步/i)).toBeTruthy();
   });
 
   it('navigates to page 2 when Next is clicked', () => {
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = renderFirstTime();
     const nextBtn = getByText(/next|下一步/i);
     fireClick(nextBtn);
     expect(getByText(/配置模型连接/i)).toBeTruthy();
@@ -173,7 +209,7 @@ describe('Onboarding', () => {
   });
 
   it('navigates back to page 1 when Back is clicked', () => {
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const { getByText } = renderFirstTime();
     // Go to page 2 first
     fireClick(getByText(/next|下一步/i));
     expect(getByText(/配置模型连接/i)).toBeTruthy();
@@ -182,20 +218,84 @@ describe('Onboarding', () => {
     expect(getByText(/建立你的工作环境/i)).toBeTruthy();
   });
 
-  it('skips from page 1 directly to completing with defaults', () => {
+  it('skips from page 1 directly to the connection page', () => {
     const onComplete = vi.fn();
     // Need to mock configure to succeed
     (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={onComplete} />);
-    // Click skip on page 1 - should go to workdir page
+    const { getByText } = renderFirstTime(onComplete);
+    // Click skip on page 1 - should go to connection page
     const skipBtn = getByText(/skip|跳过/i);
     fireClick(skipBtn);
-    // Should now be on workdir page
-    expect(getByText(/complete|完成/i)).toBeTruthy();
-    // Skip on page 2 should call complete with defaults
-    fireClick(getByText(/complete|完成/i));
-    // onComplete should eventually be called (async)
-    // We can check that configure was attempted
+    // Should now be on the connection page
+    expect(getByText(/complete|完成配置/i)).toBeTruthy();
+  });
+
+  // --- Page 3: Environment init ---
+
+  it('reaches the workdir step after first-time configure and completes with the chosen project', async () => {
+    const onComplete = vi.fn();
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
+    const projects: ProjectSummary[] = [
+      { id: 'p1', name: '桌面端产品', updatedAt: Date.now(), sessionCount: 2 },
+    ];
+    const { getByText } = renderFirstTime(onComplete, projects);
+    // pick → connection
+    fireClick(getByText(/next|下一步/i));
+    // 填 key 后完成配置
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+    fireClick(getByText(/完成配置/i));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    // 进入环境初始化页
+    expect(getByText(/选择工作目录/)).toBeTruthy();
+    expect(getByText(/桌面端产品/)).toBeTruthy();
+    // 选中项目并完成
+    fireClick(getByText(/桌面端产品/));
+    fireClick(getByText(/完成/));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete.mock.calls[0][1]).toBe('p1');
+  });
+
+  it('skips the workdir step when the first-time flow completes without a project', async () => {
+    const onComplete = vi.fn();
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
+    const { getByText } = renderFirstTime(onComplete);
+    fireClick(getByText(/next|下一步/i));
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+    fireClick(getByText(/完成配置/i));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(getByText(/选择工作目录/)).toBeTruthy();
+    fireClick(getByText(/跳过/));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it('shows a hint on the workdir step when there are no projects', async () => {
+    const onComplete = vi.fn();
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
+    const { getByText } = renderFirstTime(onComplete);
+    fireClick(getByText(/next|下一步/i));
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+    fireClick(getByText(/完成配置/i));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(getByText(/还没有项目/)).toBeTruthy();
   });
 
   it('does not expose the legacy model workdir during reconfiguration', () => {
