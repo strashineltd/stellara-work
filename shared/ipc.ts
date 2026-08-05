@@ -313,7 +313,7 @@ export type ToolResultMeta =
 
 export interface AppInfo {
   version: string;
-  platform: 'win32';
+  platform: NodeJS.Platform;
   appDataPath: string;
   envPath: string;
 }

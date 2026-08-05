@@ -35,28 +35,43 @@ let mainWindow: BrowserWindow | null = null;
 const chatStreams = new ChatStreamRegistry();
 const grantedWorkDirs = new Set<string>();
 
-function grantWorkDir(workDir: string): string {
+async function normalizeWorkDir(workDir: string): Promise<string> {
   const resolved = path.resolve(workDir);
-  grantedWorkDirs.add(resolved.toLowerCase());
+  if (process.platform === 'win32') return resolved.toLowerCase();
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+async function grantWorkDir(workDir: string): Promise<string> {
+  const resolved = path.resolve(workDir);
+  grantedWorkDirs.add(await normalizeWorkDir(workDir));
   return resolved;
 }
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
     show: true,
-    autoHideMenuBar: true,
+    autoHideMenuBar: !isMac,
     backgroundColor: '#FFFFFF',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: 'rgba(0, 0, 0, 0)',
-      symbolColor: '#65758B',
-      height: 72,
-    },
-    icon: path.join(__dirname, '..', '..', 'assets', 'icon.ico'),
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? {}
+      : {
+          titleBarOverlay: {
+            color: 'rgba(0, 0, 0, 0)',
+            symbolColor: '#65758B',
+            height: 72,
+          },
+        }),
+    icon: path.join(__dirname, '..', '..', 'assets', isMac ? 'icon-512.png' : 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -122,7 +137,7 @@ function registerIpcHandlers(): void {
     await fs.mkdir(appDataPath, { recursive: true });
     return {
       version: app.getVersion(),
-      platform: 'win32',
+      platform: process.platform,
       appDataPath,
       envPath: getEnvPath(),
     };
@@ -299,7 +314,7 @@ function registerIpcHandlers(): void {
     const selected = await fs.realpath(path.resolve(result.filePaths[0]!));
     const stat = await fs.stat(selected);
     if (!stat.isFile()) throw new Error('选择的路径不是文件');
-    const workDir = grantWorkDir(path.dirname(selected));
+    const workDir = await grantWorkDir(path.dirname(selected));
     return { path: selected, workDir };
   });
 
@@ -326,7 +341,7 @@ function registerIpcHandlers(): void {
     } finally {
       await handle?.close();
     }
-    const workDir = grantWorkDir(realParent);
+    const workDir = await grantWorkDir(realParent);
     return { path: filePath, workDir };
   });
 
@@ -661,10 +676,10 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
   // 兼容旧版 app 设置中的默认工作目录
   if (cfg.app.workDirDefault) allowed.push(cfg.app.workDirDefault);
 
-  const resolved = path.resolve(workDir);
-  if (grantedWorkDirs.has(resolved.toLowerCase())) return;
+  const resolved = await normalizeWorkDir(workDir);
+  if (grantedWorkDirs.has(resolved)) return;
   for (const dir of allowed) {
-    if (path.resolve(dir) === resolved) return;
+    if ((await normalizeWorkDir(dir)) === resolved) return;
   }
   throw new Error(`工作目录不在已配置的工作区内：${workDir}`);
 }
