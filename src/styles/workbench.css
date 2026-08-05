@@ -758,6 +758,11 @@ kbd {
   -webkit-app-region: drag;
 }
 
+/* macOS: traffic-light controls overlay the header on the left */
+html[data-platform='darwin'] .main-header {
+  padding-left: 78px;
+}
+
 .main-header button,
 .main-header a,
 .main-header input,

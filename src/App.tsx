@@ -65,6 +65,13 @@ export default function App() {
     return () => mq.removeEventListener('change', handler);
   }, [theme]);
 
+  // 平台写到 documentElement.dataset.platform（workbench.css 用 [data-platform='darwin'] 选择器）
+  useEffect(() => {
+    void window.electronAPI.app.getInfo().then((info) => {
+      document.documentElement.dataset.platform = info.platform;
+    });
+  }, []);
+
   useEffect(() => {
     Promise.all([
       window.electronAPI.app.getInfo(),
