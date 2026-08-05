@@ -29,7 +29,7 @@ npm install
 bash setup.sh
 # 或手动：npm install（better-sqlite3 自带 darwin prebuilds，无需编译）
 ```
-> ⚠️ 首次 `npm install` 会编译 `better-sqlite3`（原生模块），需要：
+> ⚠️ （仅 Windows）首次 `npm install` 会编译 `better-sqlite3`（原生模块），需要：
 > - Node.js 20+（已验证 v24.14.1）
 > - Python 3.x
 > - Visual Studio Build Tools（"使用 C++ 的桌面开发"工作负载）

@@ -200,9 +200,11 @@ export function deleteMemory(id: string): void {
 /** 删除全部记忆，返回删除的条数。 */
 export function deleteAllMemories(): number {
   const db = getDb();
-  try { db.prepare('DELETE FROM memories_fts').run(); } catch { /* FTS5 表可能不存在 */ }
-  const result = db.prepare('DELETE FROM memories').run();
-  return result.changes;
+  const deleteAll = db.transaction(() => {
+    try { db.prepare('DELETE FROM memories_fts').run(); } catch { /* FTS5 表可能不存在 */ }
+    return db.prepare('DELETE FROM memories').run().changes;
+  });
+  return deleteAll();
 }
 
 export function bumpAccess(id: string): void {

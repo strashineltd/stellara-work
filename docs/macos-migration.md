@@ -13,7 +13,7 @@
    cd stellara-work
    ```
 3. **初始化环境**：运行 `bash setup.sh`。脚本会检查 Node.js 20+、安装依赖（better-sqlite3 自带 darwin 预编译产物，无需本地编译）并跑一遍测试。
-4. **首次启动**：`npm run dev` 启动应用。首次启动会自动迁移旧数据——将备份文件还原到 macOS 数据目录后，应用会识别旧格式数据并迁移到新位置。
+4. **首次启动**：`npm run dev` 启动应用。将备份文件还原到 `~/.stellara`（旧数据目录）后，应用首次启动会自动迁移到 macOS 数据目录（`~/Library/Application Support/Stellara Work`）。迁移范围覆盖配置、会话、项目数据库（stellara.db）与加密的 API key 等全部数据。
 
 > 提示：API key 加密存储依赖 macOS Keychain（safeStorage），迁移后首次读取 key 时会弹出 Keychain 权限确认，选择「始终允许」即可。
 
