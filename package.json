@@ -1,7 +1,7 @@
 {
   "name": "stellara-work",
   "version": "0.9.0",
-  "description": "数据本地的 Codex 风格 Windows 桌面 Agent（GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型）",
+  "description": "数据本地的 Codex 风格桌面 Agent（Windows / macOS）（GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型）",
   "main": "electron/dist/electron/main.js",
   "author": "Stellara Work",
   "license": "UNLICENSED",
@@ -18,9 +18,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:w1": "vitest run scripts/verify-w1.test.ts",
-    "rebuild:node": "rm -rf node_modules/better-sqlite3 && npm install better-sqlite3",
+    "rebuild:node": "node -e \"require('fs').rmSync('node_modules/better-sqlite3',{recursive:true,force:true})\" && npm install better-sqlite3",
     "rebuild:electron": "npx --yes @electron/rebuild",
     "package": "npm run build && electron-builder --win nsis",
+    "package:win": "npm run build && electron-builder --win nsis",
+    "package:mac": "npm run build && electron-builder --mac",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
   },
@@ -88,6 +90,15 @@
       "!dist/**/*.map",
       "assets/**/*"
     ],
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "assets/icon-512.png",
+      "category": "public.app-category.developer-tools",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
     "win": {
       "target": [
         {
