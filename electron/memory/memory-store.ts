@@ -197,6 +197,14 @@ export function deleteMemory(id: string): void {
   try { db.prepare('DELETE FROM memories_fts WHERE memory_id = ?').run(id); } catch { /* ignore */ }
 }
 
+/** 删除全部记忆，返回删除的条数。 */
+export function deleteAllMemories(): number {
+  const db = getDb();
+  try { db.prepare('DELETE FROM memories_fts').run(); } catch { /* FTS5 表可能不存在 */ }
+  const result = db.prepare('DELETE FROM memories').run();
+  return result.changes;
+}
+
 export function bumpAccess(id: string): void {
   const db = getDb();
   db.prepare('UPDATE memories SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?')

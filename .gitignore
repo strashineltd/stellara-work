@@ -57,3 +57,8 @@ coverage/
 
 # Claude Code
 .claude/
+
+# AI tooling (dev only, not part of the product)
+.mimocode/
+.superpowers/
+skills/

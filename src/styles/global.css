@@ -2398,6 +2398,52 @@ body {
   font-family: inherit;
 }
 
+/* === Reset options === */
+.reset-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.reset-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-content);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.reset-option:hover {
+  border-color: var(--color-danger);
+}
+
+.reset-option input[type="radio"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.reset-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.reset-option-title {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.reset-option-desc {
+  font-size: var(--fs-sm);
+  color: var(--color-text-soft);
+}
+
 /* === Shortcuts tab === */
 .shortcuts-list {
   display: flex;
