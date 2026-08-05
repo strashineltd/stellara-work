@@ -1,5 +1,5 @@
 # Stellara Work
-> 数据本地的 Codex 风格 Windows 桌面 Agent · **v0.9 内测版**
+> 数据本地的 Codex 风格桌面 Agent（Windows / macOS） · **v0.9 内测版**
 GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型（OpenAI 兼容协议）
 **完整规划**：见 [`plan.md`](./plan.md)
 ---
@@ -16,13 +16,18 @@ GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型（OpenAI 兼�
 - **LLM 客户端**：fetch + eventsource-parser（OpenAI 兼容）
 - **存储**：better-sqlite3
 - **配置**：dotenv + JSON
-- **打包**：electron-builder + NSIS
+- **打包**：electron-builder（Windows NSIS / macOS dmg+zip 双架构）
 ---
 ## 快速开始
 ### 1. 装依赖
 ```powershell
 # Windows PowerShell
 npm install
+```
+```bash
+# macOS / Linux
+bash setup.sh
+# 或手动：npm install（better-sqlite3 自带 darwin prebuilds，无需编译）
 ```
 > ⚠️ 首次 `npm install` 会编译 `better-sqlite3`（原生模块），需要：
 > - Node.js 20+（已验证 v24.14.1）
@@ -53,6 +58,20 @@ npm run verify:w1
 # 跑测试
 npm test
 ```
+---
+## 跨平台
+**数据位置**：
+
+| 平台 | 数据目录 | 日志 |
+|------|----------|------|
+| Windows | `%APPDATA%\Stellara Work`（旧版 `~/.stellara`） | `%APPDATA%\Stellara Work\logs` |
+| macOS | `~/Library/Application Support/Stellara Work` | `~/Library/Logs/Stellara Work/main.log` |
+
+**打包**：
+- `npm run package:mac` — 产出 macOS dmg/zip（x64 + arm64），只能在 macOS 上构建
+- `npm run package:win` — 在 macOS 上交叉构建 Windows NSIS 安装包；无签名证书时设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`
+
+**数据迁移**：旧 `~/.stellara` 数据（config.json + .env）在首次启动时自动迁移到当前平台的数据目录。macOS 迁移与常见问题详见 [`docs/macos-migration.md`](./docs/macos-migration.md)。
 ---
 ## 目录结构
 ```
