@@ -51,6 +51,10 @@ const SETTINGS_TABS: Array<{ id: Tab; label: string }> = [
  * - Shortcuts：用户自定义快捷键
  */
 export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, theme, onThemeChanged, onWorkspaceModeChanged, workDir, initialTab }: SettingsModalProps) {
+  const displayBinding = (s: string): string => {
+    const shown = formatBinding(s);
+    return document.documentElement.dataset.platform === 'darwin' ? shown.replace(/Ctrl/g, 'Cmd') : shown;
+  };
   const [tab, setTab] = useState<Tab>(initialTab ?? 'providers');
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [presets, setPresets] = useState<ModelPreset[]>([]);
@@ -721,7 +725,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                   <div key={def.action} className="shortcut-row">
                     <span className="shortcut-label">{def.label}</span>
                     <code className={`shortcut-keys ${isRecording ? 'recording' : ''}`}>
-                      {isRecording ? '按下任意键…' : formatBinding(current)}
+                      {isRecording ? '按下任意键…' : displayBinding(current)}
                     </code>
                     <button
                       className="btn btn-secondary btn-small"
@@ -735,7 +739,7 @@ export function SettingsModal({ onClose, onModelChanged, onShortcutsChanged, the
                       onClick={() => handleResetShortcut(def.action)}
                       disabled={current === def.defaultBinding}
                       type="button"
-                      title={`恢复默认：${formatBinding(def.defaultBinding)}`}
+                      title={`恢复默认：${displayBinding(def.defaultBinding)}`}
                     >
                       重置
                     </button>

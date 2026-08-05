@@ -13,7 +13,10 @@ import type {
 } from '../shared/ipc';
 
 const now = Date.now();
-const previewWorkDir = 'D:\\Stellara Work';
+const isMacPreview = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
+const sep = isMacPreview ? '/' : '\\';
+const previewWorkDir = isMacPreview ? '/tmp/stellara-preview' : 'D:\\Stellara Work';
+const previewPlatform = isMacPreview ? 'darwin' : 'win32';
 
 const previewModel: ConfiguredModel = {
   id: 'custom',
@@ -26,8 +29,8 @@ const previewModel: ConfiguredModel = {
 };
 
 let projects: ProjectSummary[] = [
-  { id: 'product', name: '桌面端产品', workDir: previewWorkDir, entryFile: `${previewWorkDir}\\README.md`, updatedAt: now - 40_000, sessionCount: 2 },
-  { id: 'website', name: '品牌网站', workDir: previewWorkDir, entryFile: `${previewWorkDir}\\package.json`, updatedAt: now - 240_000, sessionCount: 1 },
+  { id: 'product', name: '桌面端产品', workDir: previewWorkDir, entryFile: `${previewWorkDir}${sep}README.md`, updatedAt: now - 40_000, sessionCount: 2 },
+  { id: 'website', name: '品牌网站', workDir: previewWorkDir, entryFile: `${previewWorkDir}${sep}package.json`, updatedAt: now - 240_000, sessionCount: 1 },
 ];
 
 let sessions: SessionSummary[] = [
@@ -68,7 +71,7 @@ function sessionFromSummary(summary: SessionSummary): Session {
 
 function emptyDiagnostics(): DiagnosticsInfo {
   return {
-    version: '0.9.0-preview', platform: 'win32', arch: 'x64', electron: 'preview', chrome: 'preview', node: 'preview',
+    version: '0.9.0-preview', platform: previewPlatform, arch: 'x64', electron: 'preview', chrome: 'preview', node: 'preview',
     appDataPath: 'Preview', envPath: 'Preview', logPath: 'Preview', dbSizeBytes: 0,
     sessionCount: sessions.length, messageCount: previewRows.length, modelCount: 1,
     activeModelId: previewModel.id, modelsWithKey: [previewModel.id], logTail: '', collectedAt: new Date().toISOString(),
@@ -83,7 +86,7 @@ export function installDevPreviewApi(): void {
   };
 
   const api: ElectronAPI = {
-    app: { getInfo: async () => ({ version: '0.9.0-preview', platform: 'win32', appDataPath: 'Preview', envPath: 'Preview' }) },
+    app: { getInfo: async () => ({ version: '0.9.0-preview', platform: previewPlatform, appDataPath: 'Preview', envPath: 'Preview' }) },
     models: {
       list: async () => ({ presets: [], configured: previewModel }),
       getAll: async () => [modelItem],
@@ -98,9 +101,9 @@ export function installDevPreviewApi(): void {
     tools: { invoke: async () => ({ ok: true, output: 'Preview' }) },
     dialog: {
       openDirectory: async () => previewWorkDir,
-      openFile: async () => `${previewWorkDir}\\README.md`,
-      selectProjectFile: async () => ({ path: `${previewWorkDir}\\README.md`, workDir: previewWorkDir }),
-      createProjectFile: async () => ({ path: `${previewWorkDir}\\notes.md`, workDir: previewWorkDir }),
+      openFile: async () => `${previewWorkDir}${sep}README.md`,
+      selectProjectFile: async () => ({ path: `${previewWorkDir}${sep}README.md`, workDir: previewWorkDir }),
+      createProjectFile: async () => ({ path: `${previewWorkDir}${sep}notes.md`, workDir: previewWorkDir }),
     },
     projects: {
       list: async () => projects,
@@ -142,7 +145,7 @@ export function installDevPreviewApi(): void {
       ] }),
       readFile: async () => ({ content: '// UI preview', size: 13, truncated: false }),
       openPath: async () => true,
-      createFile: async (workDir, relativePath) => ({ path: `${workDir}\\${relativePath.replace(/\//g, '\\')}` }),
+      createFile: async (workDir, relativePath) => ({ path: `${workDir}${sep}${relativePath.replace(/\//g, sep)}` }),
     },
     settings: {
       get: async () => ({ theme: 'light', workspaceMode: 'sidebar' }), update: async () => {}, clearAllData: async () => {}, resetSelective: async () => {},

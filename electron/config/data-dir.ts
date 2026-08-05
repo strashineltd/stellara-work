@@ -32,7 +32,10 @@ export function getLegacyDataDir(): string {
 export async function migrateLegacyAppData(targetDir: string, legacyDir = LEGACY_DATA_DIR): Promise<string[]> {
   const target = path.resolve(targetDir);
   const legacy = path.resolve(legacyDir);
-  if (target.toLowerCase() === legacy.toLowerCase()) return [];
+  const isSamePath = process.platform === 'win32'
+    ? target.toLowerCase() === legacy.toLowerCase()
+    : target === legacy;
+  if (isSamePath) return [];
 
   await fs.mkdir(target, { recursive: true });
   const copied: string[] = [];

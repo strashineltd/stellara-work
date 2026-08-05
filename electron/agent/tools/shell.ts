@@ -29,7 +29,7 @@ const ALLOWED_COMMANDS_POSIX = new Set([
   'ls', 'cat', 'head', 'tail', 'grep', 'find', 'rg',
   'pwd', 'whoami', 'uname', 'which', 'env', 'true', 'false', 'test',
   // 开发工具
-  'python3', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
+  'python', 'python3', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
   // 文本处理（只读）
   'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'diff',
 ]);
