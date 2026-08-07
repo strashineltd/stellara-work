@@ -31,11 +31,14 @@ export async function memorySearch(args: { query: string; scope?: string; kind?:
   }
 }
 
-export async function memorySave(args: { content: string; kind: string; scope?: string; tags?: string[] }, _cwd: string): Promise<ToolResult> {
+export async function memorySave(args: { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, _cwd: string): Promise<ToolResult> {
   try {
     const validKinds = ['fact', 'preference', 'decision', 'codebase', 'requirement', 'meeting'];
     if (!validKinds.includes(args.kind)) {
       return { ok: false, output: '', error: `无效的 kind: ${args.kind}，可选值: ${validKinds.join(', ')}` };
+    }
+    if (args.importance != null && (typeof args.importance !== 'number' || args.importance < 0 || args.importance > 1)) {
+      return { ok: false, output: '', error: `importance 必须是 0-1 之间的数字` };
     }
 
     const memory = saveMemory({
@@ -43,7 +46,7 @@ export async function memorySave(args: { content: string; kind: string; scope?: 
       kind: args.kind as 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting',
       content: args.content,
       source: 'agent',
-      importance: 0.7,
+      importance: args.importance ?? 0.7,
       confidence: 0.9,
       tags: args.tags,
     });
@@ -85,6 +88,7 @@ export const memoryTools: OpenAITool[] = [
           kind: { type: 'string', description: '记忆类型：fact（事实）、preference（偏好）、decision（决策）、codebase（代码库知识）、requirement（需求）、meeting（会议记录）' },
           scope: { type: 'string', description: '作用域：personal（个人）、project（项目）、workspace（企业），默认 personal' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签数组' },
+          importance: { type: 'number', description: '重要性 0-1，默认 0.7；0.8 以上会进入记忆中心"重要记忆"置顶区' },
         },
         required: ['content', 'kind'],
         additionalProperties: false,
