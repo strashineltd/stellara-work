@@ -31,6 +31,13 @@ export interface Deliverable {
   ts: number;
 }
 
+export interface MemoryContextItem {
+  kind: string;
+  content: string;
+  importance: number;
+  source?: string;
+}
+
 interface WorkspacePanelProps {
   workDir: string;
   goal: Goal | null;
@@ -41,6 +48,7 @@ interface WorkspacePanelProps {
   onStepToggle?: (index: number) => void;
   initialWidth?: number;
   onWidthChange?: (w: number) => void;
+  memoryContext?: MemoryContextItem[];
 }
 
 const MIN_WIDTH = 200;
@@ -49,7 +57,7 @@ const DEFAULT_WIDTH = 280;
 
 export function WorkspacePanel({
   workDir, goal, progress, deliverables, touchedFiles,
-  stepStatus, onStepToggle, initialWidth, onWidthChange,
+  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext,
 }: WorkspacePanelProps) {
   const [width, setWidth] = useState(initialWidth ?? DEFAULT_WIDTH);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -115,6 +123,7 @@ export function WorkspacePanel({
       <GoalSection goal={goal} stepStatus={stepStatus} onStepToggle={onStepToggle} />
       <ProgressSection progress={progress} goal={goal} stepStatus={stepStatus} />
       <DeliverablesSection deliverables={deliverables} />
+      <MemoryInjectSection memoryContext={memoryContext} />
       <FileSection workDir={workDir} touchedFiles={touchedFiles} />
     </aside>
   );
@@ -240,6 +249,26 @@ function DeliverablesSection({ deliverables }: { deliverables: Deliverable[] }) 
           <span className="deliverable-path">{d.path}</span>
         </div>
       ))}
+    </details>
+  );
+}
+
+function MemoryInjectSection({ memoryContext }: { memoryContext?: MemoryContextItem[] }) {
+  if (!memoryContext || memoryContext.length === 0) return null;
+  return (
+    <details className="workspace-section" open>
+      <summary className="workspace-section-header">
+        <span>本次记忆</span>
+      </summary>
+      <ul className="memory-inject-list">
+        {memoryContext.map((m, i) => (
+          <li key={i} className="memory-inject-item" title={m.content}>
+            <span className="memory-inject-kind">{m.kind}</span>
+            <span className="memory-inject-content">{m.content}</span>
+            {m.importance >= 0.8 && <span className="memory-inject-star">★</span>}
+          </li>
+        ))}
+      </ul>
     </details>
   );
 }

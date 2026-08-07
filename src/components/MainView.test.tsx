@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { MainView } from './MainView';
 import type { AppInfo, ConfiguredModel, SessionSummary } from '../../shared/ipc';
 
@@ -13,7 +13,10 @@ const SESSIONS: SessionSummary[] = [
   { id: 'b', title: '会话 B', modelId: 'deepseek-v4-pro', messageCount: 1, updatedAt: 0 },
 ];
 
-async function renderMainView(overrides: Partial<React.ComponentProps<typeof MainView>> = {}) {
+async function renderMainView(
+  overrides: Partial<React.ComponentProps<typeof MainView>> = {},
+  Component: React.ComponentType<React.ComponentProps<typeof MainView>> = MainView,
+) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   let root: Root;
@@ -47,7 +50,7 @@ async function renderMainView(overrides: Partial<React.ComponentProps<typeof Mai
   };
   await act(async () => {
     root = createRoot(container);
-    root.render(<MainView {...props} />);
+    root.render(<Component {...props} />);
   });
   await act(async () => { /* flush session-load promise */ });
   // TabBar only renders in the tasks view — navigate there via the sidebar nav
@@ -101,6 +104,8 @@ describe('MainView session deletion confirmation', () => {
       },
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
 
@@ -165,6 +170,8 @@ describe('MainView shortcut wiring', () => {
       },
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
 
@@ -250,6 +257,8 @@ describe('MainView model-missing banner', () => {
       },
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
 
@@ -263,5 +272,104 @@ describe('MainView model-missing banner', () => {
     const sessions = [{ id: 'a', title: '会话 A', modelId: 'deleted-model', messageCount: 1, updatedAt: 0 }];
     const { querySelector } = await renderMainView({ sessions, activeSessionId: 'a' });
     expect(querySelector('.model-missing-banner')).not.toBeNull();
+  });
+});
+
+function SessionSwitchHarness(props: React.ComponentProps<typeof MainView>) {
+  const [activeId, setActiveId] = useState<string | null>(props.activeSessionId);
+  return (
+    <MainView
+      {...props}
+      activeSessionId={activeId}
+      onSessionSwitched={(id) => setActiveId(id)}
+    />
+  );
+}
+
+describe('MainView memory context', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  it('shows injected memories in the workspace panel after a memory_context event', async () => {
+    const events = (async function* () {
+      yield {
+        type: 'memory_context',
+        memories: [
+          { kind: 'fact', content: '项目使用 npm workspaces', importance: 0.9, source: 'task' },
+          { kind: 'preference', content: '用户偏好中文界面', importance: 0.4 },
+        ],
+      };
+      yield { type: 'done' };
+    })();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 's1', events });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, querySelectorAll, getByText } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj' },
+    });
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '写个测试');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+    expect(getByText('本次记忆')).toBeTruthy();
+    const items = querySelectorAll('.memory-inject-item');
+    expect(items.length).toBe(2);
+    expect(items[0]?.querySelector('.memory-inject-kind')?.textContent).toBe('fact');
+    expect(getByText('项目使用 npm workspaces')).toBeTruthy();
+    expect(querySelectorAll('.memory-inject-star').length).toBe(1);
+  });
+
+  it('shows the extraction hint when onExtracted fires for the active session', async () => {
+    let extractedCb: ((info: { sessionId: string; count: number }) => void) | null = null;
+    (window as any).electronAPI.memory.onExtracted = vi.fn((cb) => {
+      extractedCb = cb;
+      return () => {};
+    });
+    const { querySelector } = await renderMainView();
+    expect(querySelector('.memory-extracted-hint')).toBeNull();
+    act(() => {
+      extractedCb!({ sessionId: 'a', count: 3 });
+    });
+    const hint = querySelector('.memory-extracted-hint');
+    expect(hint).toBeTruthy();
+    expect(hint?.textContent).toContain('本次会话已沉淀 3 条记忆');
+  });
+
+  it('hides the extraction hint after switching to another session', async () => {
+    let extractedCb: ((info: { sessionId: string; count: number }) => void) | null = null;
+    (window as any).electronAPI.memory.onExtracted = vi.fn((cb) => {
+      extractedCb = cb;
+      return () => {};
+    });
+    const { querySelector } = await renderMainView({}, SessionSwitchHarness);
+    act(() => {
+      extractedCb!({ sessionId: 'a', count: 5 });
+    });
+    expect(querySelector('.memory-extracted-hint')).not.toBeNull();
+    fireClick(querySelector('[data-tab-id="b"]'));
+    await act(async () => {});
+    expect(querySelector('.memory-extracted-hint')).toBeNull();
   });
 });

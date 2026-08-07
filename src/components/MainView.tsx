@@ -11,7 +11,7 @@ import {
 } from '../lib/chat-utils';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
-import { WorkspacePanel, type Goal, type Deliverable } from './WorkspacePanel';
+import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem } from './WorkspacePanel';
 import { Header } from './chat/Header';
 import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
@@ -93,11 +93,20 @@ export function MainView(props: MainViewProps) {
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
+  // 本次任务注入的相关记忆（memory_context 事件）
+  const [memoryContext, setMemoryContext] = useState<MemoryContextItem[]>([]);
+  // 会话结束后已沉淀记忆的提示（memories-extracted 事件）
+  const [extractedNotice, setExtractedNotice] = useState<{ sessionId: string; count: number } | null>(null);
 
   // ---- Model list ----
   useEffect(() => {
     void window.electronAPI.models.getAll().then(setModelList).catch(() => { /* ignore */ });
   }, [config.id]);
+
+  // 监听主进程"会话结束已提取记忆"事件，显示轻提示
+  useEffect(() => {
+    return window.electronAPI.memory.onExtracted((info) => setExtractedNotice(info));
+  }, []);
 
   async function handleSwitchModel(id: string) {
     if (id === config.id || switchingModel) return;
@@ -119,6 +128,7 @@ export function MainView(props: MainViewProps) {
 
   useEffect(() => {
     let cancelled = false;
+    setMemoryContext([]);
     (async () => {
       if (!activeSessionId) {
         if (saveTimer.current) {
@@ -275,6 +285,7 @@ export function MainView(props: MainViewProps) {
 
   async function handleSend() {
     if (!input.trim() || busy) return;
+    setMemoryContext([]);
     if (!activeSessionId) {
       setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再发送任务。' }]);
       return;
@@ -301,6 +312,9 @@ export function MainView(props: MainViewProps) {
           const next = applyStreamEventToEntries(prev, ev, setPendingApproval, setPendingPlanApproval);
           return next ?? prev;
         });
+        if (ev.type === 'memory_context' && ev.memories) {
+          setMemoryContext(ev.memories);
+        }
         if (ev.type === 'task_complete') {
           setEntries((prev) => {
             const report = generateReportFromEntries(prev);
@@ -575,6 +589,11 @@ export function MainView(props: MainViewProps) {
                   setPendingPlanApproval(null);
                 }}
               />
+              {extractedNotice && activeSessionId === extractedNotice.sessionId && (
+                <div className="memory-extracted-hint">
+                  本次会话已沉淀 {extractedNotice.count} 条记忆，可在记忆中心查看
+                </div>
+              )}
               <InputArea
                 input={input}
                 busy={busy}
@@ -626,6 +645,7 @@ export function MainView(props: MainViewProps) {
             progress={{ completed: toolResultCount, total: toolCallCount }}
             deliverables={workspaceDeliverables}
             touchedFiles={touchedFiles}
+            memoryContext={memoryContext}
           />
         )}
       </div>
