@@ -28,6 +28,15 @@ export const DEFAULT_COMPRESSION: CompressionConfig = {
   keepRecentTurns: 12,
 };
 
+/**
+ * 按模型 contextWindow 生成压缩配置：
+ * 阈值 = contextWindow × 90%；未配置窗口时回退默认 24K 阈值。
+ */
+export function compressionForContextWindow(contextWindow?: number): Partial<CompressionConfig> {
+  if (!contextWindow || contextWindow <= 0) return {};
+  return { thresholdTokens: Math.floor(contextWindow * 0.9) };
+}
+
 export interface CompressionResult {
   messages: ChatMessage[];
   compressed: boolean;

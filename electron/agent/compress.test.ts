@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimateTokens, compressIfNeeded, DEFAULT_COMPRESSION, type SummarizableClient } from './compress';
+import { estimateTokens, compressIfNeeded, compressionForContextWindow, DEFAULT_COMPRESSION, type SummarizableClient } from './compress';
 import type { ChatMessage } from '../../shared/ipc';
 
 /**
@@ -127,6 +127,17 @@ describe('compressIfNeeded', () => {
     expect(defaultThresholdTokens(256_000)).toBe(Math.floor(256_000 * 0.9));
     expect(defaultThresholdTokens(512_000)).toBe(Math.floor(512_000 * 0.9));
     expect(defaultThresholdTokens(1_000_000)).toBe(Math.floor(1_000_000 * 0.9));
+  });
+
+  it('compressionForContextWindow：按窗口自适应，未配置回退默认', () => {
+    expect(compressionForContextWindow(256_000)).toEqual({ thresholdTokens: Math.floor(256_000 * 0.9) });
+    expect(compressionForContextWindow(128_000)).toEqual({ thresholdTokens: 115_200 });
+    expect(compressionForContextWindow(undefined)).toEqual({});
+    expect(compressionForContextWindow(0)).toEqual({});
+    // 与 compressIfNeeded 的默认合并后仍为 12 轮保留
+    const merged = { ...DEFAULT_COMPRESSION, ...compressionForContextWindow(128_000) };
+    expect(merged.keepRecentTurns).toBe(12);
+    expect(merged.thresholdTokens).toBe(115_200);
   });
 
   it('默认 contextWindow 256K 下，构造 ~230K token 触发压缩', async () => {

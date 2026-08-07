@@ -753,6 +753,10 @@ async function runAgentLoopForIpc(
   }
   const history = request.messages.slice(0, -1);
 
+  // M4.1: 上下文压缩阈值随模型 contextWindow 自适应（默认 24K 阈值对 256K 窗口过保守）
+  const { compressionForContextWindow } = await import('./agent/compress');
+  const compression = compressionForContextWindow(model.contextWindow);
+
   // P0-2: 创建 AbortController
   const ctrl = chatStreams.start(streamId);
   let terminalEventSent = false;
@@ -782,6 +786,7 @@ async function runAgentLoopForIpc(
       model,
       cwd,
       history,
+      compression,
       planMode: request.planMode ?? false,
       platform: { platform: process.platform, arch: process.arch },
       skills,
