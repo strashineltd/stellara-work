@@ -572,6 +572,8 @@ export interface ElectronAPI {
     exportAll: () => Promise<{ path: string; count: number } | null>;
     /** 返回单条记忆的 Markdown 文本（渲染层写剪贴板） */
     copyMd: (id: string) => Promise<string>;
+    /** 监听"会话结束后已提取记忆"事件（sessionId + 条数） */
+    onExtracted: (callback: (info: { sessionId: string; count: number }) => void) => () => void;
   };
   menu: {
     /** 监听原生菜单触发的 action（macOS）。返回取消监听函数。 */

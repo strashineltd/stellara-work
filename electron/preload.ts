@@ -179,6 +179,13 @@ const api: ElectronAPI = {
     exportSingle: (id: string) => ipcRenderer.invoke('memory:exportSingle', id),
     exportAll: () => ipcRenderer.invoke('memory:exportAll'),
     copyMd: (id: string) => ipcRenderer.invoke('memory:copyMd', id),
+    onExtracted: (callback: (info: { sessionId: string; count: number }) => void) => {
+      const handler = (_e: unknown, info: { sessionId: string; count: number }) => callback(info);
+      ipcRenderer.on('memories-extracted', handler);
+      return () => {
+        ipcRenderer.removeListener('memories-extracted', handler);
+      };
+    },
   },
   menu: {
     onAction: (callback: (action: MenuAction) => void) => {

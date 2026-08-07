@@ -159,6 +159,7 @@ export function installDevPreviewApi(): void {
       exportSingle: async () => ({ path: 'Preview/export.md' }),
       exportAll: async () => ({ path: 'Preview/all.md', count: 1 }),
       copyMd: async () => '# Preview\n',
+      onExtracted: () => () => {},
     },
     menu: {
       onAction: () => () => {},

@@ -889,7 +889,10 @@ async function extractMemoriesFromSession(
       content: m.content,
     }));
 
-    await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall);
+    const saved = await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall);
+    if (saved.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('memories-extracted', { sessionId: request.sessionId, count: saved.length });
+    }
   } catch {
     // 记忆提取失败不影响用户体验
   }
