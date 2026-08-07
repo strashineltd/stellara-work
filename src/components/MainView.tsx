@@ -178,6 +178,34 @@ export function MainView(props: MainViewProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries, busy]);
 
+  // 原生菜单（macOS）动作：命令面板 / 新建会话 / 打开路径（App 已处理 open-settings）
+  useEffect(() => {
+    const onMenuAction = (e: Event) => {
+      const action = (e as CustomEvent<string>).detail;
+      if (action === 'open-command-palette') {
+        setCommandPaletteOpen(true);
+      } else if (action === 'new-session') {
+        void handleNewSession();
+      } else if (action.startsWith('open-path:')) {
+        handleOpenPath(action.slice('open-path:'.length));
+      }
+    };
+    window.addEventListener('menu-action', onMenuAction);
+    return () => window.removeEventListener('menu-action', onMenuAction);
+  });
+
+  // M2.4: Finder/ Dock 拖入的文件 → 打开所在项目（或跳到项目页）
+  function handleOpenPath(filePath: string) {
+    const project = projects.find((p) => p.workDir != null && filePath.startsWith(p.workDir));
+    if (project) {
+      const session = sessions.find((s) => s.projectId === project.id);
+      if (session) void props.onSessionSwitched(session.id);
+      else setActiveSection('projects');
+    } else {
+      setActiveSection('projects');
+    }
+  }
+
   useEffect(() => {
     if (!confirmNew) return;
     const onKeyDown = (event: KeyboardEvent) => {

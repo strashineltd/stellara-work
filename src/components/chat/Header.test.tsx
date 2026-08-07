@@ -114,7 +114,7 @@ describe('Header', () => {
     expect(header).toBeTruthy();
   });
 
-  it('renders the compact product branding from the reference layout', () => {
+  it('removes product branding from the header', () => {
     const { querySelector, getByText } = render(
       <Header
         config={MODEL_CONFIG}
@@ -135,9 +135,9 @@ describe('Header', () => {
         onSwitchModel={vi.fn()}
       />,
     );
-    expect(querySelector('.header-product')).toBeTruthy();
-    expect(querySelector('.header-product-mark')).toBeTruthy();
-    expect(getByText('Stellara Work')).toBeTruthy();
+    expect(querySelector('.header-product')).toBeNull();
+    expect(querySelector('.header-product-mark')).toBeNull();
+    expect(getByText('Stellara Work')).toBeNull();
   });
 
   it('does not use emoji glyphs in rendered HTML', () => {

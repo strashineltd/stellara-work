@@ -17,6 +17,7 @@ import type {
   AppSettings,
   FsNode,
   Memory,
+  MenuAction,
 } from '../shared/ipc';
 
 /**
@@ -175,6 +176,15 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('memory:delete', id),
     stats: () =>
       ipcRenderer.invoke('memory:stats'),
+  },
+  menu: {
+    onAction: (callback: (action: MenuAction) => void) => {
+      const handler = (_e: unknown, action: MenuAction) => callback(action);
+      ipcRenderer.on('menu:action', handler);
+      return () => {
+        ipcRenderer.removeListener('menu:action', handler);
+      };
+    },
   },
 };
 

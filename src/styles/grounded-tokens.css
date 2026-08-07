@@ -48,10 +48,10 @@
   --shadow-md: 0 14px 38px rgba(59, 83, 123, 0.13);
   --shadow-lg: 0 30px 80px rgba(64, 94, 145, 0.2);
 
-  --font-sans: "Segoe UI Variable", "Segoe UI", "PingFang SC",
-    "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas,
-    "SFMono-Regular", monospace;
+  --font-sans: -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI",
+    "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, "Cascadia Code", "Cascadia Mono",
+    Consolas, monospace;
 
   --fs-xxs: 10px;
   --fs-xs: 11px;
@@ -106,33 +106,35 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --color-bg-app: #111827;
-  --color-bg-sidebar: #182235;
-  --color-bg-content: #1d293d;
-  --color-bg-elevated: #243249;
-  --color-bg-soft: #223047;
-  --color-bg-input: #223047;
-  --color-bg-code: #172236;
-  --color-bg-selected: #253d63;
+  /* 中性炭灰背景（无蓝相） */
+  --color-bg-app: #14161a;
+  --color-bg-sidebar: #1a1d22;
+  --color-bg-content: #1e2126;
+  --color-bg-elevated: #24272d;
+  --color-bg-soft: #22252b;
+  --color-bg-input: #22252b;
+  --color-bg-code: #171a1f;
+  --color-bg-selected: #2c3038;
 
-  --color-text: #e5ebf4;
-  --color-text-strong: #f8fafc;
-  --color-text-soft: #b5c0d0;
-  --color-text-faint: #9daabd;
+  --color-text: #e8eaf0;
+  --color-text-strong: #f7f8fa;
+  --color-text-soft: #b6bcc6;
+  --color-text-faint: #9aa1ac;
   --color-text-on-dark: #ffffff;
-  --color-text-on-dark-soft: #d8e0eb;
+  --color-text-on-dark-soft: #d7dbe2;
 
-  --color-border: #304057;
-  --color-border-strong: #3b4d67;
-  --color-border-dark: #53647c;
+  --color-border: #31353d;
+  --color-border-strong: #3b4049;
+  --color-border-dark: #525863;
 
-  --color-primary: #eef4ff;
-  --color-accent: #78aaf8;
-  --color-on-accent: #10213f;
-  --color-accent-soft: #253d63;
-  --color-accent-hover: #94bcfb;
-  --color-focus: #78aaf8;
-  --color-accent-tint: rgba(120, 170, 248, 0.18);
+  --color-primary: #eef1f6;
+  /* 强调色：低饱和灰蓝，克制的石墨调 */
+  --color-accent: #8ba2bd;
+  --color-on-accent: #12161c;
+  --color-accent-soft: #2b313a;
+  --color-accent-hover: #9db2cb;
+  --color-focus: #8ba2bd;
+  --color-accent-tint: rgba(139, 162, 189, 0.18);
   --color-hover-overlay: rgba(255, 255, 255, 0.055);
 
   --color-success: #83b292;
@@ -144,7 +146,7 @@
   --color-on-danger: #251615;
   --color-danger-bg: #422c2a;
   --color-danger-tint: rgba(220, 144, 138, 0.12);
-  --color-info: #8aabb7;
+  --color-info: #93a7b5;
   --color-modal-backdrop: rgba(8, 9, 8, 0.66);
 
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);

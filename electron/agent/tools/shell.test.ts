@@ -75,9 +75,41 @@ describe('runCommand', () => {
   });
 
   it('rejects command not in whitelist', async () => {
-    const result = await runCommand({ command: 'curl http://example.com' }, tmpDir);
+    const result = await runCommand({ command: 'osascript -e "say hi"' }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('白名单');
+  });
+
+  it('rejects script interpreters and privilege escalation', async () => {
+    for (const cmd of ['bash script.sh', 'zsh script.zsh', 'sudo ls', 'osascript x.applescript']) {
+      const result = await runCommand({ command: cmd }, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('白名单');
+    }
+  });
+
+  it('allows macOS dev commands in whitelist (POSIX)', async () => {
+    for (const cmd of [
+      'swift --version',
+      'xcrun --version',
+      'xcodebuild -version',
+      'swiftc --version',
+      'brew --version',
+      'plutil -lint Info.plist',
+      'open --version',
+      'sqlite3 --version',
+      'make --version',
+      'clang --version',
+      'mdls -name kMDItemFSName .',
+    ]) {
+      const parsed = parseCommand(cmd);
+      expect('exe' in parsed).toBe(true);
+      if ('exe' in parsed) {
+        const result = await runCommand({ command: cmd }, tmpDir);
+        // 命令在环境中不存在时也是可接受的（exit code 非 0），但不该报"不在白名单"
+        expect(result.error ?? '').not.toContain('白名单');
+      }
+    }
   });
 
   it('rejects destructive commands', async () => {
@@ -166,5 +198,26 @@ describe('runCommand', () => {
     const result = await runCommand({ command: 'git -C ../../.. status' }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('超出');
+  });
+
+  it('rejects swift --package-path pointing outside cwd', async () => {
+    const outside = path.join(os.tmpdir(), 'outside-swiftpkg');
+    const result = await runCommand({ command: `swift build --package-path "${outside}"` }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('绝对路径');
+  });
+
+  it('rejects cargo --manifest-path pointing outside cwd', async () => {
+    const outside = path.join(os.tmpdir(), 'outside-crate');
+    const result = await runCommand({ command: `cargo build --manifest-path "${outside}"` }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('绝对路径');
+  });
+
+  it('rejects xcodebuild -project pointing outside cwd', async () => {
+    const outside = path.join(os.tmpdir(), 'outside.xcodeproj');
+    const result = await runCommand({ command: `xcodebuild -project "${outside}" -list` }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('绝对路径');
   });
 });

@@ -26,6 +26,19 @@ export function isWithinDir(absPath: string, cwd: string): boolean {
 }
 
 /**
+ * 将 cwd 规范化为真实路径，供 realpath 比较使用。
+ * macOS 下 /tmp、/var 等是符号链接（/var → /private/var），
+ * 若只用字符串比较会把合法路径误判为"超出工作目录"。
+ */
+export async function canonicalCwd(dir: string): Promise<string> {
+  try {
+    return await fs.realpath(dir);
+  } catch {
+    return path.normalize(dir);
+  }
+}
+
+/**
  * 验证已存在路径的真实路径仍在 cwd 内（防 symlink/junction 绕过）。
  * 如果路径不存在，返回错误而不是回退到原始路径。
  */
@@ -36,6 +49,8 @@ export async function verifyExistingPath(absPath: string, cwd: string): Promise<
   if (!isWithinDir(absPath, normalizedCwd)) {
     return { ok: false, error: `路径超出工作目录：${absPath}` };
   }
+
+  const realCwd = await canonicalCwd(normalizedCwd);
 
   // 检查路径是否存在（用 lstat 不跟随 symlink）
   let lstat;
@@ -53,7 +68,7 @@ export async function verifyExistingPath(absPath: string, cwd: string): Promise<
     } catch {
       return { ok: false, error: `符号链接目标不存在：${absPath}` };
     }
-    if (!isWithinDir(realPath, normalizedCwd)) {
+    if (!isWithinDir(realPath, realCwd)) {
       return { ok: false, error: `符号链接目标超出工作目录：${absPath}` };
     }
     return { ok: true, realPath };
@@ -66,7 +81,7 @@ export async function verifyExistingPath(absPath: string, cwd: string): Promise<
   } catch {
     return { ok: false, error: `无法解析路径：${absPath}` };
   }
-  if (!isWithinDir(realPath, normalizedCwd)) {
+  if (!isWithinDir(realPath, realCwd)) {
     return { ok: false, error: `路径超出工作目录：${absPath} → ${realPath}` };
   }
   return { ok: true, realPath };
@@ -85,6 +100,8 @@ export async function verifyWritePath(absPath: string, cwd: string): Promise<{ o
   if (!isWithinDir(absPath, normalizedCwd)) {
     return { ok: false, error: `路径超出工作目录：${absPath}` };
   }
+
+  const realCwd = await canonicalCwd(normalizedCwd);
 
   // 如果目标已存在，用 verifyExistingPath
   try {
@@ -122,11 +139,14 @@ export async function verifyWritePath(absPath: string, cwd: string): Promise<{ o
   } catch {
     return { ok: false, error: `无法解析父目录：${parent}` };
   }
-  if (!isWithinDir(realParent, normalizedCwd)) {
+  if (!isWithinDir(realParent, realCwd)) {
     return { ok: false, error: `父目录超出工作目录：${absPath}` };
   }
 
-  return { ok: true, realPath: path.join(realParent, path.relative(parent, absPath)) };
+  // 返回调用方词法形式路径（父目录已验证为真实目录且在 realCwd 内，可直接用于创建文件）。
+  // 不返回 canonical 形式，避免 cwd 本身是符号链接（如 macOS /var → /private/var）时
+  // 返回值与调用方视角不一致。
+  return { ok: true, realPath: path.normalize(absPath) };
 }
 
 /**

@@ -44,6 +44,19 @@ export default function App() {
     setSettingsInitialTab(tab);
     setSettingsOpen(true);
   }
+
+  // 原生菜单（macOS）动作 → 渲染层 UI
+  useEffect(() => {
+    const off = window.electronAPI.menu?.onAction((action) => {
+      if (action === 'open-settings') {
+        openSettingsAt('providers');
+      } else {
+        // MainView 处理：命令面板 / 新建会话
+        window.dispatchEvent(new CustomEvent('menu-action', { detail: action }));
+      }
+    });
+    return () => off?.();
+  }, []);
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [theme, setTheme] = useState<ThemeName>('light');
   const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('sidebar');

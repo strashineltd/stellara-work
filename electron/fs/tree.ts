@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { isWithinDir, resolvePath, verifyWritePath } from './path-security';
+import { canonicalCwd, isWithinDir, resolvePath, verifyWritePath } from './path-security';
 import type { FsNode } from '../../shared/ipc';
 
 /**
@@ -26,10 +26,11 @@ const MAX_TEXT_BYTES = 100 * 1024; // 预览截断
  */
 export async function listTree(cwd: string, maxDepth = 4): Promise<FsNode> {
   const root = path.resolve(cwd);
-  return buildNode(root, root, 0, maxDepth);
+  const realRoot = await canonicalCwd(root);
+  return buildNode(root, root, realRoot, 0, maxDepth);
 }
 
-async function buildNode(absPath: string, root: string, depth: number, maxDepth: number): Promise<FsNode> {
+async function buildNode(absPath: string, root: string, realRoot: string, depth: number, maxDepth: number): Promise<FsNode> {
   const name = path.basename(absPath) || absPath;
 
   // 使用 lstat 不跟随 symlink
@@ -40,7 +41,7 @@ async function buildNode(absPath: string, root: string, depth: number, maxDepth:
     // 验证 symlink 目标是否在 root 内
     try {
       const real = await fs.realpath(absPath);
-      if (!isWithinDir(real, root)) {
+      if (!isWithinDir(real, realRoot)) {
         // symlink 指向工作目录外，显示为单一条目但不递归
         return { name, path: absPath, type: 'file', size: 0 };
       }
@@ -67,7 +68,7 @@ async function buildNode(absPath: string, root: string, depth: number, maxDepth:
     if (SKIP_DIRS.has(e.name)) continue;
     if (e.name.startsWith('.') && !ALLOW_DOT.has(e.name)) continue;
     const childPath = path.join(absPath, e.name);
-    children.push(await buildNode(childPath, root, depth + 1, maxDepth));
+    children.push(await buildNode(childPath, root, realRoot, depth + 1, maxDepth));
   }
   children.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
@@ -97,8 +98,9 @@ export async function readFileContent(
     throw new Error(`路径超出允许范围：${resolved}`);
   }
 
-  // 防 symlink 绕过：检查 realpath 是否仍在 root 内
+  // 防 symlink 绕过：检查 realpath 是否仍在 root 内（root 先规范化为真实路径）
   let realPath: string;
+  const realRoot = await canonicalCwd(root);
   try {
     realPath = await fs.realpath(resolved);
   } catch {
@@ -115,7 +117,7 @@ export async function readFileContent(
     throw new Error(`文件不存在：${resolved}`);
   }
 
-  if (!isWithinDir(realPath, root)) {
+  if (!isWithinDir(realPath, realRoot)) {
     throw new Error(`符号链接目标超出允许范围：${resolved} → ${realPath}`);
   }
 

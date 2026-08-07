@@ -1,7 +1,7 @@
 import type { ModelConfig, ChatMessage, ChatStreamEvent, ToolCall, SkillDef } from '../../shared/ipc';
 import { OpenAICompatClient } from '../llm/openai-compat';
 import { allTools, planModeTools, invokeTool } from './tools';
-import { getSystemPrompt } from './plan';
+import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { compressIfNeeded, type CompressionConfig } from './compress';
 import { parsePlanFromContent, formatPlanProgress, tryMatchToolToPlanStep, type Plan } from './plan-parser';
 import { injectVerificationPrompt, generateFailureGuidance } from './verification';
@@ -9,6 +9,8 @@ import { injectVerificationPrompt, generateFailureGuidance } from './verificatio
 export interface AgentLoopOptions {
   model: ModelConfig;
   cwd: string;
+  /** 运行平台信息（注入 system prompt，保证命令输出与平台一致）；缺省用本机平台 */
+  platform?: AgentPlatformInfo;
   /** 之前轮次的消息（不含 system；不含本轮的 user）— 多轮上下文 */
   history?: ChatMessage[];
   /** Plan 模式：agent 只能调只读工具 */
@@ -71,7 +73,8 @@ export async function* runAgentLoop(
   const client = new OpenAICompatClient(model);
 
   // Memory OS: 检索相关记忆并注入 system prompt
-  let systemPrompt = getSystemPrompt(planMode, options.skills, options.activeSkill);
+  const platformInfo = options.platform ?? { platform: process.platform, arch: process.arch };
+  let systemPrompt = getSystemPrompt(planMode, platformInfo, options.skills, options.activeSkill);
   if (!planMode) {
     try {
       const { retrieveAndFormatMemories } = await import('../memory/memory-injector');
@@ -195,7 +198,7 @@ export async function* runAgentLoop(
           if (messages[0]?.role === 'system') {
             messages[0] = {
               role: 'system',
-              content: `${getSystemPrompt(false, options.skills, options.activeSkill)}\n\n${formatPlanProgress(parsed)}`,
+              content: `${getSystemPrompt(false, platformInfo, options.skills, options.activeSkill)}\n\n${formatPlanProgress(parsed)}`,
             };
           }
           if (toolCalls.length === 0) {

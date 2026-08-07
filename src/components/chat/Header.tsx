@@ -3,8 +3,6 @@ import type { ConfiguredModel, ModelListItem } from '../../../shared/ipc';
 import { basename } from '../../lib/chat-utils';
 import { Icon } from '../Icon';
 
-const brandIconUrl = new URL('../../../assets/icon-256.png', import.meta.url).href;
-
 interface HeaderProps {
   config: ConfiguredModel;
   sidebarOpen: boolean;
@@ -70,11 +68,6 @@ export function Header(props: HeaderProps) {
   return (
     <header className="main-header">
       <div className="main-header-left">
-        <div className="header-product" aria-label="Stellara Work">
-          <img className="header-product-mark" src={brandIconUrl} alt="" />
-          <span>Stellara Work</span>
-          <Icon className="header-product-caret" name="chevron-down" size={12} />
-        </div>
         <button
           className="btn-icon sidebar-toggle"
           onClick={props.onToggleSidebar}

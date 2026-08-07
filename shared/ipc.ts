@@ -564,7 +564,14 @@ export interface ElectronAPI {
     delete: (id: string) => Promise<void>;
     stats: () => Promise<MemoryStats>;
   };
+  menu: {
+    /** 监听原生菜单触发的 action（macOS）。返回取消监听函数。 */
+    onAction: (callback: (action: MenuAction) => void) => () => void;
+  };
 }
+
+/** 原生菜单（macOS）触发的动作，渲染层据此打开对应界面 */
+export type MenuAction = 'open-settings' | 'open-command-palette' | 'new-session';
 
 declare global {
   interface Window {

@@ -8,6 +8,37 @@
 import type { SkillDef } from '../../shared/ipc';
 import { formatSkillsForPrompt } from './skills';
 
+/** 运行环境信息（注入 system prompt，让 Agent 输出平台正确的命令） */
+export interface AgentPlatformInfo {
+  platform: string;
+  arch: string;
+}
+
+/** macOS 环境描述：POSIX 命令 + 可用工具 + 白名单外禁止项 */
+function darwinPlatformBlock(info: AgentPlatformInfo): string {
+  return `当前运行环境：
+- 操作系统：macOS（${info.arch === 'arm64' ? 'Apple 芯片 arm64' : 'Intel x64'}）
+- 命令语法：POSIX（ls/cat/grep/find 等），不是 Windows 命令
+- 路径风格：正斜杠，工作目录就是项目根目录
+- 可用 macOS 开发工具：swift、swiftc、xcrun、xcodebuild、brew、plutil、open、sqlite3、make、clang
+- 禁止使用的命令（不在白名单，会直接失败）：sh、bash、zsh、osascript、sudo、rm、mv、cp、curl -o 下载到外部路径
+- 查看系统信息：sw_vers、sysctl、uname 是只读安全的`;
+}
+
+/** Windows 环境描述（保持既有行为，仅注明平台） */
+function win32PlatformBlock(info: AgentPlatformInfo): string {
+  return `当前运行环境：
+- 操作系统：Windows（${info.arch}）
+- 命令语法：Windows 命令（npm/node/git 等），路径用反斜杠
+- 可用工具：npm、npx、node、git、python、where、findstr`;
+}
+
+export function platformPromptBlock(info: AgentPlatformInfo): string {
+  if (info.platform === 'darwin') return darwinPlatformBlock(info);
+  if (info.platform === 'win32') return win32PlatformBlock(info);
+  return `当前运行环境：${info.platform}（${info.arch}）`;
+}
+
 export const PLAN_MODE_SYSTEM_PROMPT = `你现在处于 PLAN MODE（只读模式）。
 
 规则：
@@ -74,13 +105,16 @@ export const BUILD_MODE_SYSTEM_PROMPT = `你现在处于 BUILD MODE（执行模�
 
 export function getSystemPrompt(
   planMode: boolean,
+  platform: AgentPlatformInfo,
   skills?: SkillDef[],
   activeSkill?: SkillDef,
 ): string {
   const base = planMode ? PLAN_MODE_SYSTEM_PROMPT : BUILD_MODE_SYSTEM_PROMPT;
+  const platformBlock = platformPromptBlock(platform);
+  let out = base + `\n\n${platformBlock}`;
   if (activeSkill) {
-    return base + `\n\n你正在使用技能「${activeSkill.name}」。请按以下规则执行：\n${activeSkill.prompt}`;
+    return out + `\n\n你正在使用技能「${activeSkill.name}」。请按以下规则执行：\n${activeSkill.prompt}`;
   }
   const skillsBlock = formatSkillsForPrompt(skills ?? []);
-  return base + skillsBlock;
+  return out + skillsBlock;
 }

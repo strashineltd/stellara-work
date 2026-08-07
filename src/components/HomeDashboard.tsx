@@ -121,8 +121,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
               disabled={props.busy || !props.input.trim()}
               onClick={props.onSend}
             >
-              <span>交给 Agent</span>
-              <Icon name="send" size={15} />
+              <Icon name="arrow-right" size={16} />
             </button>
           </div>
         </div>

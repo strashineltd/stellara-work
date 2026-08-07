@@ -32,6 +32,17 @@ const ALLOWED_COMMANDS_POSIX = new Set([
   'python', 'python3', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
   // 文本处理（只读）
   'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'diff',
+  // macOS / Linux 构建链
+  'make', 'cmake', 'ninja', 'clang', 'clang++', 'cc', 'gcc', 'g++',
+  // macOS 专属开发命令
+  'swift', 'swiftc', 'swiftformat', 'swiftlint', 'xcrun', 'xcodebuild', 'brew',
+  'plutil', 'open', 'sqlite3', 'mdls',
+  // macOS 系统信息（只读）
+  'sw_vers', 'sysctl', 'defaults', 'diskutil',
+  // 只读系统信息（POSIX / macOS）
+  'stat', 'du', 'df', 'file',
+  // 网络（只读语义：请求资源；下载写文件仍走 run_command 审批）
+  'curl',
 ]);
 
 function allowedCommands(): Set<string> {
@@ -46,6 +57,10 @@ function allowedCommands(): Set<string> {
 const PATH_FLAGS: Record<string, Set<string>> = {
   git: new Set(['-C', '--work-tree', '--git-dir']),
   npm: new Set(['--prefix']),
+  swift: new Set(['--package-path']),
+  cargo: new Set(['--manifest-path', '--target-dir']),
+  xcodebuild: new Set(['-project', '-workspace']),
+  go: new Set(['-C', '-modfile']),
   node: new Set(), // node 的文件参数由 validateFileArgs 处理
   python: new Set(),
   python3: new Set(),
@@ -106,6 +121,17 @@ function tokenize(s: string): string[] {
 }
 
 /**
+ * 跨平台绝对路径检测：
+ * - POSIX 绝对路径（/xxx）
+ * - Windows 盘符路径（C:\xxx / C:/xxx）与 UNC 路径（\\server\share）
+ * 无论宿主平台，模型生成的 Windows 风格路径都要被拒绝。
+ */
+export function isAbsolutePathArg(p: string): boolean {
+  if (path.isAbsolute(p)) return true;
+  return /^[a-zA-Z]:[\\/]/.test(p) || /^\\\\/.test(p);
+}
+
+/**
  * 校验路径参数是否在工作目录内。
  * 拒绝绝对路径和 .. 越界。
  * 返回 null 表示 OK，返回字符串表示错误。
@@ -116,7 +142,7 @@ function validatePathArg(arg: string, cwd: string): string | null {
   // 跳过不含路径分隔符且不含 .. 的纯文本参数（如 commit message）
   if (!arg.includes('/') && !arg.includes('\\') && !arg.includes('..')) return null;
   // 拒绝绝对路径
-  if (path.isAbsolute(arg)) {
+  if (isAbsolutePathArg(arg)) {
     return `路径参数 "${arg}" 是绝对路径，不允许。请使用相对路径。`;
   }
   // 拒绝 .. 越界
@@ -143,7 +169,7 @@ function validatePathFlags(exe: string, args: string[], cwd: string): string | n
       // 下一个 token 是路径值
       const value = args[i + 1];
       if (value) {
-        if (path.isAbsolute(value)) {
+        if (isAbsolutePathArg(value)) {
           return `命令 ${exeBase} 的 ${arg} 参数 "${value}" 是绝对路径，不允许。请使用相对路径。`;
         }
         if (value.includes('..')) {
@@ -174,7 +200,7 @@ function validateFileArgs(exe: string, args: string[], cwd: string): string | nu
     // 跳过 flag
     if (arg.startsWith('-')) continue;
     // 这是文件参数
-    if (path.isAbsolute(arg)) {
+    if (isAbsolutePathArg(arg)) {
       return `${exeBase} 的文件参数 "${arg}" 是绝对路径，不允许。请使用相对路径。`;
     }
     if (arg.includes('..')) {
@@ -200,7 +226,7 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
   }
 
   // 白名单校验：只用 basename，拒绝绝对路径 exe
-  if (path.isAbsolute(parsed.exe)) {
+  if (isAbsolutePathArg(parsed.exe)) {
     return { ok: false, output: '', error: `不允许使用绝对路径执行命令：${parsed.exe}` };
   }
   const exeBase = path.basename(parsed.exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
@@ -325,7 +351,7 @@ export const shellTools: OpenAITool[] = [
     function: {
       name: 'run_command',
       description:
-        '执行一个命令（无 shell）。仅允许白名单命令：npm/npx/node/git/ls/cat/grep/find/rg/python/cargo/go 等只读和开发工具。已移除破坏性命令（del/rm/mv/cp/rmdir/move）。不支持管道/重定向/变量展开。路径参数必须在工作目录内。',
+        '执行一个命令（无 shell）。仅允许白名单命令：npm/npx/node/git/ls/cat/grep/find/rg/python/cargo/go/make/clang 等只读和开发工具（macOS 还支持 swift/xcrun/xcodebuild/brew/plutil/open/sqlite3）。已移除破坏性命令（del/rm/mv/cp/rmdir/move）。不支持管道/重定向/变量展开/脚本解释器（sh/bash/osascript）。路径参数必须在工作目录内。',
       parameters: {
         type: 'object',
         properties: {

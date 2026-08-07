@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, nativeTheme, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import log from 'electron-log/main';
@@ -7,6 +7,8 @@ import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { resolveSessionModel } from './chat/session-context';
+import { installAppMenu } from './menu';
+import { notifyTaskEnd } from './notifications';
 import type {
   AppInfo,
   ModelConfig,
@@ -30,6 +32,9 @@ log.initialize();
 log.info('Stellara Work 启动中...');
 
 let mainWindow: BrowserWindow | null = null;
+
+// M2.4: open-file 事件在窗口创建前到达时暂存，窗口就绪后处理
+let pendingOpenFile: string | null = null;
 
 // P0-1 + P0-2: 审批流和取消任务的状态管理
 const chatStreams = new ChatStreamRegistry();
@@ -60,10 +65,16 @@ function createWindow(): void {
     minHeight: 600,
     show: true,
     autoHideMenuBar: !isMac,
-    backgroundColor: '#FFFFFF',
+    // macOS 深度适配：窗口底色跟随系统深浅色，避免主题切换时闪白；
+    // 深色面板色与 grounded-tokens 深色背景一致
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1E2126' : '#FFFFFF',
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
     ...(isMac
-      ? {}
+      ? {
+          // macOS 12+ 原生圆角窗口；红绿灯保持系统默认位置（hiddenInset），
+          // 侧栏按钮通过 CSS margin 置于其下方，两者互不重叠
+          roundedCorners: true,
+        }
       : {
           titleBarOverlay: {
             color: 'rgba(0, 0, 0, 0)',
@@ -705,6 +716,14 @@ async function runAgentLoopForIpc(
   // P0-2: 创建 AbortController
   const ctrl = chatStreams.start(streamId);
   let terminalEventSent = false;
+  let taskCompleted = false;
+  let taskFailed = false;
+
+  // macOS 深度适配：Agent 执行期间阻止系统休眠（长任务不被打断）
+  let powerSaveId: number | null = null;
+  if (process.platform === 'darwin') {
+    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+  }
 
   try {
     // 使用已验证的工作目录（chat:start 已检查 model.workDir 必须存在）
@@ -724,6 +743,7 @@ async function runAgentLoopForIpc(
       cwd,
       history,
       planMode: request.planMode ?? false,
+      platform: { platform: process.platform, arch: process.arch },
       skills,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
@@ -754,7 +774,28 @@ async function runAgentLoopForIpc(
       // P0-2: 检查是否已 abort
       if (ctrl.signal.aborted) break;
       send(event);
+      if (event.type === 'task_complete') taskCompleted = true;
+      if (event.type === 'error') taskFailed = true;
       if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
+    }
+
+    // M2.3: 任务结束系统通知（仅窗口未聚焦时）+ Dock bounce
+    const windowActive = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused();
+    if (!windowActive && !ctrl.signal.aborted && (taskCompleted || taskFailed)) {
+      // macOS：Dock 图标弹跳提示
+      if (process.platform === 'darwin') {
+        app.dock?.bounce(taskFailed ? 'critical' : 'informational');
+      }
+      notifyTaskEnd(
+        { completed: taskCompleted, failed: taskFailed, aborted: false },
+        () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      );
     }
   } catch (err) {
     if (!ctrl.signal.aborted) {
@@ -764,6 +805,11 @@ async function runAgentLoopForIpc(
     // 清理
     chatStreams.cleanup(streamId);
     if (!terminalEventSent) send({ type: 'done' });
+
+    // macOS：任务结束恢复系统休眠策略
+    if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {
+      powerSaveBlocker.stop(powerSaveId);
+    }
 
     // 异步提取记忆（不阻塞会话结束）
     void extractMemoriesFromSession(request, model).catch(() => {});
@@ -840,6 +886,8 @@ async function resolveSessionExecutionContext(sessionId: string): Promise<ModelC
 // ============================================
 
 app.whenReady().then(async () => {
+  // M2.3: Windows toast 通知需要 AppUserModelID
+  if (process.platform === 'win32') app.setAppUserModelId('work.stellara.app');
   const { setAppDataDir, migrateLegacyAppData } = await import('./config/data-dir');
   const appDataDir = app.getPath('userData');
   setAppDataDir(appDataDir);
@@ -899,14 +947,32 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers();
   createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  installAppMenu(() => mainWindow);
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// M2.4: macOS 拖文件到 Dock 图标 / Finder 打开 → 通知渲染层处理该路径
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingOpenFile = filePath;
+    return;
+  }
+  mainWindow.show();
+  mainWindow.webContents.send('menu:action', 'open-path:' + filePath);
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+    if (pendingOpenFile) {
+      mainWindow?.webContents.send('menu:action', 'open-path:' + pendingOpenFile);
+      pendingOpenFile = null;
+    }
+  }
 });
 
 app.on('will-quit', () => {

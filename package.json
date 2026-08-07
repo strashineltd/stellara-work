@@ -92,8 +92,8 @@
     ],
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
       ],
       "icon": "assets/icon-512.png",
       "category": "public.app-category.developer-tools",
@@ -120,5 +120,9 @@
       "shortcutName": "Stellara Work",
       "include": "assets/nsis-version-check.nsh"
     }
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.2": true,
+    "fsevents@2.3.3": true
   }
 }

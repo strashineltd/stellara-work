@@ -83,7 +83,12 @@ describe('HomeDashboard', () => {
 
   it('labels the send action as handing the task to the Agent', () => {
     const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} />);
-    expect(container.textContent).toContain('交给 Agent');
+    const btn = container.querySelector('.dashboard-send-button');
+    expect(btn).toBeTruthy();
+    expect(btn?.getAttribute('aria-label')).toBe('交给 Agent');
+    // 视觉为纯箭头图标按钮，无文字
+    expect(btn?.querySelector('.app-icon')).toBeTruthy();
+    expect(btn?.textContent?.trim()).toBe('');
   });
 
   it('falls back to recent projects when there are no sessions', () => {

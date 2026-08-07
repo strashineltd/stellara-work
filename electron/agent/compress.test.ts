@@ -147,7 +147,7 @@ describe('compressIfNeeded', () => {
     });
     expect(result.compressed).toBe(true);
     expect(result.tokensAfter).toBeLessThan(result.tokensBefore);
-  });
+  }, 30_000); // 1000 条大消息的 tiktoken 编码较重，给足超时
 
   it('256K × 90% = 230_400 阈值', async () => {
     const { defaultThresholdTokens } = await import('../../shared/context-window');

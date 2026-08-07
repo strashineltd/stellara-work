@@ -763,6 +763,12 @@ html[data-platform='darwin'] .main-header {
   padding-left: 78px;
 }
 
+/* macOS: 侧栏切换按钮贴到窗口最左缘（红绿灯下方），仅 macOS */
+html[data-platform='darwin'] .sidebar-toggle {
+  margin-left: -64px;
+  margin-top: 22px;
+}
+
 .main-header button,
 .main-header a,
 .main-header input,
@@ -784,29 +790,6 @@ html[data-platform='darwin'] .main-header {
 
 .main-header-left {
   gap: var(--space-3);
-}
-
-.header-product {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  color: var(--color-text-strong);
-  font-size: var(--fs-md);
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  -webkit-app-region: no-drag;
-}
-
-.header-product-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.header-product-caret {
-  color: var(--color-text-faint);
 }
 
 .main-header-center {
@@ -1441,23 +1424,26 @@ html[data-platform='darwin'] .main-header {
 }
 
 .dashboard-send-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 13px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   color: var(--color-on-accent);
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--color-accent);
   box-shadow: var(--shadow-sm);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  white-space: nowrap;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-out),
     box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.dashboard-send-button:disabled {
+  color: var(--color-text-faint);
+  background: var(--color-bg-soft);
+  box-shadow: none;
+  cursor: default;
 }
 
 .dashboard-send-button:hover:not(:disabled) {
@@ -1496,7 +1482,7 @@ html[data-platform='darwin'] .main-header {
 
 .dashboard-quick-actions button:hover {
   color: var(--color-accent);
-  border-color: rgba(47, 124, 244, 0.34);
+  border-color: var(--color-accent-tint);
   background: var(--color-accent-soft);
   transform: translateY(-1px);
 }
@@ -1644,7 +1630,7 @@ html[data-platform='darwin'] .main-header {
 }
 
 .project-dashboard-card:hover {
-  border-color: rgba(47, 124, 244, 0.32);
+  border-color: var(--color-accent-tint);
   box-shadow: 0 10px 28px rgba(63, 88, 126, 0.09);
   transform: translateY(-2px);
 }
@@ -3953,11 +3939,6 @@ html[data-platform='darwin'] .main-header {
     bottom: 0;
     left: 0;
     box-shadow: var(--shadow-lg);
-  }
-
-  .header-product span,
-  .header-product-caret {
-    display: none;
   }
 
   .dashboard-quick-actions,

@@ -2,6 +2,7 @@ import type { SVGProps } from 'react';
 
 export type IconName =
   | 'alert'
+  | 'arrow-right'
   | 'check'
   | 'chevron-down'
   | 'chevron-right'
@@ -57,6 +58,8 @@ export function Icon({ name, size = 16, className, ...props }: IconProps) {
       return <svg {...common}><path d="M8 2 14 13H2L8 2Z" /><path d="M8 5.7v3.5M8 11.5h.01" /></svg>;
     case 'check':
       return <svg {...common}><path d="m3 8.3 3.2 3.2L13 4.8" /></svg>;
+    case 'arrow-right':
+      return <svg {...common}><path d="M2.5 8h9.5M8.5 4.5 12 8l-3.5 3.5" /></svg>;
     case 'chevron-down':
       return <svg {...common}><path d="m4 6 4 4 4-4" /></svg>;
     case 'chevron-right':
