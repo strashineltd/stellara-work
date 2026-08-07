@@ -156,6 +156,9 @@ export function installDevPreviewApi(): void {
       search: async (): Promise<Memory[]> => [], list: async (): Promise<Memory[]> => [],
       save: async (memory) => ({ ...memory, id: `memory-${Date.now()}`, accessCount: 0, createdAt: Date.now(), updatedAt: Date.now() }),
       update: async () => {}, delete: async () => {}, stats: async () => ({ total: 0, byScope: {}, byKind: {}, recentCount: 0 }),
+      exportSingle: async () => ({ path: 'Preview/export.md' }),
+      exportAll: async () => ({ path: 'Preview/all.md', count: 1 }),
+      copyMd: async () => '# Preview\n',
     },
     menu: {
       onAction: () => () => {},

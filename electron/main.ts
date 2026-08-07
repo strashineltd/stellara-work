@@ -656,6 +656,46 @@ function registerIpcHandlers(): void {
     const { getMemoryStats } = await import('./memory/memory-store');
     return getMemoryStats();
   });
+
+  ipcMain.handle('memory:exportSingle', async (_e, id: string): Promise<{ path: string } | null> => {
+    const { listMemories } = await import('./memory/memory-store');
+    const { memoryToMarkdown, exportFileName } = await import('./memory/memory-md');
+    const all = listMemories({ limit: 1000 });
+    const memory = all.find((m) => m.id === id);
+    if (!memory) throw new Error('记忆不存在');
+    if (!mainWindow) return null;
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出记忆',
+      defaultPath: exportFileName(memory),
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, memoryToMarkdown(memory), 'utf-8');
+    return { path: result.filePath };
+  });
+
+  ipcMain.handle('memory:exportAll', async (): Promise<{ path: string; count: number } | null> => {
+    const { listMemories } = await import('./memory/memory-store');
+    const { memoriesToExport, exportAllFileName } = await import('./memory/memory-md');
+    const all = listMemories({ limit: 1000 });
+    if (!mainWindow) return null;
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: '导出全部记忆',
+      defaultPath: exportAllFileName(),
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, memoriesToExport(all), 'utf-8');
+    return { path: result.filePath, count: all.length };
+  });
+
+  ipcMain.handle('memory:copyMd', async (_e, id: string): Promise<string> => {
+    const { listMemories } = await import('./memory/memory-store');
+    const { memoryToMarkdown } = await import('./memory/memory-md');
+    const memory = listMemories({ limit: 1000 }).find((m) => m.id === id);
+    if (!memory) throw new Error('记忆不存在');
+    return memoryToMarkdown(memory);
+  });
 }
 
 async function verifyProjectSelection(workDir: string, filePath: string): Promise<ProjectFileSelection> {

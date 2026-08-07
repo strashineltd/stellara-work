@@ -563,6 +563,12 @@ export interface ElectronAPI {
     update: (id: string, patch: Partial<Pick<Memory, 'content' | 'importance' | 'tags'>>) => Promise<void>;
     delete: (id: string) => Promise<void>;
     stats: () => Promise<MemoryStats>;
+    /** 导出单条记忆为 .md 文件（系统保存窗口），返回路径或 null（取消） */
+    exportSingle: (id: string) => Promise<{ path: string } | null>;
+    /** 导出全部记忆为单个 .md 文件，返回路径与条数或 null（取消） */
+    exportAll: () => Promise<{ path: string; count: number } | null>;
+    /** 返回单条记忆的 Markdown 文本（渲染层写剪贴板） */
+    copyMd: (id: string) => Promise<string>;
   };
   menu: {
     /** 监听原生菜单触发的 action（macOS）。返回取消监听函数。 */

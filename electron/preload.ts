@@ -176,6 +176,9 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('memory:delete', id),
     stats: () =>
       ipcRenderer.invoke('memory:stats'),
+    exportSingle: (id: string) => ipcRenderer.invoke('memory:exportSingle', id),
+    exportAll: () => ipcRenderer.invoke('memory:exportAll'),
+    copyMd: (id: string) => ipcRenderer.invoke('memory:copyMd', id),
   },
   menu: {
     onAction: (callback: (action: MenuAction) => void) => {
