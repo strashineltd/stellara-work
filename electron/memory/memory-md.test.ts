@@ -60,6 +60,6 @@ describe('file names', () => {
     expect(name).toMatch(/\.md$/);
   });
   it('formats all-export filename', () => {
-    expect(exportAllFileName(new Date('2026-08-07T00:00:00Z'))).toBe('Stellara-Memories-20260807.md');
+    expect(exportAllFileName(new Date(2026, 7, 7))).toBe('Stellara-Memories-20260807.md');
   });
 });
