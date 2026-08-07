@@ -24,14 +24,14 @@ const DEFAULT_CONFIG: MemoryInjectionConfig = {
  *
  * @param userMessage 用户消息（用于语义搜索）
  * @param config 注入配置
- * @returns 格式化的记忆文本，可直接拼接到 system prompt
+ * @returns 结构化记忆列表 + 格式化注入文本（无记忆时为 null），可直接拼接到 system prompt
  */
-export async function retrieveAndFormatMemories(
+export async function retrieveMemoriesForInjection(
   userMessage: string,
   config: Partial<MemoryInjectionConfig> = {},
-): Promise<string | null> {
+): Promise<{ memories: Memory[]; promptBlock: string | null }> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
-  if (!cfg.enabled) return null;
+  if (!cfg.enabled) return { memories: [], promptBlock: null };
 
   try {
     const allMemories: Memory[] = [];
@@ -82,7 +82,7 @@ export async function retrieveAndFormatMemories(
       .sort((a, b) => b.importance - a.importance)
       .slice(0, cfg.maxMemories);
 
-    if (sorted.length === 0) return null;
+    if (sorted.length === 0) return { memories: [], promptBlock: null };
 
     // 更新访问计数
     for (const m of sorted) {
@@ -96,9 +96,22 @@ export async function retrieveAndFormatMemories(
       return `- ${m.content}（置信度 ${confidence}%${source ? `，来源：${source}` : ''}）`;
     });
 
-    return `[相关记忆]\n${lines.join('\n')}`;
+    return { memories: sorted, promptBlock: `[相关记忆]\n${lines.join('\n')}` };
   } catch (err) {
     console.error('[MemoryInjector] 检索失败:', err);
-    return null;
+    return { memories: [], promptBlock: null };
   }
+}
+
+/**
+ * 检索相关记忆并格式化为 prompt 注入文本（兼容旧 API）
+ *
+ * @deprecated 请使用 retrieveMemoriesForInjection（同时返回结构化记忆）
+ */
+export async function retrieveAndFormatMemories(
+  userMessage: string,
+  config: Partial<MemoryInjectionConfig> = {},
+): Promise<string | null> {
+  const { promptBlock } = await retrieveMemoriesForInjection(userMessage, config);
+  return promptBlock;
 }

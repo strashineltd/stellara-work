@@ -117,13 +117,16 @@ export interface ChatStreamEvent {
     | 'plan_approval_required'
     | 'summary'
     | 'verify'
-    | 'task_complete';
+    | 'task_complete'
+    | 'memory_context';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };
   error?: string;
   /** 错误分类 + 引导（替代裸报错） */
   errorMeta?: ErrorMeta;
+  /** 本次任务注入的相关记忆（memory_context 事件） */
+  memories?: { kind: string; content: string; importance: number; source?: string }[];
   plan?: string[];
   /** Plan 步骤进度（plan_progress 事件） */
   planSteps?: { description: string; status: string }[];

@@ -23,7 +23,12 @@ vi.mock('./tools', async (importOriginal) => {
   return { ...actual, invokeTool: mockInvokeTool };
 });
 
+vi.mock('../memory/memory-injector', () => ({
+  retrieveMemoriesForInjection: vi.fn(),
+}));
+
 import { runAgentLoop } from './loop';
+import { retrieveMemoriesForInjection } from '../memory/memory-injector';
 
 function makeConfig(): ModelConfig {
   return {
@@ -252,5 +257,44 @@ describe('consecutive failure detection', () => {
 
   it('resets counter after first success', () => {
     expect(simulateConsecutiveFailures([false, false, true, false, false, false, false])).toBeNull();
+  });
+});
+
+describe('memory_context event', () => {
+  beforeEach(() => {
+    mockChat.mockReset();
+    mockInvokeTool.mockReset();
+    mockChat.mockImplementation(() => contentThenDone(''));
+    (retrieveMemoriesForInjection as unknown as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  it('yields memory_context when memories are injected', async () => {
+    (retrieveMemoriesForInjection as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      memories: [{ id: 'm1', kind: 'preference', content: '用户偏好中文', importance: 0.9, confidence: 0.9, accessCount: 1, tags: [], createdAt: 0, updatedAt: 0 }],
+      promptBlock: '[相关记忆]\n- 用户偏好中文',
+    });
+    mockChat.mockImplementation(function* () {
+      yield { type: 'content', content: '好的' };
+      yield { type: 'done' };
+    });
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('你好', { model: makeConfig(), cwd: '/tmp', platform: { platform: 'darwin', arch: 'arm64' } })) {
+      events.push(ev);
+    }
+    const ctx = events.find((e) => e.type === 'memory_context');
+    expect(ctx).toBeDefined();
+    if (ctx?.type === 'memory_context') expect(ctx.memories.length).toBeGreaterThan(0);
+  });
+
+  it('does not yield memory_context when no promptBlock is returned', async () => {
+    (retrieveMemoriesForInjection as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      memories: [],
+      promptBlock: null,
+    });
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('你好', { model: makeConfig(), cwd: '/tmp', platform: { platform: 'darwin', arch: 'arm64' } })) {
+      events.push(ev);
+    }
+    expect(events.some((e) => e.type === 'memory_context')).toBe(false);
   });
 });

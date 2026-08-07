@@ -77,12 +77,16 @@ export async function* runAgentLoop(
   let systemPrompt = getSystemPrompt(planMode, platformInfo, options.skills, options.activeSkill);
   if (!planMode) {
     try {
-      const { retrieveAndFormatMemories } = await import('../memory/memory-injector');
-      const memoryContext = await retrieveAndFormatMemories(userMessage, {
+      const { retrieveMemoriesForInjection } = await import('../memory/memory-injector');
+      const { memories, promptBlock } = await retrieveMemoriesForInjection(userMessage, {
         maxMemories: 10,
       });
-      if (memoryContext) {
-        systemPrompt += `\n\n${memoryContext}`;
+      if (promptBlock) {
+        systemPrompt += `\n\n${promptBlock}`;
+        yield {
+          type: 'memory_context',
+          memories: memories.map((m) => ({ kind: m.kind, content: m.content, importance: m.importance, source: m.source })),
+        };
       }
     } catch {
       // 记忆注入失败不影响 agent 运行
