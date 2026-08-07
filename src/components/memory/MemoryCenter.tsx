@@ -75,9 +75,9 @@ export function MemoryCenter() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(memory: Memory) {
     try {
-      await window.electronAPI.memory.delete(id);
+      await window.electronAPI.memory.delete(memory.id);
       void loadMemories();
       void loadStats();
     } catch {

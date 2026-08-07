@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Memory } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 
@@ -23,13 +23,17 @@ const SCOPE_OPTIONS = [
   { value: 'workspace', label: '企业' },
 ];
 
+/** 星级展示：0.5 → 3 星；任何正数至少 1 星 */
+function starCount(importance: number): number {
+  return Math.max(1, Math.round(importance * 5));
+}
+
 export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogProps) {
   const [content, setContent] = useState(memory?.content ?? '');
   const [kind, setKind] = useState(memory?.kind ?? 'fact');
   const [scope, setScope] = useState(memory?.scope ?? 'personal');
   const [importance, setImportance] = useState(memory?.importance ?? 0.5);
   const [tagsInput, setTagsInput] = useState(memory?.tags?.join(', ') ?? '');
-  const dialogRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -55,18 +59,18 @@ export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogPr
   }
 
   const isEdit = !!memory;
+  const litStars = starCount(importance);
 
   return (
-    <div className="memory-dialog-overlay" onClick={onClose}>
+    <div className="modal-backdrop" onClick={onClose}>
       <div
-        ref={dialogRef}
-        className="memory-dialog"
+        className="modal memory-dialog"
         role="dialog"
         aria-label={isEdit ? '编辑记忆' : '新建记忆'}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="memory-dialog__header">
-          <h2 className="memory-dialog__title">{isEdit ? '编辑记忆' : '新建记忆'}</h2>
+          <h3 className="memory-dialog__title">{isEdit ? '编辑记忆' : '新建记忆'}</h3>
           <button className="memory-dialog__close" type="button" onClick={onClose} aria-label="关闭">
             <Icon name="x" size={16} />
           </button>
@@ -81,7 +85,7 @@ export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogPr
               onChange={(e) => setContent(e.target.value)}
               rows={3}
               required
-              placeholder="输入记忆内容..."
+              placeholder="输入记忆内容…"
             />
           </label>
           <div className="memory-dialog__row">
@@ -110,18 +114,22 @@ export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogPr
               </select>
             </label>
           </div>
-          <label className="memory-dialog__field">
-            <span className="memory-dialog__label">重要性 ({Math.round(importance * 100)}%)</span>
-            <input
-              className="memory-dialog__range"
-              type="range"
-              min={0}
-              max={1}
-              step={0.1}
-              value={importance}
-              onChange={(e) => setImportance(parseFloat(e.target.value))}
-            />
-          </label>
+          <div className="memory-dialog__field">
+            <span className="memory-dialog__label">重要性</span>
+            <div className="memory-stars" role="radiogroup" aria-label="重要性">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  className={`memory-star${n <= litStars ? ' on' : ''}`}
+                  type="button"
+                  aria-label={`${n} 星`}
+                  onClick={() => setImportance(n / 5)}
+                >
+                  ★
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="memory-dialog__field">
             <span className="memory-dialog__label">标签（逗号分隔）</span>
             <input
@@ -133,10 +141,10 @@ export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogPr
             />
           </label>
           <div className="memory-dialog__actions">
-            <button className="memory-dialog__btn memory-dialog__btn--cancel" type="button" onClick={onClose}>
+            <button className="btn btn-ghost" type="button" onClick={onClose}>
               取消
             </button>
-            <button className="memory-dialog__btn memory-dialog__btn--save" type="submit" disabled={!content.trim()}>
+            <button className="btn btn-primary" type="submit" disabled={!content.trim()}>
               {isEdit ? '保存' : '创建'}
             </button>
           </div>
