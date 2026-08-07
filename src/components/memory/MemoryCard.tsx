@@ -178,12 +178,13 @@ export function MemoryCard({
 
       <p className={`memory-card__content${clamped ? ' memory-card__content--clamped' : ''}`}>
         {memory.content}
-        {clamped && (
-          <button className="memory-card__more" type="button" onClick={handleExpand}>
-            展开
-          </button>
-        )}
       </p>
+
+      {clamped && (
+        <button className="memory-card__expand" type="button" aria-label="展开完整内容" onClick={handleExpand}>
+          展开
+        </button>
+      )}
 
       {expanded && (
         <div className="memory-card__meta">

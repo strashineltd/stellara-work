@@ -4598,8 +4598,10 @@ html[data-platform='darwin'] .sidebar-toggle {
   overflow: hidden;
 }
 
-.memory-card__more {
-  margin-left: var(--space-1);
+.memory-card__expand {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-1-5);
   padding: 0;
   border: none;
   background: none;
@@ -4608,7 +4610,7 @@ html[data-platform='darwin'] .sidebar-toggle {
   cursor: pointer;
 }
 
-.memory-card__more:hover {
+.memory-card__expand:hover {
   text-decoration: underline;
 }
 

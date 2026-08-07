@@ -81,12 +81,16 @@ describe('MemoryCard', () => {
     const content = container.querySelector('.memory-card__content');
     expect(content).toBeTruthy();
     expect(content?.className).toContain('memory-card__content--clamped');
-    expect(content?.textContent).toContain('展开');
+    const expand = container.querySelector('.memory-card__expand');
+    expect(expand).toBeTruthy();
+    expect(expand?.getAttribute('aria-label')).toBe('展开完整内容');
+    expect(content?.contains(expand)).toBe(false);
     expect(container.querySelector('.memory-card__meta')).toBeNull();
 
-    fireClick(container.querySelector('.memory-card__more'));
+    fireClick(expand);
 
     expect(content?.className).not.toContain('memory-card__content--clamped');
+    expect(container.querySelector('.memory-card__expand')).toBeNull();
     const meta = container.querySelector('.memory-card__meta');
     expect(meta).toBeTruthy();
     expect(meta?.textContent).toContain('Agent 自动提取');
@@ -100,7 +104,7 @@ describe('MemoryCard', () => {
       <MemoryCard memory={makeMemory()} onEdit={vi.fn()} onDelete={vi.fn()} />,
     );
     expect(container.querySelector('.memory-card__content--clamped')).toBeNull();
-    expect(container.querySelector('.memory-card__more')).toBeNull();
+    expect(container.querySelector('.memory-card__expand')).toBeNull();
     expect(container.querySelector('.memory-card__meta')).toBeNull();
   });
 
