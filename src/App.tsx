@@ -6,7 +6,6 @@ import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
 import { Onboarding } from './components/Onboarding';
 import { MainView } from './components/MainView';
-import { SettingsModal, type Tab as SettingsTab } from './components/SettingsModal';
 
 /** 把 theme（light/dark/system）解析成实际写到 data-theme 的值 */
 function resolveTheme(theme: ThemeName): 'light' | 'dark' {
@@ -37,19 +36,12 @@ type AppState =
  */
 export default function App() {
   const [state, setState] = useState<AppState>({ kind: 'loading' });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('providers');
-
-  function openSettingsAt(tab: SettingsTab) {
-    setSettingsInitialTab(tab);
-    setSettingsOpen(true);
-  }
 
   // 原生菜单（macOS）动作 → 渲染层 UI
   useEffect(() => {
     const off = window.electronAPI.menu?.onAction((action) => {
       if (action === 'open-settings') {
-        openSettingsAt('providers');
+        void window.electronAPI.app.openSettingsWindow();
       } else {
         // MainView 处理：命令面板 / 新建会话
         window.dispatchEvent(new CustomEvent('menu-action', { detail: action }));
@@ -254,7 +246,7 @@ export default function App() {
           });
         }}
         // MainView 的回调会被按钮直接调用；显式包一层，避免 MouseEvent 被误当成设置 tab。
-        onOpenSettings={() => openSettingsAt('providers')}
+        onOpenSettings={() => void window.electronAPI.app.openSettingsWindow()}
         onProjectCreated={(project) => {
           setState((s) => s.kind === 'ready'
             ? { ...s, projects: [{ id: project.id, name: project.name, workDir: project.workDir, entryFile: project.entryFile, updatedAt: project.updatedAt, sessionCount: 0 }, ...s.projects] }
@@ -319,26 +311,6 @@ export default function App() {
           setState((s) => s.kind === 'ready' ? { ...s, config: newConfig } : s);
         }}
       />
-      {settingsOpen && (
-        <SettingsModal
-          onClose={() => setSettingsOpen(false)}
-          onModelChanged={(newConfig) => {
-            setState((s) => s.kind === 'ready' ? { ...s, config: newConfig } : s);
-          }}
-          onShortcutsChanged={(newShortcuts) => {
-            setShortcuts({ ...DEFAULT_SHORTCUTS, ...newShortcuts });
-          }}
-          theme={theme}
-          onThemeChanged={setTheme}
-          onWorkspaceModeChanged={setWorkspaceMode}
-          workDir={state.kind === 'ready'
-            ? state.projects.find((project) => project.id === state.sessions.find((session) => session.id === state.activeSessionId)?.projectId)?.workDir
-              ?? state.sessions.find((session) => session.id === state.activeSessionId)?.workDir
-              ?? state.config.workDir
-            : undefined}
-          initialTab={settingsInitialTab}
-        />
-      )}
     </>
   );
 }
