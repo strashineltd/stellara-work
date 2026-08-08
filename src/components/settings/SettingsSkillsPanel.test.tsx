@@ -92,7 +92,7 @@ describe('SettingsSkillsPanel', () => {
     expect(byText(container, '对当前变更做全面代码审查，输出发现清单')).toBeTruthy();
     expect(byText(container, 'macos-pack')).toBeTruthy();
     expect(container.querySelector('.settings-section__title')?.textContent).toContain('2');
-    expect(container.querySelector('.settings-skill-row .active-model__logo')).toBeTruthy();
+    expect(container.querySelector('.settings-skill-row .settings-skill-row__icon')).toBeTruthy();
   });
 
   it('expands a skill row to reveal its prompt and collapses again', async () => {

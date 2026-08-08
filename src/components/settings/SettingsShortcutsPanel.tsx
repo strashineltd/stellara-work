@@ -110,9 +110,11 @@ export function SettingsShortcutsPanel({ onChanged, refreshKey = 0 }: SettingsSh
                   aria-label={`${def.label}，点击录制`}
                   onClick={() => setRecording(isRecording ? null : action)}
                   onKeyDown={(e) => {
+                    // 录制中按键统一走 window keydown 捕获路径（Enter/Space 也会被录成绑定），行内 handler 不参与
+                    if (isRecording) return;
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setRecording(isRecording ? null : action);
+                      setRecording(action);
                     }
                   }}
                 >

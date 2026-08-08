@@ -85,10 +85,10 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
               {skills.length === 0 && !skillsLoading && (
                 <div className="settings-item">
                   <div className="settings-item__grow">
-                  <div className="settings-item__hint">
-                    当前 workDir 下没有 skill 文件。在 <code>{`${workDir}/skills/`}</code> 里创建 <code>name.json</code>，
-                    必须含 <code>name</code> / <code>description</code> / <code>prompt</code> 字段。
-                  </div>
+                    <div className="settings-item__hint">
+                      当前 workDir 下没有 skill 文件。在 <code>{`${workDir}/skills/`}</code> 里创建 <code>name.json</code>，
+                      必须含 <code>name</code> / <code>description</code> / <code>prompt</code> 字段。
+                    </div>
                   </div>
                 </div>
               )}
@@ -101,7 +101,7 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
                     data-skill={s.name}
                     onClick={() => toggleSkill(s.name)}
                   >
-                    <span className="active-model__logo" aria-hidden="true">
+                    <span className="settings-skill-row__icon" aria-hidden="true">
                       <Icon name="tool" size={15} />
                     </span>
                     <div className="settings-item__grow">

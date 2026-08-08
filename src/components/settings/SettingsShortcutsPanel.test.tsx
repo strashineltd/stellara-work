@@ -153,6 +153,25 @@ describe('SettingsShortcutsPanel', () => {
     expect(row?.querySelector('.kbd')?.textContent).toBe('Ctrl + Alt + X');
   });
 
+  it('during recording, Enter is captured as a binding and does not hijack another row', async () => {
+    mocks = installApi();
+    const { container } = await render(<SettingsShortcutsPanel onChanged={vi.fn()} />);
+
+    const rowA = container.querySelector('.settings-shortcut-row[data-action="toggleSidebar"]');
+    const rowB = container.querySelector('.settings-shortcut-row[data-action="sendMessage"]');
+    await fireClick(rowA);
+
+    await act(async () => {
+      rowB?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    const patch = mocks.update.mock.calls[0]![0] as { shortcuts: Record<string, string> };
+    expect(patch.shortcuts.toggleSidebar).toBe('Enter');
+    expect(rowA?.querySelector('.kbd')?.textContent).toBe('Enter');
+    expect(rowB?.querySelector('.kbd')?.textContent).not.toBe('按任意键…');
+  });
+
   it('reset all clears overrides and persists an empty shortcuts map', async () => {
     const onChanged = vi.fn();
     mocks = installApi({ shortcuts: { toggleSidebar: 'Ctrl+Alt+X' } });
