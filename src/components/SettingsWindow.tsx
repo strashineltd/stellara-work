@@ -3,6 +3,8 @@ import { Icon, type IconName } from './Icon';
 import { SettingsModelsPanel } from './settings/SettingsModelsPanel';
 import { SettingsSessionsPanel } from './settings/SettingsSessionsPanel';
 import { SettingsAppPanel } from './settings/SettingsAppPanel';
+import { SettingsSkillsPanel } from './settings/SettingsSkillsPanel';
+import { SettingsShortcutsPanel } from './settings/SettingsShortcutsPanel';
 
 export const SETTINGS_TABS = [
   { id: 'models', label: '模型' },
@@ -87,6 +89,12 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
           )}
           {tab === 'app' && (
             <SettingsAppPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+          )}
+          {tab === 'skills' && (
+            <SettingsSkillsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+          )}
+          {tab === 'shortcuts' && (
+            <SettingsShortcutsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
           )}
         </main>
       </div>
