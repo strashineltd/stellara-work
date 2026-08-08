@@ -36,7 +36,7 @@ interface MainViewProps {
   theme?: import('../../shared/ipc').ThemeName;
   onToggleSidebar: () => void;
   onReconfigure: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: string) => void;
   onProjectCreated: (project: import('../../shared/ipc').Project) => void;
   onProjectDeleted: (id: string) => void;
   onProjectRenamed: (id: string, name: string) => void;
@@ -514,7 +514,7 @@ export function MainView(props: MainViewProps) {
             onNavigateTasks={() => setActiveSection('tasks')}
             onNavigateMemory={() => setActiveSection('memory')}
             onOpenFiles={() => activeWorkDir ? setFileTreeOpen(true) : setCreateProjectOpen(true)}
-            onOpenSettings={onOpenSettings}
+            onOpenSettings={() => onOpenSettings()}
             onSelect={handleSelectSession}
             onNew={() => void handleNewSession()}
             onDelete={(id) => void handleDeleteSession(id)}
@@ -568,7 +568,7 @@ export function MainView(props: MainViewProps) {
                 chatRef={chatRef}
                 lastUserForRetry={lastUserForRetry}
                 modelMissing={modelMissing}
-                onOpenSettings={onOpenSettings}
+                onOpenSettings={() => onOpenSettings()}
                 onRetry={handleRetry}
                 onAbort={handleAbort}
                 onApprove={(approved) => {
@@ -694,7 +694,7 @@ export function MainView(props: MainViewProps) {
           onDeleteSession={(id) => void handleDeleteSession(id)}
           onSetActiveModel={(id) => void handleSwitchModel(id)}
           onSetTheme={(t) => props.onThemeChange?.(t)}
-          onOpenSettings={() => props.onOpenSettings()}
+          onOpenSettings={(tab) => props.onOpenSettings(tab)}
           onOpenFileTree={() => setFileTreeOpen(true)}
           onToggleSidebar={props.onToggleSidebar}
           onToggleWorkspace={props.onToggleWorkspace}

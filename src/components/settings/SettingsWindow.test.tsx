@@ -16,6 +16,7 @@ function installApi() {
     updateWorkDir: vi.fn().mockResolvedValue(undefined),
     updateContextWindow: vi.fn().mockResolvedValue(undefined),
     onSettingsChanged: vi.fn().mockReturnValue(() => {}),
+    settingsGet: vi.fn().mockResolvedValue({ theme: 'light' }),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
@@ -23,6 +24,9 @@ function installApi() {
         getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
         openSettingsWindow: vi.fn().mockResolvedValue(undefined),
         onSettingsChanged: mocks.onSettingsChanged,
+      },
+      settings: {
+        get: mocks.settingsGet,
       },
       models: {
         getAll: mocks.getAll,
@@ -65,6 +69,7 @@ describe('SettingsWindow', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     delete document.documentElement.dataset.platform;
+    delete document.documentElement.dataset.theme;
     mocks = installApi();
   });
 
@@ -120,5 +125,40 @@ describe('SettingsWindow', () => {
 
     expect(mocks.getAll).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('模型');
+  });
+
+  it('applies the saved theme to documentElement', async () => {
+    mocks.settingsGet.mockResolvedValue({ theme: 'dark' });
+    await render(<SettingsWindow />);
+
+    expect(mocks.settingsGet).toHaveBeenCalledTimes(1);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
+  it('follows prefers-color-scheme changes when theme is system', async () => {
+    let dark = true;
+    const listeners: Array<() => void> = [];
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockReturnValue({
+        get matches() {
+          return dark;
+        },
+        addEventListener: vi.fn().mockImplementation((_event: string, cb: () => void) => {
+          listeners.push(cb);
+        }),
+        removeEventListener: vi.fn(),
+      }),
+    });
+    mocks.settingsGet.mockResolvedValue({ theme: 'system' });
+    await render(<SettingsWindow />);
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
+
+    dark = false;
+    await act(async () => {
+      for (const cb of listeners) cb();
+    });
+    expect(document.documentElement.dataset.theme).toBe('light');
   });
 });

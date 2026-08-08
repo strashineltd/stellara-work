@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import type { ThemeName } from '../../shared/ipc';
 import { Icon, type IconName } from './Icon';
 import { SettingsModelsPanel } from './settings/SettingsModelsPanel';
 import { SettingsSessionsPanel } from './settings/SettingsSessionsPanel';
 import { SettingsAppPanel } from './settings/SettingsAppPanel';
 import { SettingsSkillsPanel } from './settings/SettingsSkillsPanel';
 import { SettingsShortcutsPanel } from './settings/SettingsShortcutsPanel';
+import { resolveTheme } from '../lib/theme';
 
 export const SETTINGS_TABS = [
   { id: 'models', label: '模型' },
@@ -35,6 +37,7 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
   );
   const [version, setVersion] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [theme, setTheme] = useState<ThemeName>('light');
 
   useEffect(() => {
     void window.electronAPI.app.getInfo().then((info) => {
@@ -42,6 +45,28 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
       setVersion(info.version);
     });
   }, []);
+
+  // 主题写到 documentElement.dataset.theme（global.css 用 [data-theme="dark"] 选择器）
+  useEffect(() => {
+    void window.electronAPI.settings.get().then((st) => {
+      if (st.theme) setTheme(st.theme);
+    });
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolveTheme(theme);
+  }, [theme]);
+
+  // 'system' 时跟随系统 prefers-color-scheme 变化
+  useEffect(() => {
+    if (theme !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => {
+      document.documentElement.dataset.theme = resolveTheme('system');
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [theme]);
 
   // 其他窗口（主窗口等）改了模型配置 → 主进程广播 settings-changed → 刷新当前面板
   useEffect(() => {

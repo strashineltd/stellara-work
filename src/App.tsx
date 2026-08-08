@@ -6,14 +6,7 @@ import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
 import { Onboarding } from './components/Onboarding';
 import { MainView } from './components/MainView';
-
-/** 把 theme（light/dark/system）解析成实际写到 data-theme 的值 */
-function resolveTheme(theme: ThemeName): 'light' | 'dark' {
-  if (theme === 'system') {
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
-  return theme;
-}
+import { resolveTheme } from './lib/theme';
 
 type AppState =
   | { kind: 'loading' }
@@ -266,7 +259,7 @@ export default function App() {
           });
         }}
         // MainView 的回调会被按钮直接调用；显式包一层，避免 MouseEvent 被误当成设置 tab。
-        onOpenSettings={() => void window.electronAPI.app.openSettingsWindow()}
+        onOpenSettings={(tab) => void window.electronAPI.app.openSettingsWindow(tab)}
         onProjectCreated={(project) => {
           setState((s) => s.kind === 'ready'
             ? { ...s, projects: [{ id: project.id, name: project.name, workDir: project.workDir, entryFile: project.entryFile, updatedAt: project.updatedAt, sessionCount: 0 }, ...s.projects] }
