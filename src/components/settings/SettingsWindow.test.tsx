@@ -83,12 +83,22 @@ describe('SettingsWindow', () => {
     expect(container.querySelector('.settings-nav__item.active')?.textContent).toContain('模型');
   });
 
-  it('marks the requested tab active without mounting its panel yet', async () => {
+  it('marks the requested tab active and mounts its panel', async () => {
+    const sessionsList = vi.fn().mockResolvedValue([]);
+    Object.defineProperty(window, 'electronAPI', {
+      value: {
+        ...window.electronAPI,
+        sessions: { list: sessionsList, delete: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as ElectronAPI,
+      writable: true,
+      configurable: true,
+    });
     const { container } = await render(<SettingsWindow initialTab="sessions" />);
 
     const sessions = container.querySelector('.settings-nav__item[data-tab="sessions"]');
     expect(sessions?.getAttribute('aria-selected')).toBe('true');
-    expect(container.querySelector('.settings-panel-head')).toBeNull();
+    expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('会话');
+    expect(sessionsList).toHaveBeenCalledTimes(1);
     expect(mocks.getAll).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import { SettingsModelsPanel } from './settings/SettingsModelsPanel';
+import { SettingsSessionsPanel } from './settings/SettingsSessionsPanel';
+import { SettingsAppPanel } from './settings/SettingsAppPanel';
 
 export const SETTINGS_TABS = [
   { id: 'models', label: '模型' },
@@ -79,6 +81,12 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
         >
           {tab === 'models' && (
             <SettingsModelsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+          )}
+          {tab === 'sessions' && (
+            <SettingsSessionsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+          )}
+          {tab === 'app' && (
+            <SettingsAppPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
           )}
         </main>
       </div>
