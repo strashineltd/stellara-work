@@ -49,6 +49,26 @@ export default function App() {
     });
     return () => off?.();
   }, []);
+
+  // 设置窗口变更 → 主窗口实时同步
+  useEffect(() => {
+    return window.electronAPI.app.onSettingsChanged(() => {
+      void window.electronAPI.models.list().then((modelList) => {
+        const configured = modelList.configured;
+        if (configured) {
+          setState((s) => s.kind === 'ready' ? { ...s, config: configured } : s);
+        }
+      });
+      void window.electronAPI.settings.get().then((st) => {
+        if (st.theme) setTheme(st.theme);
+        if (st.shortcuts) setShortcuts({ ...DEFAULT_SHORTCUTS, ...st.shortcuts });
+        if (st.workspaceMode) setWorkspaceMode(st.workspaceMode);
+      });
+      void window.electronAPI.sessions.list().then((sessions) => {
+        setState((s) => s.kind === 'ready' ? { ...s, sessions } : s);
+      });
+    });
+  }, []);
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [theme, setTheme] = useState<ThemeName>('light');
   const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('sidebar');

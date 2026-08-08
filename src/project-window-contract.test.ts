@@ -11,7 +11,7 @@ describe('project window cross-layer contract', () => {
   const sidebar = readFileSync(resolve(__dirname, 'components/Sidebar.tsx'), 'utf-8');
   const tree = readFileSync(resolve(__dirname, '../electron/fs/tree.ts'), 'utf-8');
   const onboarding = readFileSync(resolve(__dirname, 'components/Onboarding.tsx'), 'utf-8');
-  const settings = readFileSync(resolve(__dirname, 'components/SettingsModal.tsx'), 'utf-8');
+  const settings = readFileSync(resolve(__dirname, 'components/settings/SettingsModelsPanel.tsx'), 'utf-8');
   const dataDir = readFileSync(resolve(__dirname, '../electron/config/data-dir.ts'), 'utf-8');
 
   it('keeps the project work directory in sidebar summaries and newly created state', () => {
