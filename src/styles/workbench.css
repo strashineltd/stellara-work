@@ -5353,8 +5353,10 @@ html[data-platform='darwin'] .settings-window__titlebar {
   border-color: var(--color-accent);
 }
 
-.form-row .settings-model-grid {
+.settings-model-grid {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
 }
 
 .form-row .status-busy {
