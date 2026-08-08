@@ -1,5 +1,6 @@
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 import type { MenuAction } from '../shared/ipc';
+import { openSettingsWindow } from './settings-window';
 
 /**
  * macOS 原生菜单栏（仅 darwin）。
@@ -30,7 +31,7 @@ export function installAppMenu(getWindow: () => BrowserWindow | null): void {
       submenu: [
         { role: 'about', label: '关于 Stellara Work' },
         { type: 'separator' },
-        { label: '设置…', accelerator: 'Cmd+,', click: () => send('open-settings') },
+        { label: '设置…', accelerator: 'Cmd+,', click: () => openSettingsWindow() },
         { type: 'separator' },
         { role: 'services', label: '服务' },
         { type: 'separator' },
@@ -107,7 +108,7 @@ export function installAppMenu(getWindow: () => BrowserWindow | null): void {
         { label: '新建会话', click: () => send('new-session') },
         { label: '命令面板…', click: () => send('open-command-palette') },
         { type: 'separator' },
-        { label: '设置…', click: () => send('open-settings') },
+        { label: '设置…', click: () => openSettingsWindow() },
         { type: 'separator' },
         { role: 'quit', label: '退出 Stellara Work' },
       ]),

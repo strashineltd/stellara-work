@@ -81,6 +81,14 @@ function makeStreamIterator<T>(channel: string, filter: (payload: any) => boolea
 const api: ElectronAPI = {
   app: {
     getInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:getInfo'),
+    openSettingsWindow: (tab?: string) => ipcRenderer.invoke('settings:openWindow', tab),
+    onSettingsChanged: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('settings-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('settings-changed', handler);
+      };
+    },
   },
   models: {
     list: (): Promise<ModelListResponse> => ipcRenderer.invoke('models:list'),

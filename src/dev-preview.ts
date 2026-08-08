@@ -86,7 +86,11 @@ export function installDevPreviewApi(): void {
   };
 
   const api: ElectronAPI = {
-    app: { getInfo: async () => ({ version: '0.9.0-preview', platform: previewPlatform, appDataPath: 'Preview', envPath: 'Preview' }) },
+    app: {
+      getInfo: async () => ({ version: '0.9.0-preview', platform: previewPlatform, appDataPath: 'Preview', envPath: 'Preview' }),
+      openSettingsWindow: async () => {},
+      onSettingsChanged: () => () => {},
+    },
     models: {
       list: async () => ({ presets: [], configured: previewModel }),
       getAll: async () => [modelItem],

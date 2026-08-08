@@ -8,6 +8,7 @@ import { runAgentLoop } from './agent/loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { resolveSessionModel } from './chat/session-context';
 import { installAppMenu } from './menu';
+import { openSettingsWindow, broadcastSettingsChanged } from './settings-window';
 import { notifyTaskEnd } from './notifications';
 import type {
   AppInfo,
@@ -182,7 +183,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('models:configure', async (_e, config: ModelConfig) => {
     try {
       const { configureModel } = await import('./config/model-configure');
-      return await configureModel(config);
+      const result = await configureModel(config);
+      if (result.ok) broadcastSettingsChanged();
+      return result;
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -222,11 +225,13 @@ function registerIpcHandlers(): void {
     const { deleteKey } = await import('./config/secrets');
     await removeModel(modelId);
     await deleteKey(modelId);
+    broadcastSettingsChanged();
   });
 
   ipcMain.handle('models:setActive', async (_e, modelId: string) => {
     const { setActiveModel } = await import('./config/config-v2');
     await setActiveModel(modelId);
+    broadcastSettingsChanged();
   });
 
   ipcMain.handle('models:updateWorkDir', async (_e, modelId: string, workDir: string) => {
@@ -241,6 +246,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('models:updateKey', async (_e, modelId: string, newKey: string) => {
     const { setKey } = await import('./config/secrets');
     await setKey(modelId, newKey);
+    broadcastSettingsChanged();
   });
 
   ipcMain.handle('models:updateContextWindow', async (_e, modelId: string, contextWindow: number) => {
@@ -250,6 +256,7 @@ function registerIpcHandlers(): void {
     if (idx < 0) throw new Error(`Model 不存在: ${modelId}`);
     cfg.models[idx] = { ...cfg.models[idx]!, contextWindow };
     await saveConfig(cfg);
+    broadcastSettingsChanged();
   });
 
   // Chat
@@ -523,6 +530,11 @@ function registerIpcHandlers(): void {
   });
 
   // Settings
+  ipcMain.handle('settings:openWindow', (_e, tab?: string) => {
+    openSettingsWindow(tab);
+    return true;
+  });
+
   ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
     const { loadConfig } = await import('./config/config-v2');
     const cfg = await loadConfig();
@@ -534,27 +546,32 @@ function registerIpcHandlers(): void {
     const cfg = await loadConfig();
     cfg.app = { ...cfg.app, ...partial };
     await saveConfig(cfg);
+    broadcastSettingsChanged();
   });
 
   ipcMain.handle('settings:clearAllData', async () => {
     const { wipeAllData } = await import('./config/wipe-data');
     await wipeAllData();
+    broadcastSettingsChanged();
   });
 
   ipcMain.handle('settings:resetSelective', async (_e, level: 'sessions' | 'memories' | 'all') => {
     if (level === 'all') {
       const { wipeAllData } = await import('./config/wipe-data');
       await wipeAllData();
+      broadcastSettingsChanged();
       return { cleared: 'all' as const };
     }
     if (level === 'sessions') {
       const { deleteAllSessions } = await import('./store/db');
       const count = deleteAllSessions();
+      broadcastSettingsChanged();
       return { cleared: 'sessions' as const, count };
     }
     if (level === 'memories') {
       const { deleteAllMemories } = await import('./memory/memory-store');
       const count = deleteAllMemories();
+      broadcastSettingsChanged();
       return { cleared: 'memories' as const, count };
     }
   });
