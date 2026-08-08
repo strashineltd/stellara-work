@@ -137,13 +137,13 @@ describe('SettingsModelsPanel', () => {
     expect(row0.textContent).toContain('活跃');
     expect(row0.textContent).toContain('已连接');
     expect(row0.textContent).toContain('model: deepseek-v4-pro');
-    expect(row0.querySelector('.badge--active')).toBeTruthy();
-    expect(row0.querySelector('.badge--ok')).toBeTruthy();
+    expect(row0.querySelector('.settings-badge--active')).toBeTruthy();
+    expect(row0.querySelector('.settings-badge--ok')).toBeTruthy();
 
     const row1 = rows[1]!;
     expect(row1.textContent).toContain('GLM-5.2');
     expect(row1.textContent).toContain('无 Key');
-    expect(row1.querySelector('.badge--warn')).toBeTruthy();
+    expect(row1.querySelector('.settings-badge--warn')).toBeTruthy();
 
     const card = container.querySelector('.active-model');
     expect(card?.textContent).toContain('DeepSeek-v4-Pro');
@@ -154,14 +154,14 @@ describe('SettingsModelsPanel', () => {
   it('opens the add form, auto-fills preset baseUrl, and saves via configure', async () => {
     const { container } = await render(<SettingsModelsPanel onChanged={vi.fn()} />);
 
-    await fireClick(container.querySelector('.add-model-trigger button'));
-    expect(container.querySelector('.add-model-form')).toBeTruthy();
+    await fireClick(container.querySelector('.settings-add-trigger button'));
+    expect(container.querySelector('.settings-add-form')).toBeTruthy();
 
     const cards = container.querySelectorAll('.model-card');
     expect(cards.length).toBe(2);
 
     await fireClick(cards[1]);
-    const baseCode = container.querySelector('.readonly-field code');
+    const baseCode = container.querySelector('.settings-readonly-field code');
     expect(baseCode?.textContent).toContain('https://open.bigmodel.cn/api/paas/v4');
 
     const keyInput = container.querySelector('#add-model-api-key') as HTMLInputElement;
@@ -178,7 +178,7 @@ describe('SettingsModelsPanel', () => {
       isCustom: false,
     });
     expect(mocks.getAll).toHaveBeenCalledTimes(2);
-    expect(container.querySelector('.add-model-form')).toBeNull();
+    expect(container.querySelector('.settings-add-form')).toBeNull();
   });
 
   it('edits a model key inline and saves via updateKey', async () => {
@@ -187,14 +187,14 @@ describe('SettingsModelsPanel', () => {
     const rows = container.querySelectorAll('.provider-row');
     await fireClick(rows[1]!.querySelector('.icon-btn[title="编辑 Key"]'));
 
-    const input = rows[1]!.querySelector('.settings-row__ops input') as HTMLInputElement;
+    const input = rows[1]!.querySelector('.settings-item__ops input') as HTMLInputElement;
     expect(input).toBeTruthy();
     fireChange(input, 'new-key');
     await fireClick(byText(rows[1]!, '保存'));
 
     expect(mocks.updateKey).toHaveBeenCalledWith('glm-5.2', 'new-key');
     expect(mocks.getAll).toHaveBeenCalledTimes(2);
-    expect(container.querySelector('.settings-row__ops input')).toBeNull();
+    expect(container.querySelector('.settings-item__ops input')).toBeNull();
   });
 
   it('switches the active model via the switch list', async () => {
@@ -219,7 +219,7 @@ describe('SettingsModelsPanel', () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
 
     confirmMock.mockReturnValue(false);
-    const dangerDelete = container.querySelectorAll('.danger-zone .btn-danger')[0];
+    const dangerDelete = container.querySelectorAll('.settings-danger-zone .btn-danger')[0];
     await fireClick(dangerDelete);
     expect(mocks.remove).toHaveBeenCalledTimes(1);
   });

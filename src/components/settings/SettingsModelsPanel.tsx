@@ -152,7 +152,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
   const active = models.find((m) => m.isActive);
 
   return (
-    <div className="settings-panel">
+    <div className="settings-panel-root">
       <div className="settings-panel-head">
         <div>
           <h2>模型</h2>
@@ -171,7 +171,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
         <div className="settings-section__title">活跃模型</div>
         <div className="active-model">
           <div className="active-model__logo" aria-hidden="true">{active ? active.label.slice(0, 2) : '—'}</div>
-          <div className="settings-row__grow">
+          <div className="settings-item__grow">
             <div className="active-model__name">{active?.label ?? '未设置'}</div>
             <div className="active-model__meta">
               {active
@@ -205,11 +205,11 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
                 type="button"
               >
                 <span className="active-model__logo" aria-hidden="true">{m.label.slice(0, 2)}</span>
-                <span className="settings-row__grow">
+                <span className="settings-item__grow">
                   <span className="nm">{m.label}</span>
                   <span className="hint">{m.baseUrl} · key {m.hasKey ? '已配置' : '未配置'}</span>
                 </span>
-                {m.isActive && <span className="badge badge--active">活跃</span>}
+                {m.isActive && <span className="settings-badge settings-badge--active">活跃</span>}
               </button>
             ))}
           </div>
@@ -221,20 +221,20 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
         <div className="settings-group">
           {models.length === 0 && <p className="empty-hint">还没有 model。点下方「添加模型」按钮加一个</p>}
           {models.map((m) => (
-            <div key={m.id} className="settings-row provider-row">
-              <div className="settings-row__grow">
-                <div className="settings-row__top">
-                  <span className="settings-row__title">{m.label}</span>
-                  {m.isActive && <span className="badge badge--active">活跃</span>}
-                  <span className={`badge ${m.hasKey ? 'badge--ok' : 'badge--warn'}`}>
+            <div key={m.id} className="settings-item provider-row">
+              <div className="settings-item__grow">
+                <div className="settings-item__top">
+                  <span className="settings-item__title">{m.label}</span>
+                  {m.isActive && <span className="settings-badge settings-badge--active">活跃</span>}
+                  <span className={`settings-badge ${m.hasKey ? 'settings-badge--ok' : 'settings-badge--warn'}`}>
                     {m.hasKey ? '已连接' : '无 Key'}
                   </span>
                 </div>
-                <div className="settings-row__base">
+                <div className="settings-item__base">
                   {m.baseUrl} · model: {m.model} · {formatContextWindow(m.contextWindow)}
                 </div>
               </div>
-              <div className="settings-row__ops">
+              <div className="settings-item__ops">
                 {editingKey === m.id ? (
                   <>
                     <input
@@ -280,7 +280,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
             </div>
           ))}
         </div>
-        <div className="add-model-trigger">
+        <div className="settings-add-trigger">
           <button
             className="btn btn-primary"
             onClick={() => setShowAdd((v) => !v)}
@@ -292,10 +292,10 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
           </button>
         </div>
         {showAdd && (
-          <div className="add-model-form">
+          <div className="settings-add-form">
             <div className="form-row">
               <label>选择预设</label>
-              <div className="model-grid">
+              <div className="settings-model-grid">
                 {presets.map((p) => (
                   <ModelCard
                     key={p.id}
@@ -332,12 +332,12 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
             ) : (
               <div className="form-row">
                 <label>Base URL / Model</label>
-                <div className="readonly-fields">
-                  <div className="readonly-field">
+                <div className="settings-readonly-fields">
+                  <div className="settings-readonly-field">
                     <span className="label">Base URL</span>
                     <code>{addBaseUrl || '（自动）'}</code>
                   </div>
-                  <div className="readonly-field">
+                  <div className="settings-readonly-field">
                     <span className="label">Model</span>
                     <code>{addModelName || '（自动）'}</code>
                   </div>
@@ -369,7 +369,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
                 </div>
               </div>
             )}
-            <div className="add-model-actions">
+            <div className="settings-add-actions">
               <button className="btn btn-primary" onClick={() => void handleSaveAdd()} disabled={addBusy || !addApiKey} type="button">
                 {addBusy ? '测试并保存中…' : '保存'}
               </button>
@@ -381,12 +381,12 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
 
       <div className="settings-section">
         <div className="settings-section__title">危险区</div>
-        <div className="settings-group danger-zone">
+        <div className="settings-group settings-danger-zone">
           {models.map((m) => (
-            <div key={m.id} className="settings-row">
-              <div className="settings-row__grow">
-                <div className="settings-row__label">{m.label}</div>
-                <div className="settings-row__hint">同时从 .env 移除对应 API key</div>
+            <div key={m.id} className="settings-item">
+              <div className="settings-item__grow">
+                <div className="settings-item__label">{m.label}</div>
+                <div className="settings-item__hint">同时从 .env 移除对应 API key</div>
               </div>
               <button className="btn btn-danger" onClick={() => void handleRemove(m.id)} type="button">删除</button>
             </div>

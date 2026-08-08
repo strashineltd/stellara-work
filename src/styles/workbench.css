@@ -5022,6 +5022,10 @@ html[data-platform='darwin'] .settings-window__titlebar {
   overflow: auto;
 }
 
+.settings-panel-root {
+  width: 100%;
+}
+
 .settings-panel-head {
   display: flex;
   align-items: center;
@@ -5073,7 +5077,7 @@ html[data-platform='darwin'] .settings-window__titlebar {
   overflow: hidden;
 }
 
-.settings-window .settings-row {
+.settings-item {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -5082,40 +5086,40 @@ html[data-platform='darwin'] .settings-window__titlebar {
   border-bottom: 0;
 }
 
-.settings-window .settings-row + .settings-row {
+.settings-item + .settings-item {
   border-top: 1px solid var(--color-border);
 }
 
-.settings-row__grow {
+.settings-item__grow {
   flex: 1;
   min-width: 0;
 }
 
-.settings-row__label {
+.settings-item__label {
   color: var(--color-text);
   font-size: 12.5px;
   font-weight: 550;
 }
 
-.settings-row__hint {
+.settings-item__hint {
   margin-top: 2px;
   color: var(--color-text-faint);
   font-size: 11px;
 }
 
-.settings-row__title {
+.settings-item__title {
   color: var(--color-text);
   font-size: 12.5px;
   font-weight: 620;
 }
 
-.settings-row__top {
+.settings-item__top {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.settings-row__base {
+.settings-item__base {
   margin-top: 3px;
   overflow: hidden;
   color: var(--color-text-faint);
@@ -5125,13 +5129,13 @@ html[data-platform='darwin'] .settings-window__titlebar {
   white-space: nowrap;
 }
 
-.settings-row__ops {
+.settings-item__ops {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.settings-row__ops input {
+.settings-item__ops input {
   width: 180px;
   height: 30px;
   padding: 0 10px;
@@ -5144,11 +5148,11 @@ html[data-platform='darwin'] .settings-window__titlebar {
   font-size: var(--fs-sm);
 }
 
-.settings-row__ops input:focus {
+.settings-item__ops input:focus {
   border-color: var(--color-accent);
 }
 
-.settings-row__ops .btn {
+.settings-item__ops .btn {
   min-height: 30px;
   padding-inline: 11px;
   font-size: var(--fs-xs);
@@ -5247,7 +5251,7 @@ html[data-platform='darwin'] .settings-window__titlebar {
 }
 
 /* 徽章 */
-.settings-window .badge {
+.settings-badge {
   display: inline-flex;
   align-items: center;
   height: 18px;
@@ -5259,17 +5263,17 @@ html[data-platform='darwin'] .settings-window__titlebar {
   white-space: nowrap;
 }
 
-.settings-window .badge--active {
+.settings-badge--active {
   color: var(--color-accent);
   background: var(--color-accent-soft);
 }
 
-.settings-window .badge--ok {
+.settings-badge--ok {
   color: var(--color-success);
   background: var(--color-success-bg);
 }
 
-.settings-window .badge--warn {
+.settings-badge--warn {
   color: var(--color-warning);
   background: var(--color-warning-bg);
 }
@@ -5303,11 +5307,11 @@ html[data-platform='darwin'] .settings-window__titlebar {
 }
 
 /* 添加模型表单 */
-.add-model-trigger {
+.settings-add-trigger {
   margin-top: 10px;
 }
 
-.settings-window .add-model-form {
+.settings-add-form {
   margin-top: 10px;
   padding: 0;
   overflow: hidden;
@@ -5349,7 +5353,7 @@ html[data-platform='darwin'] .settings-window__titlebar {
   border-color: var(--color-accent);
 }
 
-.form-row .model-grid {
+.form-row .settings-model-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -5357,7 +5361,36 @@ html[data-platform='darwin'] .settings-window__titlebar {
   margin: 0;
 }
 
-.add-model-actions {
+.settings-readonly-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.settings-readonly-field {
+  display: grid;
+  gap: 3px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-content);
+}
+
+.settings-readonly-field .label {
+  color: var(--color-text-faint);
+  font-size: var(--fs-xxs);
+}
+
+.settings-readonly-field code {
+  overflow: hidden;
+  color: var(--color-text-soft);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-add-actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
@@ -5366,13 +5399,13 @@ html[data-platform='darwin'] .settings-window__titlebar {
 }
 
 /* 危险区 */
-.settings-window .danger-zone {
+.settings-danger-zone {
   padding: 0;
   border: 1px solid var(--color-danger-tint);
   background: var(--color-bg-content);
 }
 
-.settings-window .danger-zone .settings-row__label {
+.settings-danger-zone .settings-item__label {
   color: var(--color-danger);
 }
 
