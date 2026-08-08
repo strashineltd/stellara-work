@@ -68,9 +68,15 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
     return () => mq.removeEventListener('change', handler);
   }, [theme]);
 
-  // 其他窗口（主窗口等）改了模型配置 → 主进程广播 settings-changed → 刷新当前面板
+  // 其他窗口（主窗口等）改了模型/主题等配置 → 主进程广播 settings-changed → 刷新当前面板 + 同步主题
   useEffect(() => {
-    return window.electronAPI.app.onSettingsChanged(() => setRefreshKey((k) => k + 1));
+    return window.electronAPI.app.onSettingsChanged(() => {
+      setRefreshKey((k) => k + 1);
+      // 主题可能被主窗口或本窗口内其他 panel 修改：广播时重新读取，保证深浅色实时同步
+      void window.electronAPI.settings.get().then((st) => {
+        if (st.theme) setTheme(st.theme);
+      });
+    });
   }, []);
 
   return (

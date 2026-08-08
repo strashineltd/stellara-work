@@ -135,6 +135,22 @@ describe('SettingsWindow', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
+  it('re-syncs theme when settings-changed is broadcast', async () => {
+    mocks.settingsGet.mockResolvedValue({ theme: 'light' });
+    await render(<SettingsWindow />);
+    expect(document.documentElement.dataset.theme).toBe('light');
+
+    // 主窗口切到深色 → 广播 → 设置窗口重读主题并应用
+    mocks.settingsGet.mockResolvedValue({ theme: 'dark' });
+    const broadcast = mocks.onSettingsChanged.mock.calls[0]![0] as () => void;
+    await act(async () => {
+      broadcast();
+    });
+
+    expect(mocks.settingsGet).toHaveBeenCalledTimes(2);
+    expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+
   it('follows prefers-color-scheme changes when theme is system', async () => {
     let dark = true;
     const listeners: Array<() => void> = [];
