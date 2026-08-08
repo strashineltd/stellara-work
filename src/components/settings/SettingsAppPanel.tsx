@@ -240,7 +240,7 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
             </div>
             <input
               id="clear-all-confirm"
-              className="danger-input"
+              className="settings-danger-input"
               type="text"
               placeholder="DELETE"
               value={confirmClear}

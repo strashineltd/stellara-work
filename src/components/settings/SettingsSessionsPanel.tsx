@@ -85,7 +85,7 @@ export function SettingsSessionsPanel({ onChanged, refreshKey = 0 }: SettingsSes
         <div className="settings-group">
           {sessions.length === 0 && <p className="empty-hint">还没有会话</p>}
           {sessions.map((s) => (
-            <div key={s.id} className="settings-item session-row">
+            <div key={s.id} className="settings-item settings-session-row">
               <div className="settings-item__grow">
                 <div className="settings-item__title">{s.title}</div>
                 <div className="settings-item__hint">

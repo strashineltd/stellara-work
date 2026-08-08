@@ -91,7 +91,7 @@ describe('SettingsSessionsPanel', () => {
 
     expect(mocks.list).toHaveBeenCalledTimes(1);
 
-    const rows = container.querySelectorAll('.session-row');
+    const rows = container.querySelectorAll('.settings-session-row');
     expect(rows.length).toBe(3);
 
     const row0 = rows[0]!;
@@ -114,14 +114,14 @@ describe('SettingsSessionsPanel', () => {
     installApi([]);
     const { container } = await render(<SettingsSessionsPanel onChanged={vi.fn()} />);
 
-    expect(container.querySelector('.session-row')).toBeNull();
+    expect(container.querySelector('.settings-session-row')).toBeNull();
     expect(container.textContent).toContain('还没有会话');
   });
 
   it('deletes a session after confirm and refreshes the list; skips when cancelled', async () => {
     const { container } = await render(<SettingsSessionsPanel onChanged={vi.fn()} />);
 
-    const rows = container.querySelectorAll('.session-row');
+    const rows = container.querySelectorAll('.settings-session-row');
     await fireClick(rows[0]!.querySelector('.icon-btn[title="删除"]'));
 
     expect(confirmMock).toHaveBeenCalled();

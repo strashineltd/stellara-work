@@ -5411,6 +5411,38 @@ html[data-platform='darwin'] .settings-window__titlebar {
   color: var(--color-danger);
 }
 
+/* 危险区确认输入框（应用 tab 清空确认，对照预览页 .danger-input） */
+.settings-danger-input {
+  width: 130px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-strong);
+  border-color: var(--color-danger-tint);
+  border-radius: 8px;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.settings-danger-input:focus {
+  border-color: var(--color-danger);
+}
+
+/* 会话行（唯一化，避免复用 sidebar 的 .session-row 规则泄漏） */
+.settings-session-row .settings-item__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.settings-session-row .settings-item__hint {
+  font-size: 11px;
+  color: var(--color-text-faint);
+}
+
 /* 单选卡片（应用 tab 复用） */
 .radio-group {
   display: flex;
