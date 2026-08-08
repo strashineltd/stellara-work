@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>设置界面设计预览 · Stellara Work</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", system-ui, sans-serif;
+    font-size: 13px; color: var(--text); background: var(--bg-app);
+    -webkit-font-smoothing: antialiased;
+  }
+  :root {
+    --bg-app: #f1f5fb; --bg-content: #ffffff; --bg-soft: #f6f8fc; --bg-input: #ffffff;
+    --bg-selected: #edf4ff; --bg-code: #f4f7fb;
+    --text: #293449; --text-strong: #111827; --text-soft: #64748b; --text-faint: #667085;
+    --border: #e6ebf2; --border-strong: #dce3ed; --border-dark: #c8d2e1;
+    --accent: #2f7cf4; --on-accent: #ffffff; --accent-soft: #edf4ff; --accent-hover: #2469d8;
+    --accent-tint: rgba(47,124,244,0.14); --hover: rgba(47,94,157,0.06);
+    --danger: #c14f57; --danger-bg: #fff0f1; --danger-soft: rgba(193,79,87,0.08);
+    --success: #32845d; --success-bg: #edf8f2; --warning: #9a6822;
+    --shadow: 0 18px 50px rgba(30,45,75,0.18);
+  }
+  :root[data-theme="dark"] {
+    --bg-app: #14161a; --bg-content: #1e2126; --bg-soft: #22252b; --bg-input: #22252b;
+    --bg-selected: #2c3038; --bg-code: #171a1f;
+    --text: #e8eaf0; --text-strong: #f7f8fa; --text-soft: #b6bcc6; --text-faint: #9aa1ac;
+    --border: #31353d; --border-strong: #3b4049; --border-dark: #525863;
+    --accent: #8ba2bd; --on-accent: #12161c; --accent-soft: #2b313a; --accent-hover: #9db2cb;
+    --accent-tint: rgba(139,162,189,0.18); --hover: rgba(255,255,255,0.055);
+    --danger: #dc908a; --danger-bg: #422c2a; --danger-soft: rgba(220,144,138,0.1);
+    --success: #83b292; --success-bg: #2b3b30; --warning: #d0aa69;
+    --shadow: 0 18px 50px rgba(0,0,0,0.5);
+  }
+
+  .stage { min-height: 100vh; display: grid; place-items: center; padding: 40px 20px; }
+
+  /* ---- Settings window ---- */
+  .settings-win {
+    width: 760px; height: 640px;
+    background: var(--bg-content);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px; box-shadow: var(--shadow);
+    display: grid; grid-template-rows: 46px minmax(0, 1fr);
+    overflow: hidden;
+  }
+  .win-titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 14px; border-bottom: 1px solid var(--border);
+    background: var(--bg-content);
+  }
+  .win-titlebar .dots { display: flex; gap: 7px; }
+  .win-titlebar .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .win-titlebar .dot.r { background: #ff5f57; } .win-titlebar .dot.y { background: #febc2e; } .win-titlebar .dot.g { background: #28c840; }
+  .win-titlebar .t { margin-left: 8px; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+  .win-titlebar .spacer { flex: 1; }
+
+  .win-body { display: grid; grid-template-columns: 168px minmax(0, 1fr); min-height: 0; }
+
+  /* ---- Nav ---- */
+  .nav { background: var(--bg-soft); border-right: 1px solid var(--border); padding: 10px 8px; overflow: auto; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; min-height: 34px; padding: 0 10px;
+    border: none; background: transparent; border-radius: 8px;
+    color: var(--text-soft); font-size: 12.5px; cursor: pointer; text-align: left;
+  }
+  .nav-item svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+  .nav-item:hover { color: var(--text); background: var(--hover); }
+  .nav-item.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+  /* ---- Panels ---- */
+  .panel { padding: 18px 20px; overflow: auto; min-height: 0; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .panel-head h2 { font-size: 15px; font-weight: 650; color: var(--text-strong); }
+  .panel-head .sub { color: var(--text-faint); font-size: 11.5px; margin-top: 3px; }
+
+  .section { margin-bottom: 18px; }
+  .section-title { display: flex; align-items: center; gap: 7px; color: var(--text-soft); font-size: 11.5px; font-weight: 650; margin-bottom: 8px; }
+  .section-title .count { color: var(--text-faint); font-weight: 500; }
+  .group {
+    background: var(--bg-content); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 14px; min-height: 46px;
+  }
+  .row + .row { border-top: 1px solid var(--border); }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .lbl { color: var(--text); font-size: 12.5px; font-weight: 550; }
+  .row .hint { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+  .row .val { color: var(--text-soft); font-size: 12px; font-family: "SFMono-Regular", ui-monospace, monospace; }
+
+  /* Active model card */
+  .active-model {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 14px;
+    background: var(--accent-soft); border: 1px solid var(--accent-tint); border-radius: 12px;
+  }
+  .active-model .logo { width: 34px; height: 34px; border-radius: 9px; background: var(--bg-content); display: grid; place-items: center; color: var(--accent); font-weight: 700; font-size: 13px; border: 1px solid var(--border); }
+  .active-model .nm { color: var(--text-strong); font-weight: 650; font-size: 13px; }
+  .active-model .meta { color: var(--text-faint); font-size: 11px; }
+
+  /* Model list rows */
+  .provider-row { padding: 12px 14px; }
+  .provider-row .top { display: flex; align-items: center; gap: 10px; }
+  .provider-row .nm { font-weight: 620; font-size: 12.5px; color: var(--text); }
+  .badge { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; }
+  .badge.active { color: var(--accent); background: var(--accent-soft); }
+  .badge.nokey { color: var(--warning); background: rgba(208,170,105,0.14); }
+  .provider-row .base { color: var(--text-faint); font-family: var(--mono); font-size: 10.5px; margin-top: 3px; }
+  .provider-row .ops { display: flex; gap: 6px; }
+  .icon-btn { width: 26px; height: 26px; display: grid; place-items: center; border: none; background: transparent; border-radius: 7px; color: var(--text-faint); cursor: pointer; }
+  .icon-btn:hover { color: var(--text); background: var(--hover); }
+  .icon-btn.danger:hover { color: var(--danger); background: var(--danger-soft); }
+  .icon-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
+  .btn.ghost { background: transparent; border-color: var(--border-strong); color: var(--text-soft); }
+  .btn.ghost:hover { color: var(--text); }
+  .btn.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-soft); }
+  .btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  /* Form rows */
+  .form-row { display: grid; gap: 5px; padding: 12px 14px; }
+  .form-row + .form-row { border-top: 1px solid var(--border); }
+  .form-row label { font-size: 11.5px; color: var(--text-soft); font-weight: 550; }
+  .form-row input, .form-row select {
+    height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px;
+    background: var(--bg-input); color: var(--text); font-size: 12.5px; outline: none; font-family: inherit;
+  }
+  .form-row input:focus, .form-row select:focus { border-color: var(--accent); }
+  .form-row textarea { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-input); color: var(--text); font-size: 12.5px; padding: 9px 10px; outline: none; font-family: inherit; min-height: 64px; }
+
+  /* Radio group */
+  .radio-group { display: flex; gap: 10px; flex-wrap: wrap; }
+  .radio-card {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 13px; border: 1px solid var(--border-strong); border-radius: 9px;
+    background: var(--bg-input); color: var(--text-soft); font-size: 12px; cursor: pointer;
+  }
+  .radio-card.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .radio-card .swatch { width: 13px; height: 13px; border-radius: 4px; border: 1px solid var(--border-dark); }
+
+  /* Danger zone */
+  .danger-zone { border: 1px solid var(--danger-soft); }
+  .danger-zone .row .lbl { color: var(--danger); }
+  .danger-input { width: 130px !important; border-color: var(--danger-soft) !important; }
+
+  /* Shortcuts */
+  .shortcut-row .kbd { min-width: 108px; }
+  .kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 26px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 7px;
+    background: var(--bg-input); color: var(--text); font-size: 11px; font-family: var(--mono);
+    box-shadow: inset 0 -1px 0 var(--border-dark);
+  }
+  .kbd.rec { border-color: var(--accent); color: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+
+  /* Sessions */
+  .session-row .title { font-size: 12.5px; color: var(--text); font-weight: 550; }
+  .session-row .time { color: var(--text-faint); font-size: 11px; }
+
+  /* Skills */
+  .skill-row { display: flex; align-items: flex-start; gap: 10px; }
+  .skill-row .ic { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: 0 0 auto; }
+  .skill-row .ic svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+  .skill-row .nm { font-weight: 600; font-size: 12.5px; color: var(--text); }
+  .skill-row .desc { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+
+  /* Theme switch */
+  .theme-switch {
+    position: fixed; right: 16px; bottom: 16px; z-index: 60;
+    display: inline-flex; gap: 6px; padding: 5px;
+    background: var(--bg-content); border: 1px solid var(--border-strong);
+    border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  }
+  .theme-switch button { border: none; background: transparent; padding: 6px 12px; border-radius: 999px; color: var(--text-soft); font-size: 12px; cursor: pointer; }
+  .theme-switch button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="settings-win">
+    <div class="win-titlebar">
+      <span class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></span>
+      <span class="t">设置</span>
+      <span class="spacer"></span>
+      <span class="t" style="font-weight:400">Stellara Work 0.9.0</span>
+    </div>
+    <div class="win-body">
+      <nav class="nav" id="nav">
+        <button class="nav-item active" data-tab="models"><svg><path d="M3 8.5 8 3l5 5.5M4.5 7.5V13h7V7.5"/></svg>模型</button>
+        <button class="nav-item" data-tab="sessions"><svg><path d="M3 4h10v9H3zM6 3v2M10 3v2"/></svg>会话</button>
+        <button class="nav-item" data-tab="app"><svg><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.3M8 12.9v1.3M14.2 8h-1.3M3.1 8H1.8M12.4 3.6l-.9.9M4.5 11.5l-.9.9M12.4 12.4l-.9-.9M4.5 4.5l-.9-.9"/></svg>应用</button>
+        <button class="nav-item" data-tab="skills"><svg><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M8 6v4M6 8h4"/></svg>技能</button>
+        <button class="nav-item" data-tab="shortcuts"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg>快捷键</button>
+      </nav>
+
+      <main class="panel" id="panel">
+        <!-- ======== MODELS ======== -->
+        <div class="tab-pane" data-pane="models">
+          <div class="panel-head">
+            <div><h2>模型</h2><div class="sub">管理 API 提供商与模型连接</div></div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">活跃模型</div>
+            <div class="active-model">
+              <div class="logo">DS</div>
+              <div class="grow">
+                <div class="nm">DeepSeek-v4-Pro</div>
+                <div class="meta">api.deepseek.com · 256K 上下文 · key 已配置</div>
+              </div>
+              <button class="btn ghost">切换</button>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">模型列表 <span class="count">2</span></div>
+            <div class="group">
+              <div class="row provider-row">
+                <div class="grow">
+                  <div class="top"><span class="nm">DeepSeek-v4-Pro</span><span class="badge active">活跃</span><span class="badge" style="background:var(--success-bg);color:var(--success)">已连接</span></div>
+                  <div class="base">api.deepseek.com · model: deepseek-v4-pro · 256K</div>
+                </div>
+                <div class="ops">
+                  <button class="icon-btn" title="编辑 Key"><svg><path d="m4 12-.5 2.5L6 14l7.5-7.5-2-2zM9 7.5l2 2"/></svg></button>
+                  <button class="icon-btn" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+                </div>
+              </div>
+              <div class="row provider-row">
+                <div class="grow">
+                  <div class="top"><span class="nm">GLM-5.2</span><span class="badge nokey">无 Key</span></div>
+                  <div class="base">open.bigmodel.cn · model: glm-5.2 · 128K</div>
+                </div>
+                <div class="ops">
+                  <button class="icon-btn" title="编辑 Key"><svg><path d="m4 12-.5 2.5L6 14l7.5-7.5-2-2zM9 7.5l2 2"/></svg></button>
+                  <button class="icon-btn" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:10px">
+              <button class="btn primary"><svg><path d="M8 3v10M3 8h10"/></svg>添加模型</button>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">危险区</div>
+            <div class="group danger-zone">
+              <div class="row">
+                <div class="grow"><div class="lbl">删除模型</div><div class="hint">同时从 .env 移除对应 API key</div></div>
+                <button class="btn danger">删除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== SESSIONS ======== -->
+        <div class="tab-pane" data-pane="sessions" style="display:none">
+          <div class="panel-head">
+            <div><h2>会话</h2><div class="sub">管理本地会话记录</div></div>
+          </div>
+          <div class="section">
+            <div class="section-title">最近会话 <span class="count">3</span></div>
+            <div class="group">
+              <div class="row session-row">
+                <div class="grow">
+                  <div class="title">记忆中心升级：UI 重设计与 MD 导出</div>
+                  <div class="time">今天 14:20 · 桌面端项目</div>
+                </div>
+                <button class="icon-btn" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+              <div class="row session-row">
+                <div class="grow">
+                  <div class="title">macOS 深度适配：Agent 平台感知</div>
+                  <div class="time">昨天 21:40 · 桌面端项目</div>
+                </div>
+                <button class="icon-btn" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+              <div class="row session-row">
+                <div class="grow">
+                  <div class="title">数据本地桌面 Agent 原型讨论</div>
+                  <div class="time">8月2日 · 未分组</div>
+                </div>
+                <button class="icon-btn" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">数据管理</div>
+            <div class="group danger-zone">
+              <div class="row">
+                <div class="grow"><div class="lbl">清空所有会话</div><div class="hint">删除全部会话与消息，不可恢复</div></div>
+                <button class="btn danger">清空</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== APP ======== -->
+        <div class="tab-pane" data-pane="app" style="display:none">
+          <div class="panel-head">
+            <div><h2>应用</h2><div class="sub">界面、数据与日志</div></div>
+          </div>
+          <div class="section">
+            <div class="section-title">界面</div>
+            <div class="group">
+              <div class="row">
+                <div class="grow"><div class="lbl">主题</div><div class="hint">跟随系统或手动指定</div></div>
+                <div class="radio-group">
+                  <span class="radio-card"><span class="swatch" style="background:#fff"></span>浅色</span>
+                  <span class="radio-card on"><span class="swatch" style="background:#1e2126"></span>深色</span>
+                  <span class="radio-card"><span class="swatch" style="background:linear-gradient(135deg,#fff 50%,#1e2126 50%)"></span>跟随系统</span>
+                </div>
+              </div>
+              <div class="row">
+                <div class="grow"><div class="lbl">工作区模式</div><div class="hint">主界面右侧面板的呈现方式</div></div>
+                <div class="radio-group">
+                  <span class="radio-card on">侧栏</span>
+                  <span class="radio-card">标签页</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">数据与日志</div>
+            <div class="group">
+              <div class="row">
+                <div class="grow"><div class="lbl">数据目录</div><div class="hint">配置、密钥与数据库存放位置</div></div>
+                <button class="btn ghost">打开</button>
+              </div>
+              <div class="row">
+                <div class="grow"><div class="lbl">日志</div><div class="hint">主进程与渲染进程日志文件</div></div>
+                <button class="btn ghost">查看</button>
+              </div>
+              <div class="row">
+                <div class="grow"><div class="lbl">诊断信息</div><div class="hint">版本、系统与数据库状态</div></div>
+                <button class="btn ghost">复制</button>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">危险区</div>
+            <div class="group danger-zone">
+              <div class="row">
+                <div class="grow"><div class="lbl">清空所有数据</div><div class="hint">删除全部会话、记忆与配置，输入 DELETE 确认</div></div>
+                <input class="danger-input" placeholder="DELETE" style="height:32px;border:1px solid var(--border-strong);border-radius:8px;padding:0 10px;background:var(--bg-input);color:var(--text)" />
+                <button class="btn danger" disabled style="opacity:.5">清空</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== SKILLS ======== -->
+        <div class="tab-pane" data-pane="skills" style="display:none">
+          <div class="panel-head">
+            <div><h2>技能</h2><div class="sub">项目 skills/ 目录中的自定义技能</div></div>
+            <button class="btn ghost">打开目录</button>
+          </div>
+          <div class="section">
+            <div class="section-title">可用技能 <span class="count">2</span></div>
+            <div class="group">
+              <div class="row skill-row">
+                <div class="ic"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg></div>
+                <div class="grow">
+                  <div class="nm">代码审查</div>
+                  <div class="desc">对当前变更做全面代码审查，输出发现清单</div>
+                </div>
+              </div>
+              <div class="row skill-row">
+                <div class="ic"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg></div>
+                <div class="grow">
+                  <div class="nm">macOS 打包</div>
+                  <div class="desc">构建 arm64 dmg/zip 并验证产物</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">技能目录</div>
+            <div class="group">
+              <div class="row">
+                <div class="grow"><div class="lbl">skills 目录</div><div class="val">/Users/lhy/Stellara Work/skills</div></div>
+                <button class="btn ghost">在访达中显示</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======== SHORTCUTS ======== -->
+        <div class="tab-pane" data-pane="shortcuts" style="display:none">
+          <div class="panel-head">
+            <div><h2>快捷键</h2><div class="sub">点击按键组合可重新录制</div></div>
+            <button class="btn ghost">重置全部</button>
+          </div>
+          <div class="section">
+            <div class="section-title">导航</div>
+            <div class="group">
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">切换左会话栏</div></div>
+                <span class="kbd">Cmd + B</span>
+              </div>
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">切换右工作区</div></div>
+                <span class="kbd">Cmd + Shift + W</span>
+              </div>
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">打开命令面板</div></div>
+                <span class="kbd">Cmd + K</span>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">操作</div>
+            <div class="group">
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">切换 Plan 模式</div></div>
+                <span class="kbd">Cmd + Shift + P</span>
+              </div>
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">发送消息</div></div>
+                <span class="kbd">Cmd + Enter</span>
+              </div>
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">拒绝当前批准</div></div>
+                <span class="kbd">Esc</span>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">标签页</div>
+            <div class="group">
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">切换到 Tab 1–9</div></div>
+                <span class="kbd">Cmd + 1 … Cmd + 9</span>
+              </div>
+              <div class="row shortcut-row">
+                <div class="grow"><div class="lbl">关闭当前 Tab</div></div>
+                <span class="kbd">Cmd + W</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+
+<div class="theme-switch">
+  <button id="sw-light" class="on" onclick="setTheme('light')">浅色</button>
+  <button id="sw-dark" onclick="setTheme('dark')">深色</button>
+</div>
+
+<script>
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.getElementById('sw-light').classList.toggle('on', t === 'light');
+  document.getElementById('sw-dark').classList.toggle('on', t === 'dark');
+}
+document.querySelectorAll('.nav-item').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b === btn));
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-pane').forEach((p) => {
+      p.style.display = p.dataset.pane === tab ? '' : 'none';
+    });
+  });
+});
+</script>
+</body>
+</html>
