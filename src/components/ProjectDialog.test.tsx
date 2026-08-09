@@ -181,12 +181,12 @@ describe('ProjectDialog', () => {
       await Promise.resolve();
     });
     expect(api.selectProjectFile).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain('README.md');
+    expect(container.textContent).toContain('Stellara Work');
     await act(async () => {
-      fireClick(buttonByText(container, '打开文件'));
+      fireClick(buttonByText(container, '打开文件夹'));
       await Promise.resolve();
     });
-    expect(api.openPath).toHaveBeenCalledWith('D:\\Stellara Work', 'D:\\Stellara Work\\README.md');
+    expect(api.openPath).toHaveBeenCalledWith('D:\\Stellara Work', 'D:\\Stellara Work');
   });
 
   it('creates a new file through the native save flow', async () => {
@@ -225,7 +225,6 @@ describe('ProjectDialog', () => {
     });
     expect(api.selectProjectDir).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('folder-project');
-    expect(container.textContent).toContain('README.md');
     await act(async () => {
       fireClick(buttonByText(container, '创建项目'));
       await Promise.resolve();

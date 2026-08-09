@@ -23,15 +23,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function displayPath(workDir: string, filePath: string): string {
-  const root = workDir.replace(/\\/g, '/').replace(/\/$/, '');
-  const file = filePath.replace(/\\/g, '/');
-  if (file.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
-    return file.slice(root.length + 1);
-  }
-  return filePath;
-}
-
 export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRename, onUpdateFile, onClose }: ProjectDialogProps) {
   const isCreateMode = mode === 'create';
   const initialName = isCreateMode ? '' : (project?.name ?? '');
@@ -159,15 +150,15 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
     }
   }
 
-  async function handleOpenFile() {
-    if (!projectWorkDir || !selectedFile) return;
+  async function handleOpenFolder() {
+    if (!projectWorkDir) return;
     setBusyAction('open');
     setFeedback(null);
     try {
-      await window.electronAPI.fs.openPath(projectWorkDir, selectedFile);
-      setFeedback({ kind: 'success', message: '已使用系统默认应用打开文件', scope: 'file' });
+      await window.electronAPI.fs.openPath(projectWorkDir, projectWorkDir);
+      setFeedback({ kind: 'success', message: '已打开项目文件夹', scope: 'file' });
     } catch (error) {
-      setFeedback({ kind: 'error', message: `打开文件失败：${errorMessage(error)}`, scope: 'file' });
+      setFeedback({ kind: 'error', message: `打开文件夹失败：${errorMessage(error)}`, scope: 'file' });
     } finally {
       setBusyAction(null);
     }
@@ -273,15 +264,15 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
             <p className="project-dialog-empty" role="status">{isCreateMode ? '尚未选择入口文件（可选），不会影响项目创建。' : '程序不会预设工作项目。请为这个项目选择一个入口文件。'}</p>
           )}
 
-          {selectedFile && projectWorkDir && (
+          {projectWorkDir && (
             <div className="project-selected-file">
-              <Icon name="file" size={16} />
+              <Icon name="folder" size={16} />
               <div>
-                <strong>{basename(selectedFile)}</strong>
-                <code title={selectedFile}>{displayPath(projectWorkDir, selectedFile)}</code>
+                <strong>{basename(projectWorkDir)}</strong>
+                <code title={projectWorkDir}>{projectWorkDir}</code>
               </div>
-              <button className="btn btn-secondary" type="button" onClick={() => void handleOpenFile()} disabled={isBusy}>
-                {busyAction === 'open' ? '打开中…' : '打开文件'}
+              <button className="btn btn-secondary" type="button" onClick={() => void handleOpenFolder()} disabled={isBusy}>
+                {busyAction === 'open' ? '打开中…' : '打开文件夹'}
               </button>
             </div>
           )}
