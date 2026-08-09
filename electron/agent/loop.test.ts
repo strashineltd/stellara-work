@@ -298,3 +298,64 @@ describe('memory_context event', () => {
     expect(events.some((e) => e.type === 'memory_context')).toBe(false);
   });
 });
+
+describe('cumulative usage events', () => {
+  beforeEach(() => {
+    mockChat.mockReset();
+    mockInvokeTool.mockReset();
+    mockChat.mockImplementation(() => contentThenDone(''));
+  });
+
+  it('yields cumulative usage and tool counts across rounds', async () => {
+    mockChat
+      .mockReturnValueOnce((async function* () {
+        yield { type: 'content', content: '分析中' };
+        yield { type: 'usage', usage: { promptTokens: 100, completionTokens: 20, estimated: false } };
+        yield {
+          type: 'tool_call',
+          toolCall: { id: 't1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } },
+        };
+        yield { type: 'done' };
+      })())
+      .mockReturnValueOnce((async function* () {
+        yield { type: 'content', content: '完成' };
+        yield { type: 'usage', usage: { promptTokens: 50, completionTokens: 10, estimated: false } };
+        yield { type: 'done' };
+      })());
+    mockInvokeTool.mockResolvedValue({ ok: true, output: '内容' });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('读文件', { model: makeConfig(), cwd: '/tmp' })) {
+      events.push(ev);
+    }
+
+    const usageEvents = events.filter((e) => e.type === 'usage');
+    expect(usageEvents.length).toBeGreaterThanOrEqual(2); // 每轮 LLM 调用至少一次
+    const first = usageEvents[0];
+    const last = usageEvents[usageEvents.length - 1];
+    if (first?.type === 'usage' && last?.type === 'usage') {
+      // 累计：第一轮 100/20，第二轮 100+50 / 20+10
+      expect(first.totals).toEqual({ promptTokens: 100, completionTokens: 20 });
+      expect(last.totals).toEqual({ promptTokens: 150, completionTokens: 30 });
+      expect(last.usage).toEqual({ promptTokens: 50, completionTokens: 10, estimated: false });
+      expect(last.toolCounts?.['read_file']).toBe(1);
+    }
+  });
+
+  it('falls back to estimated zero usage when the LLM sends no usage event', async () => {
+    mockChat.mockReturnValueOnce(contentThenDone('完成'));
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('任务', { model: makeConfig(), cwd: '/tmp' })) {
+      events.push(ev);
+    }
+
+    const usageEvents = events.filter((e) => e.type === 'usage');
+    expect(usageEvents).toHaveLength(1);
+    if (usageEvents[0]?.type === 'usage') {
+      expect(usageEvents[0].usage).toEqual({ promptTokens: 0, completionTokens: 0, estimated: true });
+      expect(usageEvents[0].totals).toEqual({ promptTokens: 0, completionTokens: 0 });
+      expect(usageEvents[0].toolCounts).toEqual({});
+    }
+  });
+});

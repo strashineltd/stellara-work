@@ -105,6 +105,11 @@ export async function* runAgentLoop(
   let consecutiveFailures = 0;
   let iteration = 0;
 
+  // 本次 run 的累计 token 用量与工具调用次数（跨轮累计）
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  const toolCallCounts: Record<string, number> = {};
+
   // Plan 批准门禁：本 run 是否已产出 READY TO EXECUTE 计划（防重试/多轮绕过门禁）
   let planGateDone = false;
   // 是否已 yield 过 plan 事件（多轮计划只向调用方发一次）
@@ -155,6 +160,7 @@ export async function* runAgentLoop(
     // 累积这一轮的响应
     let assistantContent = '';
     const toolCalls: ToolCall[] = [];
+    let lastUsage: ChatStreamEvent['usage'] | undefined;
 
     for await (const event of stream) {
       if (event.type === 'content' && event.content) {
@@ -162,6 +168,10 @@ export async function* runAgentLoop(
         yield event;
       } else if (event.type === 'tool_call' && event.toolCall) {
         toolCalls.push(event.toolCall);
+      } else if (event.type === 'usage' && event.usage) {
+        lastUsage = event.usage;
+        totalPromptTokens += event.usage.promptTokens;
+        totalCompletionTokens += event.usage.completionTokens;
       } else if (event.type === 'error') {
         yield event;
         return;
@@ -169,6 +179,14 @@ export async function* runAgentLoop(
         // done
       }
     }
+
+    // 每轮至少 yield 一次 usage（LLM 未上报时用估算 0 兜底）；totals/toolCounts 为本次 run 累计值
+    yield {
+      type: 'usage',
+      usage: lastUsage ?? { promptTokens: 0, completionTokens: 0, estimated: true },
+      totals: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+      toolCounts: { ...toolCallCounts },
+    };
 
     // Plan 模式：从 LLM 输出中提取结构化计划
     if (planMode && assistantContent && !planGateDone) {
@@ -319,6 +337,7 @@ export async function* runAgentLoop(
 
           // 缓存只读结果
           if (result.ok) {
+            toolCallCounts[toolName] = (toolCallCounts[toolName] ?? 0) + 1;
             toolCache.set(cacheKey, { ok: result.ok, output: result.output, error: result.error });
           }
 
@@ -420,6 +439,7 @@ export async function* runAgentLoop(
 
       totalToolCalls++;
       if (toolName === 'run_command') totalCommands++;
+      if (result.ok) toolCallCounts[toolName] = (toolCallCounts[toolName] ?? 0) + 1;
 
       // 命令数检查
       if (totalCommands > MAX_COMMANDS) {
