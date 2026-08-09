@@ -14,6 +14,12 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
+async function writeSkill(rel: string, text: string) {
+  const p = path.join(tmpDir, rel);
+  await fs.mkdir(path.dirname(p), { recursive: true });
+  await fs.writeFile(p, text, 'utf-8');
+}
+
 describe('loadSkills', () => {
   it('目录不存在 → 返回空数组', async () => {
     const skills = await loadSkills(path.join(tmpDir, 'no-skills'));
@@ -115,5 +121,33 @@ describe('formatSkillsForPrompt', () => {
     expect(text).toContain('doc-writer');
     expect(text).toContain('审查代码');
     expect(text).toContain('写文档');
+  });
+});
+
+describe('loadSkills markdown format', () => {
+  it('loads .md skill with frontmatter name/description and body as prompt', async () => {
+    await writeSkill('skills/review.md', `---\nname: review\n描述行: 忽略\ndescription: 代码审查技能\n---\n\n审查当前变更并输出发现清单。`);
+    const skills = await loadSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]).toEqual({ name: 'review', description: '代码审查技能', prompt: '审查当前变更并输出发现清单。', format: 'md' });
+  });
+
+  it('skips .md without required frontmatter fields', async () => {
+    await writeSkill('skills/bad.md', '# 没有 frontmatter');
+    await writeSkill('skills/noname.md', '---\ndescription: 缺 name\n---\n正文');
+    await writeSkill('skills/nodesc.md', '---\nname: x\n---\n正文');
+    expect(await loadSkills(tmpDir)).toHaveLength(0);
+  });
+
+  it('loads subdirectory skills with filename fallback name', async () => {
+    await writeSkill('skills/review/code.md', `---\ndescription: 子目录技能\n---\n正文`);
+    const skills = await loadSkills(tmpDir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.name).toBe('code');
+  });
+
+  it('keeps legacy .json skills working', async () => {
+    await writeSkill('skills/old.json', JSON.stringify({ name: 'old', description: '旧格式', prompt: 'p' }));
+    expect(await loadSkills(tmpDir)).toHaveLength(1);
   });
 });

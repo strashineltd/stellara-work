@@ -470,6 +470,7 @@ export interface SkillDef {
   name: string;
   description: string;
   prompt: string;
+  format?: 'md' | 'json';
 }
 
 export interface CreateSessionArgs {
