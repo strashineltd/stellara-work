@@ -336,6 +336,26 @@ function registerIpcHandlers(): void {
     return { path: selected, workDir };
   });
 
+  // 文件夹模式：选择项目工作区目录，自动探测 README.md 作为可选入口文件
+  ipcMain.handle('dialog:selectProjectDir', async (): Promise<{ workDir: string; entryFile?: string } | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择项目文件夹',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const workDir = await grantWorkDir(result.filePaths[0]!);
+    let entryFile: string | undefined;
+    try {
+      await fs.access(path.join(workDir, 'README.md'));
+      entryFile = 'README.md';
+    } catch {
+      // 无 README.md → 入口文件留空
+    }
+    return { workDir, entryFile };
+  });
+
   ipcMain.handle('dialog:createProjectFile', async (): Promise<ProjectFileSelection | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showSaveDialog(mainWindow, {
@@ -418,18 +438,21 @@ function registerIpcHandlers(): void {
     }));
   });
 
-  ipcMain.handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile: string }) => {
+  ipcMain.handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile?: string }) => {
     if (typeof args?.name !== 'string' || !args.name.trim()) throw new Error('项目名称不能为空');
-    if (typeof args?.workDir !== 'string' || !args.workDir.trim()) throw new Error('请选择项目文件');
-    if (typeof args?.entryFile !== 'string' || !args.entryFile.trim()) throw new Error('请选择项目文件');
-    const selection = await verifyProjectSelection(args.workDir, args.entryFile);
+    if (typeof args?.workDir !== 'string' || !args.workDir.trim()) throw new Error('请选择项目文件夹');
     const { v4: uuid } = await import('uuid');
     const { createProject } = await import('./store/db');
+    let entryFile: string | undefined;
+    if (typeof args.entryFile === 'string' && args.entryFile.trim()) {
+      const selection = await verifyProjectSelection(args.workDir, args.entryFile.trim());
+      entryFile = selection.path;
+    }
     return createProject({
       id: uuid(),
       name: args.name.trim().slice(0, 50),
-      workDir: selection.workDir,
-      entryFile: selection.path,
+      workDir: args.workDir.trim(),
+      entryFile,
     });
   });
 

@@ -539,12 +539,14 @@ export interface ElectronAPI {
     openFile: (workDir: string) => Promise<string | null>;
     /** 用户显式选择任意项目入口文件，并返回其规范化路径和父目录 */
     selectProjectFile: () => Promise<ProjectFileSelection | null>;
+    /** 文件夹模式：选择项目工作区目录（自动探测 README.md 作为可选入口文件） */
+    selectProjectDir: () => Promise<{ workDir: string; entryFile?: string } | null>;
     /** 通过系统保存窗口安全新建项目入口文件（禁止覆盖） */
     createProjectFile: () => Promise<ProjectFileSelection | null>;
   };
   projects: {
     list: () => Promise<ProjectSummary[]>;
-    create: (args: { name: string; workDir: string; entryFile: string }) => Promise<Project>;
+    create: (args: { name: string; workDir: string; entryFile?: string }) => Promise<Project>;
     delete: (id: string) => Promise<void>;
     rename: (id: string, name: string) => Promise<void>;
     updateFile: (id: string, selection: ProjectFileSelection) => Promise<Project>;

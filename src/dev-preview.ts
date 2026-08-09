@@ -107,6 +107,7 @@ export function installDevPreviewApi(): void {
       openDirectory: async () => previewWorkDir,
       openFile: async () => `${previewWorkDir}${sep}README.md`,
       selectProjectFile: async () => ({ path: `${previewWorkDir}${sep}README.md`, workDir: previewWorkDir }),
+      selectProjectDir: async () => ({ workDir: previewWorkDir, entryFile: 'README.md' }),
       createProjectFile: async () => ({ path: `${previewWorkDir}${sep}notes.md`, workDir: previewWorkDir }),
     },
     projects: {

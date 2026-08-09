@@ -126,11 +126,12 @@ const api: ElectronAPI = {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
     openFile: (workDir: string): Promise<string | null> => ipcRenderer.invoke('dialog:openFile', workDir),
     selectProjectFile: () => ipcRenderer.invoke('dialog:selectProjectFile'),
+    selectProjectDir: () => ipcRenderer.invoke('dialog:selectProjectDir'),
     createProjectFile: () => ipcRenderer.invoke('dialog:createProjectFile'),
   },
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
-    create: (args: { name: string; workDir: string; entryFile: string }) => ipcRenderer.invoke('projects:create', args),
+    create: (args: { name: string; workDir: string; entryFile?: string }) => ipcRenderer.invoke('projects:create', args),
     delete: (id: string) => ipcRenderer.invoke('projects:delete', id),
     rename: (id: string, name: string) => ipcRenderer.invoke('projects:rename', id, name),
     updateFile: (id: string, selection: { path: string; workDir: string }) => ipcRenderer.invoke('projects:updateFile', id, selection),
