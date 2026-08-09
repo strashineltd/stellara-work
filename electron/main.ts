@@ -347,9 +347,10 @@ function registerIpcHandlers(): void {
 
     const workDir = await grantWorkDir(result.filePaths[0]!);
     let entryFile: string | undefined;
+    const readmePath = path.join(workDir, 'README.md');
     try {
-      await fs.access(path.join(workDir, 'README.md'));
-      entryFile = 'README.md';
+      await fs.access(readmePath);
+      entryFile = readmePath;
     } catch {
       // 无 README.md → 入口文件留空
     }
