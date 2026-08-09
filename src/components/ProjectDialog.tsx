@@ -231,13 +231,30 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
 
           <div className="project-file-actions">
             {isCreateMode && (
-              <button type="button" className="project-file-action" onClick={() => void handlePickDir()} disabled={isBusy}>
+            <div className="project-file-action project-file-action--split">
+              <button
+                type="button"
+                className="project-file-action__main"
+                onClick={() => void handlePickDir()}
+                disabled={isBusy}
+              >
                 <Icon name="folder" size={16} />
                 <span>
                   <strong>{busyAction === 'pickDir' ? '正在选择…' : '选择文件夹'}</strong>
                   <small>选择文件夹作为项目工作区</small>
                 </span>
               </button>
+              <button
+                type="button"
+                className="project-file-action__open"
+                onClick={() => void handleOpenFolder()}
+                disabled={isBusy || !projectWorkDir}
+                title="在系统文件管理器中打开"
+              >
+                <Icon name="arrow-right" size={14} />
+                <span>打开文件夹</span>
+              </button>
+            </div>
             )}
             <button type="button" className="project-file-action" onClick={() => void handlePickFile()} disabled={isBusy}>
               <Icon name="folder" size={16} />

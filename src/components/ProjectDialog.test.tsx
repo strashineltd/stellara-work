@@ -259,4 +259,25 @@ describe('ProjectDialog', () => {
       entryFile: undefined,
     });
   });
+
+  it('shows the open-folder button next to the folder picker, disabled until a folder is chosen', async () => {
+    const api = installApi();
+    const { container } = renderDialog({ mode: 'create', project: undefined, workDir: '' });
+    const openBtn = buttonByText(container, '打开文件夹') as HTMLButtonElement | null;
+    expect(openBtn).toBeTruthy();
+    expect(openBtn?.disabled).toBe(true);
+
+    api.selectProjectDir.mockResolvedValue({ workDir: 'D:/workspace/folder-project', entryFile: 'README.md' });
+    await act(async () => {
+      fireClick(buttonByText(container, '选择文件夹'));
+      await Promise.resolve();
+    });
+    const openBtn2 = buttonByText(container, '打开文件夹') as HTMLButtonElement | null;
+    expect(openBtn2?.disabled).toBe(false);
+    await act(async () => {
+      fireClick(openBtn2!);
+      await Promise.resolve();
+    });
+    expect(api.openPath).toHaveBeenCalledWith('D:/workspace/folder-project', 'D:/workspace/folder-project');
+  });
 });
