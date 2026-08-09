@@ -568,6 +568,7 @@ export function MainView(props: MainViewProps) {
                 chatRef={chatRef}
                 lastUserForRetry={lastUserForRetry}
                 modelMissing={modelMissing}
+                workDir={activeWorkDir}
                 onOpenSettings={() => onOpenSettings()}
                 onRetry={handleRetry}
                 onAbort={handleAbort}

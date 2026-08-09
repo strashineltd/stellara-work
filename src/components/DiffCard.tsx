@@ -11,11 +11,13 @@ import { css } from '@codemirror/lang-css';
 import { python } from '@codemirror/lang-python';
 import { markdown } from '@codemirror/lang-markdown';
 import { Icon } from './Icon';
+import { HoverablePath } from './hover/HoverablePath';
 
 interface DiffCardProps {
   path: string;
   before: string | null;
   after: string;
+  workDir?: string;
 }
 
 function getLangExtension(filePath: string) {
@@ -44,7 +46,7 @@ function isDarkTheme(): boolean {
   return document.documentElement.dataset.theme === 'dark';
 }
 
-export function DiffCard({ path, before, after }: DiffCardProps) {
+export function DiffCard({ path, before, after, workDir }: DiffCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<MergeView | EditorView | null>(null);
   const [open, setOpen] = useState(true);
@@ -131,7 +133,11 @@ export function DiffCard({ path, before, after }: DiffCardProps) {
         title={open ? '折叠' : '展开 diff'}
       >
         <span className="tool-card-icon"><Icon name={isNew ? 'file' : 'edit'} size={14} /></span>
-        <span className="tool-card-name">{path}</span>
+        <span className="tool-card-name">
+          {workDir
+            ? <HoverablePath path={path} workDir={workDir}>{path}</HoverablePath>
+            : <span>{path}</span>}
+        </span>
         <span className="tool-card-summary">
           {isNew ? '新文件' : stats && (
             <>

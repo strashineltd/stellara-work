@@ -10,6 +10,7 @@ import { ErrorBanner } from '../ErrorBanner';
 import { ApprovalTopBar } from '../ApprovalTopBar';
 import { Icon } from '../Icon';
 import { prettyApprovalArgs, type DisplayEntry } from '../../lib/chat-utils';
+import { HoverablePath } from '../hover/HoverablePath';
 
 interface ChatStreamProps {
   entries: DisplayEntry[];
@@ -18,6 +19,7 @@ interface ChatStreamProps {
   chatRef: RefObject<HTMLElement | null>;
   lastUserForRetry: string | null;
   modelMissing: boolean;
+  workDir?: string;
   onOpenSettings: () => void;
   onRetry: () => void;
   onAbort: () => void;
@@ -60,11 +62,12 @@ export function ChatStream(props: ChatStreamProps) {
                   busy={props.busy}
                   canRetry={!!props.lastUserForRetry && e.content.includes('[连接错误]')}
                   onRetry={() => props.onRetry()}
+                  workDir={props.workDir}
                 />
               )}
               {e.kind === 'tool_call' && <ToolCallCard name={e.name} args={e.args} />}
               {e.kind === 'tool_result' && e.meta?.kind === 'edit' && (
-                <DiffCard path={e.meta.path} before={e.meta.before} after={e.meta.after} />
+                <DiffCard path={e.meta.path} workDir={props.workDir} before={e.meta.before} after={e.meta.after} />
               )}
               {e.kind === 'tool_result' && e.meta?.kind === 'command' && (
                 <ShellCard
@@ -109,7 +112,7 @@ export function ChatStream(props: ChatStreamProps) {
                   onRetry={() => props.onRetry()}
                 />
               )}
-              {e.kind === 'report' && <ReportEntry entry={e} />}
+              {e.kind === 'report' && <ReportEntry entry={e} workDir={props.workDir} />}
             </div>
           ))}
           {props.busy && (
@@ -167,18 +170,20 @@ function AssistantEntry({
   busy,
   canRetry,
   onRetry,
+  workDir,
 }: {
   content: string;
   busy: boolean;
   canRetry: boolean;
   onRetry: () => void;
+  workDir?: string;
 }) {
   return (
     <div className="message message-assistant">
       <div className="message-role">执行记录</div>
       <div className="message-content">
         {content
-          ? <MarkdownView content={content} />
+          ? <MarkdownView content={content} workDir={workDir} />
           : busy
             ? <span className="thinking">正在分析任务…</span>
             : <span className="empty-placeholder">[该消息未生成内容]</span>}
@@ -193,14 +198,17 @@ function AssistantEntry({
   );
 }
 
-function ReportEntry({ entry }: { entry: Extract<DisplayEntry, { kind: 'report' }> }) {
+function ReportEntry({ entry, workDir }: {
+  entry: Extract<DisplayEntry, { kind: 'report' }>;
+  workDir?: string;
+}) {
   return (
     <div className="report-card">
       <div className="report-card-header">
         <span className="report-card-title">任务完成</span>
       </div>
       <div className="report-body">
-        <MarkdownView content={entry.summary} />
+        <MarkdownView content={entry.summary} workDir={workDir} />
       </div>
       {entry.files.length > 0 && (
         <details className="report-section" open>
@@ -213,7 +221,11 @@ function ReportEntry({ entry }: { entry: Extract<DisplayEntry, { kind: 'report' 
                 <span className="report-file-icon" aria-hidden="true">
                   <Icon name={f.kind === 'write' ? 'file' : 'edit'} size={13} />
                 </span>
-                <code className="report-file-path">{f.path}</code>
+                <code className="report-file-path">
+                  {workDir ? (
+                    <HoverablePath path={f.path} workDir={workDir}>{f.path}</HoverablePath>
+                  ) : f.path}
+                </code>
               </li>
             ))}
           </ul>
