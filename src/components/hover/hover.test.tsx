@@ -16,6 +16,10 @@ function installApi() {
     writable: true,
     configurable: true,
   });
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    configurable: true,
+  });
   return mocks;
 }
 
@@ -113,6 +117,20 @@ describe('FileHoverPreview', () => {
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     );
     expect(window.electronAPI.fs.openPath).toHaveBeenCalledWith('/w', 'src/a.ts');
+  });
+
+  it('copies the path on click and shows 已复制 feedback', async () => {
+    await render(
+      <FileHoverPreview anchor={{ x: 10, y: 20 }} path="src/a.ts" workDir="/w" onClose={() => {}} />,
+    );
+    const pathBtn = document.body.querySelector('.file-hover-preview__path') as HTMLElement;
+    await act(async () => {
+      pathBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('src/a.ts');
+    expect(document.body.textContent).toContain('已复制');
+    await act(() => vi.advanceTimersByTime(1500));
+    expect(document.body.textContent).not.toContain('已复制');
   });
 });
 

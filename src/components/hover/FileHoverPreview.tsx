@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { filePreviewCache } from '../../lib/file-preview-cache';
 
@@ -17,6 +17,8 @@ export function FileHoverPreview({ anchor, path, workDir, onClose, onHoverChange
   const [content, setContent] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +44,12 @@ export function FileHoverPreview({ anchor, path, workDir, onClose, onHoverChange
     };
   }, [workDir, path]);
 
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, []);
+
   const left = window.innerWidth - anchor.x < PREVIEW_WIDTH ? Math.max(0, anchor.x - PREVIEW_WIDTH) : anchor.x;
   const top = window.innerHeight - anchor.y < PREVIEW_HEIGHT ? anchor.y - PREVIEW_HEIGHT - 8 : anchor.y;
 
@@ -49,6 +57,17 @@ export function FileHoverPreview({ anchor, path, workDir, onClose, onHoverChange
     void window.electronAPI.fs.openPath(workDir, path);
     onClose();
   };
+
+  async function copyPath() {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  }
 
   return createPortal(
     <div
@@ -58,9 +77,14 @@ export function FileHoverPreview({ anchor, path, workDir, onClose, onHoverChange
       onMouseLeave={() => onHoverChange?.(false)}
     >
       <div className="file-hover-preview__head">
-        <span className="file-hover-preview__path" title={path}>
-          {path}
-        </span>
+        <button
+          type="button"
+          className={`file-hover-preview__path${copied ? ' file-hover-preview__path--copied' : ''}`}
+          title={path}
+          onClick={copyPath}
+        >
+          {copied ? '已复制' : path}
+        </button>
         <button type="button" className="file-hover-preview__open" onClick={openFile}>
           打开
         </button>
