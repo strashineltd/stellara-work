@@ -77,12 +77,21 @@ export class McpManager {
     }
   }
 
-  private async getCachedEntry(cfg: McpServerConfig): Promise<CachedConnection> {
-    const hit = this.cache.get(cfg.id);
+  private async getEntry(serverId: string): Promise<CachedConnection> {
+    const hit = this.cache.get(serverId);
     if (hit) return hit;
-    const entry = await connectMcpServer(cfg);
-    this.cache.set(cfg.id, entry);
+    const server = (await this.listServers()).find((s) => s.id === serverId);
+    if (!server) throw new Error(`MCP 服务器不存在: ${serverId}`);
+    const entry = await connectMcpServer(server);
+    this.cache.set(serverId, entry);
     return entry;
+  }
+
+  private invalidateFor(serverId: string): void {
+    const entry = this.cache.get(serverId);
+    if (!entry) return;
+    void Promise.resolve(entry.client.close()).catch(() => {});
+    this.cache.delete(serverId);
   }
 
   async getEnabledTools(): Promise<OpenAITool[]> {
@@ -91,7 +100,7 @@ export class McpManager {
     for (const s of servers) {
       if (!s.enabled) continue;
       try {
-        const { tools } = await this.getCachedEntry(s);
+        const { tools } = await this.getEntry(s.id);
         const allowed =
           s.tools && s.tools.length > 0 ? tools.filter((t) => s.tools!.includes(t.name)) : tools;
         for (const t of allowed) out.push(mcpToolToOpenAITool(s.id, t));
@@ -108,17 +117,19 @@ export class McpManager {
     const { serverId, toolName } = parsed;
     const server = (await this.listServers()).find((s) => s.id === serverId);
     if (!server) return { ok: false, output: '', error: `MCP 服务器不存在: ${serverId}` };
+    let entry: CachedConnection;
     try {
-      const entry = await this.getCachedEntry(server);
-      return await callMcpTool(entry.client, toolName, args);
+      entry = await this.getEntry(serverId);
     } catch (e) {
-      this.cache.delete(serverId);
-      try {
-        const entry = await this.getCachedEntry(server);
-        return await callMcpTool(entry.client, toolName, args);
-      } catch (e2) {
-        return { ok: false, output: '', error: errorMessage(e2) };
-      }
+      return { ok: false, output: '', error: errorMessage(e) };
+    }
+    const result = await callMcpTool(entry.client, toolName, args);
+    if (result.ok || result.output !== '') return result;
+    this.invalidateFor(serverId);
+    try {
+      return await callMcpTool((await this.getEntry(serverId)).client, toolName, args);
+    } catch (e) {
+      return { ok: false, output: '', error: errorMessage(e) };
     }
   }
 

@@ -394,6 +394,35 @@ describe('McpManager', () => {
       expect(res.error).toBe('spawn ENOENT');
     });
 
+    it('reconnects once when a cached client call fails', async () => {
+      await seed(stdioCfg);
+      const stale = makeClient();
+      stale.callTool.mockRejectedValue(new Error('connection closed'));
+      let calls = 0;
+      mockClient.mockImplementation(function () {
+        calls += 1;
+        if (calls === 1) return stale;
+        return makeClient();
+      });
+      await mcpManager.getEnabledTools();
+      const res = await mcpManager.callTool('mcp__s1__read', { path: '/a' });
+      expect(res).toEqual({ ok: true, output: 'ok' });
+      expect(mockClient).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns error when retry after stale client also fails', async () => {
+      await seed(stdioCfg);
+      const bad = makeClient();
+      bad.callTool.mockRejectedValue(new Error('connection closed'));
+      mockClient.mockImplementation(function () {
+        return bad;
+      });
+      await mcpManager.getEnabledTools();
+      const res = await mcpManager.callTool('mcp__s1__read', {});
+      expect(res).toEqual({ ok: false, output: '', error: 'connection closed' });
+      expect(mockClient).toHaveBeenCalledTimes(2);
+    });
+
     it('surfaces tool errors from the server', async () => {
       await seed(stdioCfg);
       const client = makeClient();
@@ -403,6 +432,7 @@ describe('McpManager', () => {
       });
       const res = await mcpManager.callTool('mcp__s1__write', {});
       expect(res).toEqual({ ok: false, output: 'permission denied', error: 'permission denied' });
+      expect(mockClient).toHaveBeenCalledTimes(1);
     });
   });
 });
