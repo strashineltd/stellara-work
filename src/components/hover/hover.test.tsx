@@ -67,16 +67,17 @@ describe('FileHoverPreview', () => {
     );
     expect(window.electronAPI.fs.readFile).toHaveBeenCalledWith('/w', 'src/a.ts', 100 * 1024);
     expect(document.body.textContent).toContain('const x = 1;');
-    expect(filePreviewCache.get('/w', 'src/a.ts')).toBe('const x = 1;');
+    expect(filePreviewCache.get('/w', 'src/a.ts')).toEqual({ content: 'const x = 1;', truncated: false });
   });
 
   it('serves content from filePreviewCache without re-reading', async () => {
-    filePreviewCache.set('/w', 'src/a.ts', 'cached-content');
+    filePreviewCache.set('/w', 'src/a.ts', { content: 'cached-content', truncated: true });
     await render(
       <FileHoverPreview anchor={{ x: 10, y: 20 }} path="src/a.ts" workDir="/w" onClose={() => {}} />,
     );
     expect(window.electronAPI.fs.readFile).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('cached-content');
+    expect(document.body.textContent).toContain('已截断');
   });
 
   it('shows error state on failure', async () => {

@@ -22,7 +22,8 @@ export function FileHoverPreview({ anchor, path, workDir, onClose, onHoverChange
     let cancelled = false;
     const cached = filePreviewCache.get(workDir, path);
     if (cached !== null) {
-      setContent(cached);
+      setContent(cached.content);
+      setTruncated(cached.truncated);
       return;
     }
     void window.electronAPI.fs
@@ -31,7 +32,7 @@ export function FileHoverPreview({ anchor, path, workDir, onClose, onHoverChange
         if (cancelled) return;
         setContent(res.content);
         setTruncated(res.truncated);
-        filePreviewCache.set(workDir, path, res.content);
+        filePreviewCache.set(workDir, path, { content: res.content, truncated: res.truncated });
       })
       .catch(() => {
         if (!cancelled) setError('无法预览此文件');
