@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { loadConfig, saveConfig, addModel, migrateFromV1, _setConfigDir } from './config-v2';
+import type { McpServerConfig } from '../../shared/ipc';
 import { _setSecretsDir, getKey } from './secrets';
 
 let tmpDir: string;
@@ -25,8 +26,49 @@ describe('config-v2', () => {
       activeModelId: null,
       models: [],
       app: {},
+      mcpServers: [],
       schemaVersion: 1,
     });
+  });
+
+  it('saveConfig + loadConfig round-trips mcpServers', async () => {
+    const servers: McpServerConfig[] = [
+      {
+        id: 'srv-fs',
+        name: 'Filesystem',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+        enabled: true,
+        tools: ['list_files', 'read_file'],
+      },
+      {
+        id: 'srv-remote',
+        name: 'Remote',
+        transport: 'http',
+        url: 'https://mcp.example.com/sse',
+        headers: { Authorization: 'Bearer x' },
+        enabled: false,
+      },
+    ];
+    await saveConfig({
+      activeModelId: null,
+      models: [],
+      app: {},
+      schemaVersion: 1,
+      mcpServers: servers,
+    });
+    const cfg = await loadConfig();
+    expect(cfg.mcpServers).toEqual(servers);
+  });
+
+  it('loads legacy config without mcpServers as []', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'config.json'),
+      JSON.stringify({ activeModelId: null, models: [], app: {}, schemaVersion: 1 }, null, 2),
+    );
+    const cfg = await loadConfig();
+    expect(cfg.mcpServers).toEqual([]);
   });
 
   it('saveConfig + loadConfig round-trips', async () => {

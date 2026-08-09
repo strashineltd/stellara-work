@@ -473,6 +473,33 @@ export interface SkillDef {
   format?: 'md' | 'json';
 }
 
+// ============================================
+// MCP 相关
+// ============================================
+
+export interface McpServerConfig {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'http';
+  /** stdio */
+  command?: string;
+  /** stdio */
+  args?: string[];
+  /** http */
+  url?: string;
+  /** http 可选 */
+  headers?: Record<string, string>;
+  enabled: boolean;
+  /** 空 = 全部 */
+  tools?: string[];
+}
+
+export interface McpToolInfo {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
 export interface CreateSessionArgs {
   modelId: string;
   workDir?: string;

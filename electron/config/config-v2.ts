@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { setKey } from './secrets';
 import { getAppDataDir } from './data-dir';
-import type { ThemeName } from '../../shared/ipc';
+import type { ThemeName, McpServerConfig } from '../../shared/ipc';
 
 let _overrideConfigDir: string | null = null;
 
@@ -43,6 +43,7 @@ export interface AppConfig {
     theme?: ThemeName;
     workspaceMode?: 'sidebar' | 'tabs';
   };
+  mcpServers: McpServerConfig[];
   schemaVersion: 1;
 }
 
@@ -51,6 +52,7 @@ function defaultConfig(): AppConfig {
     activeModelId: null,
     models: [],
     app: {},
+    mcpServers: [],
     schemaVersion: 1,
   };
 }
@@ -66,6 +68,8 @@ export async function loadConfig(): Promise<AppConfig> {
       ...parsed,
       models: [...(parsed.models ?? [])],
       app: { ...(parsed.app ?? {}) },
+      // 深拷贝 mcpServers，兼容旧配置无此字段
+      mcpServers: [...(parsed.mcpServers ?? [])],
     };
   } catch {
     return defaultConfig();
@@ -177,6 +181,7 @@ export async function migrateFromV1(): Promise<boolean> {
     activeModelId: entry.id,
     models: [entry],
     app: {},
+    mcpServers: [],
     schemaVersion: 1,
   };
   await saveConfig(newCfg);
