@@ -151,6 +151,46 @@ describe('Sidebar', () => {
     expect(onNavigateTasks).toHaveBeenCalledOnce();
   });
 
+  it('navigates to the files section from primary navigation', () => {
+    const onNavigateFiles = vi.fn();
+    const { getByText } = render(
+      <Sidebar
+        sessions={SESSIONS}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+        onNavigateFiles={onNavigateFiles}
+      />,
+    );
+    fireClick(getByText('文件'));
+    expect(onNavigateFiles).toHaveBeenCalledOnce();
+  });
+
+  it('marks the files nav item as the active section', () => {
+    const { querySelectorAll } = render(
+      <Sidebar
+        sessions={SESSIONS}
+        activeId={null}
+        activeSection="files"
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+      />,
+    );
+    const fileBtn = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      (el) => el.textContent && el.textContent.includes('文件'),
+    );
+    expect(fileBtn?.getAttribute('aria-current')).toBe('page');
+    expect(fileBtn?.className).toContain('sidebar-primary-item--active');
+  });
+
   it('opens a session from the keyboard', () => {
     const onSelect = vi.fn();
     const { querySelector } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={onSelect} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);

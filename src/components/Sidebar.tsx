@@ -23,11 +23,13 @@ interface SidebarProps {
   onProjectRename: (id: string, name: string) => void | Promise<void>;
   onProjectFileUpdate?: (id: string, selection: ProjectFileSelection) => Project | Promise<Project>;
   onNewSessionInProject: (projectId: string) => void;
-  activeSection?: 'home' | 'projects' | 'tasks' | 'memory';
+  activeSection?: 'home' | 'projects' | 'tasks' | 'memory' | 'files';
   onNavigateHome?: () => void;
   onNavigateProjects?: () => void;
   onNavigateTasks?: () => void;
   onNavigateMemory?: () => void;
+  onNavigateFiles?: () => void;
+  /** @deprecated Files are browsed from the files section; the full-screen modal entry lives in SidebarFileView. */
   onOpenFiles?: () => void;
   onOpenSettings?: () => void;
 }
@@ -66,7 +68,7 @@ export function Sidebar({
   onSelect, onNew, onDelete, onRename, onExport,
   onProjectCreate, onProjectDelete, onProjectRename, onProjectFileUpdate, onNewSessionInProject,
   activeSection = 'tasks', onNavigateHome, onNavigateProjects, onNavigateTasks, onNavigateMemory,
-  onOpenFiles, onOpenSettings,
+  onNavigateFiles, onOpenSettings,
 }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -453,7 +455,12 @@ export function Sidebar({
           <Icon name="database" size={16} />
           <span>记忆</span>
         </button>
-        <button className="sidebar-primary-item" type="button" onClick={onOpenFiles}>
+        <button
+          className={`sidebar-primary-item${activeSection === 'files' ? ' sidebar-primary-item--active' : ''}`}
+          type="button"
+          aria-current={activeSection === 'files' ? 'page' : undefined}
+          onClick={onNavigateFiles}
+        >
           <Icon name="file-tree" size={16} />
           <span>文件</span>
         </button>

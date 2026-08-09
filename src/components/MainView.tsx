@@ -19,6 +19,7 @@ import { TabBar, type TabBarTab } from './chat/TabBar';
 import { HomeDashboard } from './HomeDashboard';
 import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
+import { SidebarFileView } from './files/SidebarFileView';
 import { CommandPalette } from './CommandPalette';
 import { useShortcuts } from '../hooks/useShortcuts';
 
@@ -89,7 +90,7 @@ export function MainView(props: MainViewProps) {
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks' | 'memory'>('home');
+  const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks' | 'memory' | 'files'>('home');
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -548,6 +549,7 @@ export function MainView(props: MainViewProps) {
             onNavigateProjects={() => setActiveSection('projects')}
             onNavigateTasks={() => setActiveSection('tasks')}
             onNavigateMemory={() => setActiveSection('memory')}
+            onNavigateFiles={() => setActiveSection('files')}
             onOpenFiles={() => activeWorkDir ? setFileTreeOpen(true) : setCreateProjectOpen(true)}
             onOpenSettings={() => onOpenSettings()}
             onSelect={handleSelectSession}
@@ -648,6 +650,8 @@ export function MainView(props: MainViewProps) {
             </>
           ) : activeSection === 'memory' ? (
             <MemoryCenter />
+          ) : activeSection === 'files' ? (
+            <SidebarFileView workDir={activeWorkDir ?? null} onOpenFullScreen={() => setFileTreeOpen(true)} />
           ) : (
             <HomeDashboard
               section={activeSection}

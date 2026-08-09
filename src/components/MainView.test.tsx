@@ -374,6 +374,41 @@ describe('MainView memory context', () => {
   });
 });
 
+describe('MainView files section', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  it('renders the sidebar file view when navigating to the files section', async () => {
+    const { querySelector, querySelectorAll } = await renderMainView();
+    const fileNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      (el) => el.textContent && el.textContent.includes('文件'),
+    );
+    expect(fileNav?.getAttribute('aria-current')).toBeNull();
+    fireClick(fileNav);
+    expect(querySelector('.sidebar-file-view')).not.toBeNull();
+    const fileNavAfter = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      (el) => el.textContent && el.textContent.includes('文件'),
+    );
+    expect(fileNavAfter?.getAttribute('aria-current')).toBe('page');
+  });
+});
+
 describe('MainView context stats', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
