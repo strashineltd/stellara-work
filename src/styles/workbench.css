@@ -5069,7 +5069,9 @@ html[data-platform='darwin'] .settings-window__titlebar {
 /* File hover preview */
 .file-hover-preview { position: fixed; z-index: var(--z-modal); width: 480px; max-width: calc(100vw - 16px); max-height: 320px; display: flex; flex-direction: column; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-content); box-shadow: var(--shadow-lg); overflow: hidden; }
 .file-hover-preview__head { display: flex; align-items: center; gap: var(--space-2); min-height: 34px; padding: 0 var(--space-3); border-bottom: 1px solid var(--color-border); }
-.file-hover-preview__path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-soft); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.file-hover-preview__path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; background: none; text-align: left; color: var(--color-text-soft); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.file-hover-preview__path:hover { color: var(--color-text); }
+.file-hover-preview__path--copied, .file-hover-preview__path--copied:hover { color: var(--color-success); }
 .file-hover-preview__open { flex: 0 0 auto; }
 .file-hover-preview__body { flex: 1; min-height: 0; margin: 0; padding: var(--space-3); overflow: auto; color: var(--color-text); background: var(--color-bg-code); font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.6; white-space: pre-wrap; }
 .file-hover-preview__error { padding: var(--space-3); color: var(--color-text-faint); font-size: var(--fs-sm); }
