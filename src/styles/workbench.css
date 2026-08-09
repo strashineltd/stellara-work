@@ -3116,6 +3116,85 @@ html[data-platform='darwin'] .sidebar-toggle {
 }
 
 /* --------------------------------------------------------------------------
+   Sidebar file view (tree on top, preview below)
+   -------------------------------------------------------------------------- */
+
+.sidebar-file-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sidebar-file-view__toolbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebar-file-view__tree {
+  flex: 0 0 55%;
+  min-height: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebar-file-view__preview {
+  display: flex;
+  flex: 1 1 45%;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-file-view__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebar-file-view__preview-path {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-file-view__preview-truncated {
+  flex: none;
+  color: var(--color-text-faint);
+  font-size: var(--fs-xxs);
+}
+
+.sidebar-file-view__preview-content {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  color: var(--color-text);
+  background: var(--color-bg-code);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.sidebar-file-view__empty {
+  color: var(--color-text-faint);
+}
+
+/* --------------------------------------------------------------------------
    Modals and settings
    -------------------------------------------------------------------------- */
 
