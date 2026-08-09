@@ -18,6 +18,7 @@ import type {
   FsNode,
   Memory,
   MenuAction,
+  McpServerConfig,
 } from '../shared/ipc';
 
 /**
@@ -161,6 +162,13 @@ const api: ElectronAPI = {
   },
   skills: {
     list: (workDir: string) => ipcRenderer.invoke('skills:list', workDir),
+  },
+  mcp: {
+    list: () => ipcRenderer.invoke('mcp:list'),
+    add: (cfg: McpServerConfig) => ipcRenderer.invoke('mcp:add', cfg),
+    update: (id: string, patch: Partial<McpServerConfig>) => ipcRenderer.invoke('mcp:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('mcp:remove', id),
+    test: (cfg: McpServerConfig) => ipcRenderer.invoke('mcp:test', cfg),
   },
   fs: {
     listTree: (cwd: string, maxDepth?: number): Promise<FsNode> =>

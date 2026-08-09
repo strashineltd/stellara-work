@@ -607,6 +607,13 @@ export interface ElectronAPI {
   skills: {
     list: (workDir: string) => Promise<SkillDef[]>;
   };
+  mcp: {
+    list: () => Promise<McpServerConfig[]>;
+    add: (cfg: McpServerConfig) => Promise<void>;
+    update: (id: string, patch: Partial<McpServerConfig>) => Promise<void>;
+    remove: (id: string) => Promise<void>;
+    test: (cfg: McpServerConfig) => Promise<{ ok: boolean; toolCount?: number; error?: string }>;
+  };
   memory: {
     search: (query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => Promise<Memory[]>;
     list: (options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) => Promise<Memory[]>;

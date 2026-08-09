@@ -156,7 +156,36 @@ export function installDevPreviewApi(): void {
       get: async () => ({ theme: 'light', workspaceMode: 'sidebar' }), update: async () => {}, clearAllData: async () => {}, resetSelective: async () => {},
       openDataDir: async () => {}, openLogFile: async () => {}, collectDiagnostics: async () => emptyDiagnostics(),
     },
-    skills: { list: async () => [] },
+    skills: {
+      list: async () => [
+        { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md' },
+        { name: 'mcp-setup', description: '配置 MCP 服务器的 JSON 模板', prompt: 'JSON 格式技能内容', format: 'json' },
+        { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…' },
+      ],
+    },
+    mcp: {
+      list: async () => [
+        {
+          id: 'filesystem',
+          name: '本地文件系统',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', previewWorkDir],
+          enabled: true,
+        },
+        {
+          id: 'github',
+          name: 'GitHub API',
+          transport: 'http',
+          url: 'https://mcp.example.com/github',
+          enabled: false,
+        },
+      ],
+      add: async () => {},
+      update: async () => {},
+      remove: async () => {},
+      test: async () => ({ ok: true, toolCount: 3 }),
+    },
     memory: {
       search: async (): Promise<Memory[]> => [], list: async (): Promise<Memory[]> => [],
       save: async (memory) => ({ ...memory, id: `memory-${Date.now()}`, accessCount: 0, createdAt: Date.now(), updatedAt: Date.now() }),

@@ -12,7 +12,7 @@ export const SETTINGS_TABS = [
   { id: 'models', label: '模型' },
   { id: 'sessions', label: '会话' },
   { id: 'app', label: '应用' },
-  { id: 'skills', label: '技能' },
+  { id: 'skills', label: '技能与 MCP' },
   { id: 'shortcuts', label: '快捷键' },
 ] as const;
 

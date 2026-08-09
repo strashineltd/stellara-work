@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SkillDef } from '../../../shared/ipc';
 import { Icon } from '../Icon';
+import { SettingsMcpSection } from './SettingsMcpSection';
 
 interface SettingsSkillsPanelProps {
   /** 设置变更后通知 SettingsWindow（跨窗口同步） */
@@ -9,17 +10,27 @@ interface SettingsSkillsPanelProps {
   refreshKey?: number;
 }
 
+/** 「复制模板」按钮写入剪贴板的新技能文件模板（markdown frontmatter） */
+export const SKILL_TEMPLATE = `---
+name: my-skill
+description: 描述
+---
+
+技能内容`;
+
 /**
- * 设置窗口「技能」面板：workDir 从 models.list() 的 configured.workDir 获取，
- * 展示 skills.list() 返回的可用技能（图标块 + 名称 + 描述，可展开 prompt），
- * 以及技能目录（路径 + 打开目录按钮 → fs.openPath）。
+ * 设置窗口「技能与 MCP」面板：workDir 从 models.list() 的 configured.workDir 获取，
+ * 展示 skills.list() 返回的可用技能（搜索过滤 + 格式徽章 + 可展开 prompt + 复制模板引导），
+ * 以及技能目录；下方渲染 MCP 服务器管理区块（SettingsMcpSection）。
  */
-export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps) {
+export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkillsPanelProps) {
   const [workDir, setWorkDir] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillDef[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [templateCopied, setTemplateCopied] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -53,12 +64,30 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
     void window.electronAPI.fs.openPath(workDir, `${workDir}/skills`);
   }
 
+  async function copyTemplate() {
+    try {
+      await navigator.clipboard.writeText(SKILL_TEMPLATE);
+      setTemplateCopied(true);
+      setTimeout(() => setTemplateCopied(false), 2000);
+    } catch {
+      setError('复制模板失败：剪贴板不可用');
+    }
+  }
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? skills.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q),
+      )
+    : skills;
+
   return (
     <div className="settings-panel-root">
       <div className="settings-panel-head">
         <div>
-          <h2>技能</h2>
-          <div className="sub">项目 skills/ 目录中的自定义技能</div>
+          <h2>技能与 MCP</h2>
+          <div className="sub">项目技能与 MCP 服务器</div>
         </div>
       </div>
 
@@ -81,18 +110,36 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
             <div className="settings-section__title">
               可用技能 <span className="count">{skillsLoading ? '加载中…' : skills.length}</span>
             </div>
+            <div className="settings-skill-search">
+              <Icon name="search" size={14} />
+              <input
+                type="text"
+                placeholder="搜索技能…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="搜索技能"
+              />
+            </div>
             <div className="settings-group">
               {skills.length === 0 && !skillsLoading && (
                 <div className="settings-item">
                   <div className="settings-item__grow">
                     <div className="settings-item__hint">
-                      当前 workDir 下没有 skill 文件。在 <code>{`${workDir}/skills/`}</code> 里创建 <code>name.json</code>，
-                      必须含 <code>name</code> / <code>description</code> / <code>prompt</code> 字段。
+                      当前 workDir 下没有 skill 文件。在 <code>{`${workDir}/skills/`}</code> 里创建{' '}
+                      <code>name.md</code>（frontmatter 声明 <code>name</code> /{' '}
+                      <code>description</code>，正文为 prompt）或 <code>name.json</code>。
                     </div>
                   </div>
                 </div>
               )}
-              {skills.map((s) => {
+              {filtered.length === 0 && skills.length > 0 && (
+                <div className="settings-item">
+                  <div className="settings-item__grow">
+                    <div className="settings-item__hint">没有匹配「{query}」的技能。</div>
+                  </div>
+                </div>
+              )}
+              {filtered.map((s) => {
                 const isOpen = expanded.has(s.name);
                 return (
                   <div
@@ -105,7 +152,14 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
                       <Icon name="tool" size={15} />
                     </span>
                     <div className="settings-item__grow">
-                      <div className="settings-item__title">{s.name}</div>
+                      <div className="settings-item__top">
+                        <div className="settings-item__title">{s.name}</div>
+                        {s.format && (
+                          <span className={`settings-skill-badge settings-skill-badge--${s.format}`}>
+                            {s.format}
+                          </span>
+                        )}
+                      </div>
                       <div className="settings-item__hint">{s.description}</div>
                       {isOpen && <pre className="settings-skill-prompt">{s.prompt}</pre>}
                     </div>
@@ -125,13 +179,36 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
           </div>
 
           <div className="settings-section">
+            <div className="settings-section__title">新建技能</div>
+            <div className="settings-group">
+              <div className="settings-item">
+                <div className="settings-item__grow">
+                  <div className="settings-item__hint">
+                    在 <code>{`${workDir}/skills/`}</code> 里创建 <code>.md</code> 文件，
+                    文件头用 frontmatter 声明 <code>name</code> 与 <code>description</code>，
+                    正文为技能内容（也可用 <code>.json</code> 格式）。
+                  </div>
+                </div>
+                <button
+                  className="btn btn-secondary settings-skill-template-copy"
+                  onClick={() => void copyTemplate()}
+                  type="button"
+                  title="复制 markdown 模板到剪贴板"
+                >
+                  {templateCopied ? '已复制' : '复制模板'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="settings-section">
             <div className="settings-section__title">技能目录</div>
             <div className="settings-group">
               <div className="settings-item">
-            <div className="settings-item__grow">
-              <div className="settings-item__label">skills 目录</div>
-              <div className="settings-item__hint settings-skill-path">{`${workDir}/skills`}</div>
-            </div>
+                <div className="settings-item__grow">
+                  <div className="settings-item__label">skills 目录</div>
+                  <div className="settings-item__hint settings-skill-path">{`${workDir}/skills`}</div>
+                </div>
                 <button
                   className="btn btn-secondary"
                   onClick={openSkillsDir}
@@ -145,6 +222,8 @@ export function SettingsSkillsPanel({ refreshKey = 0 }: SettingsSkillsPanelProps
           </div>
         </>
       )}
+
+      <SettingsMcpSection refreshKey={refreshKey} onChanged={onChanged} />
     </div>
   );
 }

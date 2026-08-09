@@ -24,6 +24,7 @@ import type {
   AppSettings,
   ProjectFileSelection,
   Memory,
+  McpServerConfig,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -665,6 +666,35 @@ function registerIpcHandlers(): void {
     await assertWorkDirAllowed(workDir);
     const { loadSkills } = await import('./agent/skills');
     return loadSkills(workDir);
+  });
+
+  // MCP 服务器管理
+  ipcMain.handle('mcp:list', async (): Promise<McpServerConfig[]> => {
+    const { mcpManager } = await import('./mcp/mcp-manager');
+    return mcpManager.listServers();
+  });
+
+  ipcMain.handle('mcp:add', async (_e, cfg: McpServerConfig) => {
+    const { mcpManager } = await import('./mcp/mcp-manager');
+    await mcpManager.addServer(cfg);
+    broadcastSettingsChanged();
+  });
+
+  ipcMain.handle('mcp:update', async (_e, id: string, patch: Partial<McpServerConfig>) => {
+    const { mcpManager } = await import('./mcp/mcp-manager');
+    await mcpManager.updateServer(id, patch);
+    broadcastSettingsChanged();
+  });
+
+  ipcMain.handle('mcp:remove', async (_e, id: string) => {
+    const { mcpManager } = await import('./mcp/mcp-manager');
+    await mcpManager.removeServer(id);
+    broadcastSettingsChanged();
+  });
+
+  ipcMain.handle('mcp:test', async (_e, cfg: McpServerConfig) => {
+    const { mcpManager } = await import('./mcp/mcp-manager');
+    return mcpManager.testConnection(cfg);
   });
 
   // Memory OS
