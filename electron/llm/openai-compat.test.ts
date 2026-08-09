@@ -227,6 +227,57 @@ describe('OpenAICompatClient streaming', () => {
     const errorEvents = events.filter((e) => e.type === 'error');
     expect(errorEvents).toHaveLength(0);
   });
+
+  it('extracts usage from the stream and yields a usage event', async () => {
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"你好"}}]}\n\n`,
+      `data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":45,"total_tokens":165}}\n\n`,
+      `data: [DONE]\n\n`,
+    ];
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(makeSseResponse(chunks));
+
+    const client = new OpenAICompatClient(config);
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of client.chat({
+      model: config.model,
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: true,
+    })) {
+      events.push(ev);
+    }
+    const usage = events.find((e) => e.type === 'usage');
+    expect(usage).toBeDefined();
+    if (usage?.type === 'usage') {
+      expect(usage.usage?.promptTokens).toBe(120);
+      expect(usage.usage?.completionTokens).toBe(45);
+      expect(usage.usage?.estimated).toBe(false);
+    }
+  });
+
+  it('estimates usage when the stream has no usage chunk', async () => {
+    const chunks = [
+      `data: {"choices":[{"delta":{"content":"hi"}}]}\n\n`,
+      `data: [DONE]\n\n`,
+    ];
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(makeSseResponse(chunks));
+
+    const client = new OpenAICompatClient(config);
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of client.chat({
+      model: config.model,
+      messages: [{ role: 'user', content: 'hello world' }],
+      stream: true,
+    })) {
+      events.push(ev);
+    }
+    const usage = events.find((e) => e.type === 'usage');
+    expect(usage).toBeDefined();
+    if (usage?.type === 'usage') {
+      expect(usage.usage?.estimated).toBe(true);
+      expect(usage.usage?.promptTokens).toBeGreaterThan(0);
+      expect(usage.usage?.completionTokens).toBeGreaterThan(0);
+    }
+  });
 });
 
 /**

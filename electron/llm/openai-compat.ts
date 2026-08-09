@@ -128,16 +128,34 @@ export class OpenAICompatClient {
       // 本地 buffer：SSE onEvent 回调里塞进来，主循环在每次 feed 之后 drain 出来 yield
       const pending: ChatStreamEvent[] = [];
       const toolCallsBuffer = new Map<number, ToolCall>(); // index -> partial tool call
+      let hadUsage = false; // provider 是否上报过 usage chunk
+      let streamedContent = ''; // 流式 content 累积量（估算 completion tokens 用）
       const parser = createParser({
         onEvent: (event: EventSourceMessage) => {
           if (event.data === '[DONE]') return;
           try {
             const json = JSON.parse(event.data);
+
+            // usage chunk（流结束时某些 provider 单独发；无 delta，必须先于
+            // 下面的 delta 检查捕获）
+            if (json.usage) {
+              hadUsage = true;
+              pending.push({
+                type: 'usage',
+                usage: {
+                  promptTokens: json.usage.prompt_tokens ?? 0,
+                  completionTokens: json.usage.completion_tokens ?? 0,
+                  estimated: false,
+                },
+              });
+            }
+
             const delta = json.choices?.[0]?.delta;
             if (!delta) return;
 
             // content 增量
             if (delta.content) {
+              streamedContent += delta.content;
               pending.push({ type: 'content', content: delta.content });
             }
 
@@ -220,6 +238,22 @@ export class OpenAICompatClient {
           errorMeta: { kind: 'idle_timeout', hint: '流式响应空闲超时（120s 没新数据）。可能是 provider 丢流或网络不稳。', action: 'retry', retryable: true },
         };
         return;
+      }
+
+      // 无 usage chunk 时本地估算（避免反向依赖 agent/compress，估算内联）。
+      // 字符数/4 的粗略近似：中文约 1 字 ≈ 1-2 token，英文约 4 字符 ≈ 1 token。
+      if (!hadUsage) {
+        const text = request.messages.map((m) => m.content ?? '').join('\n');
+        const promptEstimate = Math.ceil(text.length / 4);
+        const completionEstimate = Math.ceil(streamedContent.length / 4);
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens: Math.max(1, promptEstimate),
+            completionTokens: Math.max(1, completionEstimate),
+            estimated: true,
+          },
+        };
       }
 
       // 输出累积的 tool calls

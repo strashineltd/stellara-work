@@ -103,6 +103,13 @@ export interface PlanApprovalRequest {
   plan: string[];
 }
 
+/** API usage 信息（estimated=true 表示来自本地估算而非 provider 上报） */
+export interface UsageInfo {
+  promptTokens: number;
+  completionTokens: number;
+  estimated: boolean;
+}
+
 export interface ChatStreamEvent {
   type:
     | 'content'
@@ -118,7 +125,8 @@ export interface ChatStreamEvent {
     | 'summary'
     | 'verify'
     | 'task_complete'
-    | 'memory_context';
+    | 'memory_context'
+    | 'usage';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };
@@ -142,6 +150,12 @@ export interface ChatStreamEvent {
   tokensAfter?: number;
   compressedCount?: number;
   summary?: string;
+  /** 本次 LLM 调用的 token 用量（usage 事件） */
+  usage?: UsageInfo;
+  /** 会话累计用量（由调用方汇总） */
+  totals?: { promptTokens: number; completionTokens: number };
+  /** 会话内各工具调用次数（由调用方汇总） */
+  toolCounts?: Record<string, number>;
 }
 
 /** 错误类型 — 用于分类 + 引导文案 */
