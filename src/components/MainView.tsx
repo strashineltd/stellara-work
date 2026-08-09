@@ -341,7 +341,14 @@ export function MainView(props: MainViewProps) {
           });
         }
         if (ev.type === 'summary') {
-          setContextStats((prev) => (prev ? { ...prev, compressedCount: prev.compressedCount + 1 } : prev));
+          setContextStats((prev) => ({
+            promptTokens: prev?.promptTokens ?? 0,
+            completionTokens: prev?.completionTokens ?? 0,
+            toolCounts: prev?.toolCounts ?? {},
+            recentCalls: prev?.recentCalls ?? [],
+            compressedCount: (prev?.compressedCount ?? 0) + 1,
+            estimated: prev?.estimated,
+          }));
         }
         if (ev.type === 'task_complete') {
           setEntries((prev) => {

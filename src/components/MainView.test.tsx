@@ -437,6 +437,27 @@ describe('MainView context stats', () => {
     expect(container.textContent).toContain('已压缩 1 条消息');
   });
 
+  it('keeps compressed count when the summary event arrives before any usage event', async () => {
+    const events = (async function* () {
+      yield { type: 'summary', summary: '压缩摘要' };
+      yield {
+        type: 'usage',
+        usage: { promptTokens: 1000, completionTokens: 100, estimated: true },
+        totals: { promptTokens: 3000, completionTokens: 100 },
+        toolCounts: { read_file: 1 },
+      };
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's1', events });
+    const { container, querySelector } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj', contextWindow: 128000 },
+    });
+    await typeAndSend(querySelector, '写个测试');
+    expect(container.textContent).toContain('已压缩 1 条消息');
+    expect(container.textContent).toContain('3.0K');
+  });
+
   it('shows the empty hint before any usage data exists', async () => {
     const { container } = await renderMainView({
       workspaceOpen: true,
