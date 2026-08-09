@@ -105,6 +105,56 @@ describe('ChatStream', () => {
     expect(html).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
   });
 
+  it('wraps report file paths in hoverable-path when workDir provided', () => {
+    const { querySelectorAll } = render(
+      <ChatStream
+        entries={[{
+          kind: 'report',
+          summary: '完成',
+          files: [{ path: 'src/a.ts', kind: 'edit' }],
+          commands: [],
+        }]}
+        busy={false}
+        streamId={null}
+        chatRef={null as any}
+        lastUserForRetry={null}
+        modelMissing={false}
+        onOpenSettings={vi.fn()}
+        onRetry={vi.fn()}
+        onAbort={vi.fn()}
+        onApprove={vi.fn()}
+        pendingApproval={null}
+        workDir="/w"
+      />,
+    );
+    expect(querySelectorAll('.report-file-path .hoverable-path').length).toBe(1);
+  });
+
+  it('renders report file paths plain without workDir', () => {
+    const { querySelectorAll } = render(
+      <ChatStream
+        entries={[{
+          kind: 'report',
+          summary: '完成',
+          files: [{ path: 'src/a.ts', kind: 'edit' }],
+          commands: [],
+        }]}
+        busy={false}
+        streamId={null}
+        chatRef={null as any}
+        lastUserForRetry={null}
+        modelMissing={false}
+        onOpenSettings={vi.fn()}
+        onRetry={vi.fn()}
+        onAbort={vi.fn()}
+        onApprove={vi.fn()}
+        pendingApproval={null}
+      />,
+    );
+    expect(querySelectorAll('.report-file-path').length).toBe(1);
+    expect(querySelectorAll('.report-file-path .hoverable-path').length).toBe(0);
+  });
+
   it('renders a plan entry with approve buttons when approval pending', () => {
     const onApprovePlan = vi.fn();
     const { getByText, querySelector } = render(
