@@ -154,7 +154,7 @@ describe('SettingsModelsPanel', () => {
   it('opens the add form, auto-fills preset baseUrl, and saves via configure', async () => {
     const { container } = await render(<SettingsModelsPanel onChanged={vi.fn()} />);
 
-    await fireClick(container.querySelector('.settings-add-trigger button'));
+    await fireClick(container.querySelector('.settings-panel-head__action'));
     expect(container.querySelector('.settings-add-form')).toBeTruthy();
 
     const cards = container.querySelectorAll('.model-card');

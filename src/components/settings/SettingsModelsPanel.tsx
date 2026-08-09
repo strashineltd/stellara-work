@@ -158,6 +158,15 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
           <h2>模型</h2>
           <div className="sub">管理 API 提供商与模型连接</div>
         </div>
+        <button
+          className="btn btn-primary settings-panel-head__action"
+          onClick={() => setShowAdd((v) => !v)}
+          aria-expanded={showAdd}
+          type="button"
+        >
+          <Icon name={showAdd ? 'chevron-down' : 'plus'} size={13} />
+          <span>{showAdd ? '收起' : '添加模型'}</span>
+        </button>
       </div>
 
       {error && (
@@ -167,131 +176,9 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
         </div>
       )}
 
-      <div className="settings-section">
-        <div className="settings-section__title">活跃模型</div>
-        <div className="active-model">
-          <div className="active-model__logo" aria-hidden="true">{active ? active.label.slice(0, 2) : '—'}</div>
-          <div className="settings-item__grow">
-            <div className="active-model__name">{active?.label ?? '未设置'}</div>
-            <div className="active-model__meta">
-              {active
-                ? `${active.baseUrl} · ${formatContextWindow(active.contextWindow)} 上下文 · key ${active.hasKey ? '已配置' : '未配置'}`
-                : '在下方列表中添加并设为活跃'}
-            </div>
-          </div>
-          {models.length > 0 && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => setShowSwitch((v) => !v)}
-              aria-expanded={showSwitch}
-              type="button"
-            >
-              {showSwitch ? '收起' : '切换'}
-            </button>
-          )}
-        </div>
-        {showSwitch && (
-          <div className="switch-list">
-            {models.map((m) => (
-              <button
-                key={m.id}
-                className="switch-row"
-                role="radio"
-                aria-checked={m.isActive}
-                onClick={() => {
-                  setShowSwitch(false);
-                  void handleSetActive(m.id);
-                }}
-                type="button"
-              >
-                <span className="active-model__logo" aria-hidden="true">{m.label.slice(0, 2)}</span>
-                <span className="settings-item__grow">
-                  <span className="nm">{m.label}</span>
-                  <span className="hint">{m.baseUrl} · key {m.hasKey ? '已配置' : '未配置'}</span>
-                </span>
-                {m.isActive && <span className="settings-badge settings-badge--active">活跃</span>}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-section__title">模型列表 <span className="count">{models.length}</span></div>
-        <div className="settings-group">
-          {models.length === 0 && <p className="empty-hint">还没有 model。点下方「添加模型」按钮加一个</p>}
-          {models.map((m) => (
-            <div key={m.id} className="settings-item provider-row">
-              <div className="settings-item__grow">
-                <div className="settings-item__top">
-                  <span className="settings-item__title">{m.label}</span>
-                  {m.isActive && <span className="settings-badge settings-badge--active">活跃</span>}
-                  <span className={`settings-badge ${m.hasKey ? 'settings-badge--ok' : 'settings-badge--warn'}`}>
-                    {m.hasKey ? '已连接' : '无 Key'}
-                  </span>
-                </div>
-                <div className="settings-item__base">
-                  {m.baseUrl} · model: {m.model} · {formatContextWindow(m.contextWindow)}
-                </div>
-              </div>
-              <div className="settings-item__ops">
-                {editingKey === m.id ? (
-                  <>
-                    <input
-                      type="password"
-                      placeholder="新 API key"
-                      aria-label={`更新 ${m.label} 的 API key`}
-                      value={editingKeyValue}
-                      onChange={(e) => setEditingKeyValue(e.target.value)}
-                      autoComplete="off"
-                    />
-                    <button className="btn btn-primary" onClick={() => void handleUpdateKey(m.id)} type="button">保存</button>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => { setEditingKey(null); setEditingKeyValue(''); }}
-                      type="button"
-                    >
-                      取消
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="icon-btn"
-                      title="编辑 Key"
-                      aria-label={`编辑 ${m.label} 的 API key`}
-                      onClick={() => { setEditingKey(m.id); setEditingKeyValue(''); }}
-                      type="button"
-                    >
-                      <Icon name="edit" />
-                    </button>
-                    <button
-                      className="icon-btn danger"
-                      title="删除"
-                      aria-label={`删除 ${m.label}`}
-                      onClick={() => void handleRemove(m.id)}
-                      type="button"
-                    >
-                      <Icon name="x" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="settings-add-trigger">
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowAdd((v) => !v)}
-            aria-expanded={showAdd}
-            type="button"
-          >
-            <Icon name={showAdd ? 'chevron-down' : 'plus'} size={13} />
-            <span>{showAdd ? '收起' : '添加模型'}</span>
-          </button>
-        </div>
-        {showAdd && (
+      {showAdd && (
+        <div className="settings-section">
+          <div className="settings-section__title">添加模型</div>
           <div className="settings-add-form">
             <div className="form-row">
               <label>选择预设</label>
@@ -376,7 +263,122 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
               <button className="btn btn-secondary" onClick={resetAddForm} type="button">取消</button>
             </div>
           </div>
+        </div>
+      )}
+
+      <div className="settings-section">
+        <div className="settings-section__title">活跃模型</div>
+        <div className="active-model">
+          <div className="active-model__logo" aria-hidden="true">{active ? active.label.slice(0, 2) : '—'}</div>
+          <div className="settings-item__grow">
+            <div className="active-model__name">{active?.label ?? '未设置'}</div>
+            <div className="active-model__meta">
+              {active
+                ? `${active.baseUrl} · ${formatContextWindow(active.contextWindow)} 上下文 · key ${active.hasKey ? '已配置' : '未配置'}`
+                : '在下方列表中添加并设为活跃'}
+            </div>
+          </div>
+          {models.length > 0 && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowSwitch((v) => !v)}
+              aria-expanded={showSwitch}
+              type="button"
+            >
+              {showSwitch ? '收起' : '切换'}
+            </button>
+          )}
+        </div>
+        {showSwitch && (
+          <div className="switch-list">
+            {models.map((m) => (
+              <button
+                key={m.id}
+                className="switch-row"
+                role="radio"
+                aria-checked={m.isActive}
+                onClick={() => {
+                  setShowSwitch(false);
+                  void handleSetActive(m.id);
+                }}
+                type="button"
+              >
+                <span className="active-model__logo" aria-hidden="true">{m.label.slice(0, 2)}</span>
+                <span className="settings-item__grow">
+                  <span className="nm">{m.label}</span>
+                  <span className="hint">{m.baseUrl} · key {m.hasKey ? '已配置' : '未配置'}</span>
+                </span>
+                {m.isActive && <span className="settings-badge settings-badge--active">活跃</span>}
+              </button>
+            ))}
+          </div>
         )}
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section__title">模型列表 <span className="count">{models.length}</span></div>
+        <div className="settings-group">
+          {models.length === 0 && <p className="empty-hint">还没有 model。点右上角「添加模型」按钮加一个</p>}
+          {models.map((m) => (
+            <div key={m.id} className="settings-item provider-row">
+              <div className="settings-item__grow">
+                <div className="settings-item__top">
+                  <span className="settings-item__title">{m.label}</span>
+                  {m.isActive && <span className="settings-badge settings-badge--active">活跃</span>}
+                  <span className={`settings-badge ${m.hasKey ? 'settings-badge--ok' : 'settings-badge--warn'}`}>
+                    {m.hasKey ? '已连接' : '无 Key'}
+                  </span>
+                </div>
+                <div className="settings-item__base">
+                  {m.baseUrl} · model: {m.model} · {formatContextWindow(m.contextWindow)}
+                </div>
+              </div>
+              <div className="settings-item__ops">
+                {editingKey === m.id ? (
+                  <>
+                    <input
+                      type="password"
+                      placeholder="新 API key"
+                      aria-label={`更新 ${m.label} 的 API key`}
+                      value={editingKeyValue}
+                      onChange={(e) => setEditingKeyValue(e.target.value)}
+                      autoComplete="off"
+                    />
+                    <button className="btn btn-primary" onClick={() => void handleUpdateKey(m.id)} type="button">保存</button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => { setEditingKey(null); setEditingKeyValue(''); }}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="icon-btn"
+                      title="编辑 Key"
+                      aria-label={`编辑 ${m.label} 的 API key`}
+                      onClick={() => { setEditingKey(m.id); setEditingKeyValue(''); }}
+                      type="button"
+                    >
+                      <Icon name="edit" />
+                    </button>
+                    <button
+                      className="icon-btn danger"
+                      title="删除"
+                      aria-label={`删除 ${m.label}`}
+                      onClick={() => void handleRemove(m.id)}
+                      type="button"
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="settings-section">
