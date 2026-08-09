@@ -273,9 +273,11 @@ describe('McpManager', () => {
   });
 
   describe('testConnection', () => {
-    it('returns ok with toolCount on success and closes client', async () => {
+    it('returns ok with toolCount and tools on success and closes client', async () => {
       const res = await mcpManager.testConnection(stdioCfg);
-      expect(res).toEqual({ ok: true, toolCount: 2 });
+      expect(res.ok).toBe(true);
+      expect(res.toolCount).toBe(2);
+      expect(res.tools).toEqual([READ_TOOL, WRITE_TOOL]);
       const client = mockClient.mock.results[0]?.value;
       expect(client.close).toHaveBeenCalled();
     });

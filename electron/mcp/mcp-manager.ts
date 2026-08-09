@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { loadConfig, saveConfig } from '../config/config-v2';
-import type { McpServerConfig, McpToolInfo, OpenAITool, ToolResult } from '../../shared/ipc';
+import type { McpServerConfig, McpTestResult, McpToolInfo, OpenAITool, ToolResult } from '../../shared/ipc';
 import { connectMcpServer, callMcpTool } from './mcp-client';
 import { mcpToolToOpenAITool, parseMcpToolName } from './mcp-tools';
 
@@ -67,11 +67,11 @@ export class McpManager {
     this.invalidateCache();
   }
 
-  async testConnection(cfg: McpServerConfig): Promise<{ ok: boolean; toolCount?: number; error?: string }> {
+  async testConnection(cfg: McpServerConfig): Promise<McpTestResult> {
     try {
       const { client, tools } = await connectMcpServer(cfg);
       await client.close();
-      return { ok: true, toolCount: tools.length };
+      return { ok: true, toolCount: tools.length, tools };
     } catch (e) {
       return { ok: false, error: errorMessage(e) };
     }

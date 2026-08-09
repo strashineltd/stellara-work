@@ -24,13 +24,13 @@ const CONFIGURED: ConfiguredModel = {
 function installApi(configured: ConfiguredModel | null) {
   const mocks = {
     list: vi.fn().mockResolvedValue({ presets: [], configured }),
-    skillsList: vi.fn().mockResolvedValue(SKILLS),
+    skillsList: vi.fn().mockResolvedValue({ items: SKILLS, errors: [] }),
     openPath: vi.fn().mockResolvedValue(true),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
       models: { list: mocks.list },
-      skills: { list: mocks.skillsList },
+      skills: { list: mocks.skillsList, listDetailed: mocks.skillsList },
       fs: { openPath: mocks.openPath },
     } as unknown as ElectronAPI,
     writable: true,

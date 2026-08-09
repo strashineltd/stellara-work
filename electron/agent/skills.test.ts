@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { loadSkills, formatSkillsForPrompt } from './skills';
+import { loadSkills, loadSkillsWithErrors, formatSkillsForPrompt } from './skills';
 
 let tmpDir: string;
 
@@ -103,6 +103,53 @@ describe('loadSkills', () => {
     const skills = await loadSkills(tmpDir);
     expect(skills).toHaveLength(2);
     expect(skills.map((s) => s.name).sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('loadSkillsWithErrors', () => {
+  it('目录不存在 → 空 skills + 空 errors', async () => {
+    const res = await loadSkillsWithErrors(path.join(tmpDir, 'no-skills'));
+    expect(res).toEqual({ skills: [], errors: [] });
+  });
+
+  it('区分字段的格式错误列表（json）', async () => {
+    const skillsDir = path.join(tmpDir, 'skills');
+    await fs.mkdir(skillsDir);
+    await fs.writeFile(path.join(skillsDir, 'noname.json'), JSON.stringify({ description: 'x', prompt: 'y' }));
+    await fs.writeFile(path.join(skillsDir, 'nodesc.json'), JSON.stringify({ name: 'x', prompt: 'y' }));
+    await fs.writeFile(path.join(skillsDir, 'noprompt.json'), JSON.stringify({ name: 'x', description: 'y' }));
+    await fs.writeFile(path.join(skillsDir, 'broken.json'), 'not json{');
+    await fs.writeFile(path.join(skillsDir, 'good.json'), JSON.stringify({ name: 'good', description: 'x', prompt: 'y' }));
+    const res = await loadSkillsWithErrors(tmpDir);
+    expect(res.skills.map((s) => s.name)).toEqual(['good']);
+    expect(res.errors).toEqual([
+      { file: 'broken.json', reason: '格式解析失败' },
+      { file: 'nodesc.json', reason: '缺少 description' },
+      { file: 'noname.json', reason: '缺少 name' },
+      { file: 'noprompt.json', reason: '缺少 prompt' },
+    ]);
+  });
+
+  it('区分字段的格式错误列表（markdown）', async () => {
+    await writeSkill('skills/bad.md', '# 没有 frontmatter');
+    await writeSkill('skills/noname.md', '---\ndescription: 缺 name\n---\n正文');
+    await writeSkill('skills/nodesc.md', '---\nname: x\n---\n正文');
+    await writeSkill('skills/ok.md', '---\nname: ok\ndescription: 好\n---\n正文');
+    const res = await loadSkillsWithErrors(tmpDir);
+    expect(res.skills.map((s) => s.name)).toEqual(['ok']);
+    expect(res.errors).toEqual([
+      { file: 'bad.md', reason: '格式解析失败' },
+      { file: 'nodesc.md', reason: '缺少 description' },
+      { file: 'noname.md', reason: '缺少 name' },
+    ]);
+  });
+
+  it('loadSkills 只返回 skills（错误列表被丢弃）', async () => {
+    const skillsDir = path.join(tmpDir, 'skills');
+    await fs.mkdir(skillsDir);
+    await fs.writeFile(path.join(skillsDir, 'bad.json'), JSON.stringify({ description: 'x', prompt: 'y' }));
+    await fs.writeFile(path.join(skillsDir, 'good.json'), JSON.stringify({ name: 'good', description: 'x', prompt: 'y' }));
+    expect(await loadSkills(tmpDir)).toEqual([{ name: 'good', description: 'x', prompt: 'y', format: 'json' }]);
   });
 });
 

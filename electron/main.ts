@@ -668,6 +668,12 @@ function registerIpcHandlers(): void {
     return loadSkills(workDir);
   });
 
+  ipcMain.handle('skills:listDetailed', async (_e, workDir: string) => {
+    await assertWorkDirAllowed(workDir);
+    const { loadSkillsWithErrors } = await import('./agent/skills');
+    return loadSkillsWithErrors(workDir);
+  });
+
   // MCP 服务器管理
   ipcMain.handle('mcp:list', async (): Promise<McpServerConfig[]> => {
     const { mcpManager } = await import('./mcp/mcp-manager');

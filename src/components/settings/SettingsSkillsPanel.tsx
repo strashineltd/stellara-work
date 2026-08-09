@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SkillDef } from '../../../shared/ipc';
+import type { SkillDef, SkillLoadError } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 import { SettingsMcpSection } from './SettingsMcpSection';
 
@@ -26,6 +26,7 @@ description: 描述
 export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkillsPanelProps) {
   const [workDir, setWorkDir] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillDef[]>([]);
+  const [skillErrors, setSkillErrors] = useState<SkillLoadError[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -40,8 +41,9 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
         setWorkDir(dir);
         if (!dir) return;
         setSkillsLoading(true);
-        const found = await window.electronAPI.skills.list(dir);
-        setSkills(found);
+        const res = await window.electronAPI.skills.listDetailed(dir);
+        setSkills(res.items);
+        setSkillErrors(res.errors);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -120,6 +122,20 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
                 aria-label="搜索技能"
               />
             </div>
+            {skillErrors.length > 0 && (
+              <div className="settings-skill-errors" role="alert">
+                <div className="settings-skill-errors__title">
+                  {`${skillErrors.length} 个文件格式错误`}
+                </div>
+                <ul className="settings-skill-errors__list">
+                  {skillErrors.map((e) => (
+                    <li key={e.file} className="settings-skill-errors__item">
+                      <code>{e.file}</code>（{e.reason}）
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="settings-group">
               {skills.length === 0 && !skillsLoading && (
                 <div className="settings-item">

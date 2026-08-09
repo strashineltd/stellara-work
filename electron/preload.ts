@@ -162,6 +162,7 @@ const api: ElectronAPI = {
   },
   skills: {
     list: (workDir: string) => ipcRenderer.invoke('skills:list', workDir),
+    listDetailed: (workDir: string) => ipcRenderer.invoke('skills:listDetailed', workDir),
   },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),

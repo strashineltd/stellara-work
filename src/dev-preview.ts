@@ -162,6 +162,17 @@ export function installDevPreviewApi(): void {
         { name: 'mcp-setup', description: '配置 MCP 服务器的 JSON 模板', prompt: 'JSON 格式技能内容', format: 'json' },
         { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…' },
       ],
+      listDetailed: async () => ({
+        items: [
+          { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md' },
+          { name: 'mcp-setup', description: '配置 MCP 服务器的 JSON 模板', prompt: 'JSON 格式技能内容', format: 'json' },
+          { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…' },
+        ],
+        errors: [
+          { file: 'bad.json', reason: '缺少 name' },
+          { file: 'broken.md', reason: '格式解析失败' },
+        ],
+      }),
     },
     mcp: {
       list: async () => [

@@ -40,6 +40,12 @@ const SERVERS: McpServerConfig[] = [
   },
 ];
 
+const TOOLS = [
+  { name: 'read', description: 'Read files', inputSchema: { type: 'object', properties: {} } },
+  { name: 'write', description: 'Write files', inputSchema: { type: 'object', properties: {} } },
+  { name: 'list', description: 'List files', inputSchema: { type: 'object', properties: {} } },
+];
+
 const CONFIGURED: ConfiguredModel = {
   id: 'deepseek-v4-pro',
   label: 'DeepSeek-v4-Pro',
@@ -54,6 +60,7 @@ function installApi(configured: ConfiguredModel | null) {
   const mocks = {
     list: vi.fn().mockResolvedValue({ presets: [], configured }),
     skillsList: vi.fn().mockResolvedValue(SKILLS),
+    skillsListDetailed: vi.fn().mockResolvedValue({ items: SKILLS, errors: [] }),
     openPath: vi.fn().mockResolvedValue(true),
     mcpList: vi.fn().mockResolvedValue(SERVERS),
     mcpAdd: vi.fn().mockResolvedValue(undefined),
@@ -65,7 +72,7 @@ function installApi(configured: ConfiguredModel | null) {
   Object.defineProperty(window, 'electronAPI', {
     value: {
       models: { list: mocks.list },
-      skills: { list: mocks.skillsList },
+      skills: { list: mocks.skillsList, listDetailed: mocks.skillsListDetailed },
       fs: { openPath: mocks.openPath },
       mcp: {
         list: mocks.mcpList,
@@ -125,6 +132,13 @@ async function fireChange(element: Element | null | undefined, value: string) {
     const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
     setter.call(element, value);
     element.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+async function fireCheckboxToggle(element: Element | null | undefined) {
+  if (!element) throw new Error('Element not found for checkbox');
+  await act(async () => {
+    (element as HTMLInputElement).click();
   });
 }
 
@@ -205,6 +219,26 @@ describe('SettingsSkillsMcp（技能与 MCP 面板）', () => {
       expect(written).toContain('---');
       expect(byText(container, '已复制')).toBeTruthy();
     });
+
+    it('renders format error warnings for invalid skill files', async () => {
+      mocks.skillsListDetailed.mockResolvedValue({
+        items: SKILLS,
+        errors: [
+          { file: 'bad.json', reason: '缺少 name' },
+          { file: 'broken.md', reason: '格式解析失败' },
+        ],
+      });
+      const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+      const banner = container.querySelector('.settings-skill-errors');
+      expect(banner).toBeTruthy();
+      expect(byText(container, '2 个文件格式错误')).toBeTruthy();
+      expect(byText(container, 'bad.json')).toBeTruthy();
+      expect(byText(container, '缺少 name')).toBeTruthy();
+      expect(byText(container, 'broken.md')).toBeTruthy();
+      expect(byText(container, '格式解析失败')).toBeTruthy();
+      expect(banner?.getAttribute('role')).toBe('alert');
+    });
   });
 
   describe('MCP 服务器列表', () => {
@@ -267,6 +301,66 @@ describe('SettingsSkillsMcp（技能与 MCP 面板）', () => {
       expect(byText(container, '可用工具 3 个')).toBeTruthy();
       expect(byText(container, '默认启用全部工具')).toBeTruthy();
     });
+
+    it('expanded row lists tools as checkboxes, all checked by default (empty whitelist)', async () => {
+      mocks.mcpTest.mockResolvedValue({ ok: true, toolCount: 3, tools: TOOLS });
+      const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+      await fireClick(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-expand'));
+
+      const boxes = container.querySelectorAll<HTMLInputElement>('.settings-mcp-tool__checkbox');
+      expect(boxes.length).toBe(3);
+      expect([...boxes].map((b) => b.checked)).toEqual([true, true, true]);
+      expect(byText(container, 'read')).toBeTruthy();
+      expect(byText(container, 'write')).toBeTruthy();
+      expect(byText(container, 'list')).toBeTruthy();
+    });
+
+    it('unchecking a tool persists the whitelist via mcp.update', async () => {
+      mocks.mcpTest.mockResolvedValue({ ok: true, toolCount: 3, tools: TOOLS });
+      const onChanged = vi.fn();
+      const { container } = await render(<SettingsSkillsPanel onChanged={onChanged} />);
+      await fireClick(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-expand'));
+
+      await fireCheckboxToggle(
+        container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-tool__checkbox'),
+      );
+
+      expect(mocks.mcpUpdate).toHaveBeenCalledWith('filesystem', { tools: ['write', 'list'] });
+      expect(onChanged).toHaveBeenCalled();
+      const boxes = container.querySelectorAll<HTMLInputElement>('.settings-mcp-tool__checkbox');
+      expect(boxes[0]!.checked).toBe(false);
+      expect(boxes[1]!.checked).toBe(true);
+      expect(boxes[2]!.checked).toBe(true);
+    });
+
+    it('re-checking every tool stores an empty whitelist (default enable all)', async () => {
+      mocks.mcpTest.mockResolvedValue({ ok: true, toolCount: 3, tools: TOOLS });
+      const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+      await fireClick(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-expand'));
+
+      await fireCheckboxToggle(
+        container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-tool__checkbox'),
+      );
+      await fireCheckboxToggle(
+        container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-tool__checkbox'),
+      );
+
+      expect(mocks.mcpUpdate).toHaveBeenLastCalledWith('filesystem', { tools: [] });
+    });
+
+    it('re-shows an existing whitelist when expanding a server with tools set', async () => {
+      mocks.mcpTest.mockResolvedValue({ ok: true, toolCount: 3, tools: TOOLS });
+      mocks.mcpList.mockResolvedValue([
+        { ...SERVERS[0]!, tools: ['read'] },
+        SERVERS[1],
+      ]);
+      const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+      await fireClick(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-expand'));
+
+      const boxes = container.querySelectorAll<HTMLInputElement>('.settings-mcp-tool__checkbox');
+      expect([...boxes].map((b) => b.checked)).toEqual([true, false, false]);
+    });
   });
 
   describe('MCP 添加表单', () => {
@@ -322,6 +416,25 @@ describe('SettingsSkillsMcp（技能与 MCP 面板）', () => {
 
       expect(byText(container, '连接失败')).toBeTruthy();
       expect(byText(container, '连接被拒绝')).toBeTruthy();
+    });
+
+    it('clears the stale test result when form fields change', async () => {
+      const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+      await fireClick(container.querySelector('.settings-mcp-add-trigger'));
+      await fireInput(container.querySelector('.settings-mcp-field-name input'), '文件系统');
+      await fireInput(container.querySelector('.settings-mcp-field-command input'), 'npx');
+
+      await fireClick(container.querySelector('.settings-mcp-test'));
+      expect(byText(container, '连接成功')).toBeTruthy();
+
+      await fireInput(container.querySelector('.settings-mcp-field-command input'), 'node');
+      expect(byText(container, '连接成功')).toBeNull();
+
+      await fireClick(container.querySelector('.settings-mcp-test'));
+      expect(byText(container, '连接成功')).toBeTruthy();
+
+      await fireChange(container.querySelector('.settings-mcp-transport'), 'http');
+      expect(byText(container, '连接成功')).toBeNull();
     });
 
     it('saves a stdio server via mcp.add with id, name, command and args', async () => {

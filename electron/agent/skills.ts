@@ -1,10 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { SkillDef } from '../../shared/ipc';
+import type { SkillDef, SkillLoadError } from '../../shared/ipc';
 
 /**
  * 扫描项目 workDir 下的 skills/ 目录，加载所有 .json 文件。
- * 缺少字段的跳过 + console.warn；目录不存在则返回空数组（静默）。
+ * 无效文件不再静默跳过 —— loadSkillsWithErrors 返回错误列表（界面标注「格式错误」）。
  */
 
 export function formatSkillsForPrompt(skills: SkillDef[]): string {
@@ -16,27 +16,41 @@ export function formatSkillsForPrompt(skills: SkillDef[]): string {
   return lines.join('\n');
 }
 
+type ParseResult = { skill: SkillDef } | { reason: string };
+
 /**
  * 解析 Claude 风格 markdown 技能文件。
  * 提取 frontmatter 中的 name / description（可选 fallbackName），正文作为 prompt。
- * 缺 name（且无 fallback）或缺 description 时返回 null。
+ * 失败时返回区分字段的错误 reason（缺 name / 缺 description / 缺 prompt / 格式解析失败）。
  */
-export function parseSkillMarkdown(text: string, fallbackName: string): SkillDef | null {
+function parseSkillMarkdownDetailed(text: string, fallbackName: string): ParseResult {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-  if (!m) return null;
+  if (!m) return { reason: '格式解析失败' };
   const block = m[1];
   const nameMatch = /^name:\s*(.+)$/m.exec(block);
   const descMatch = /^description:\s*(.+)$/m.exec(block);
   const name = (nameMatch ? nameMatch[1].trim() : '') || fallbackName.trim();
-  if (!name) return null;
+  if (!name) return { reason: '缺少 name' };
   const description = descMatch ? descMatch[1].trim() : '';
-  if (!description) return null;
+  if (!description) return { reason: '缺少 description' };
   const prompt = text.slice(m[0].length).trim();
-  if (!prompt) return null;
-  return { name, description, prompt, format: 'md' };
+  if (!prompt) return { reason: '缺少 prompt' };
+  return { skill: { name, description, prompt, format: 'md' } };
 }
 
-async function loadMarkdownSkills(skillsDir: string, dirName: string, skills: SkillDef[], useFileFallback: boolean): Promise<void> {
+/** 兼容旧 API：解析失败返回 null */
+export function parseSkillMarkdown(text: string, fallbackName: string): SkillDef | null {
+  const r = parseSkillMarkdownDetailed(text, fallbackName);
+  return 'skill' in r ? r.skill : null;
+}
+
+async function loadMarkdownSkills(
+  skillsDir: string,
+  dirName: string,
+  skills: SkillDef[],
+  errors: SkillLoadError[],
+  useFileFallback: boolean,
+): Promise<void> {
   let entries: string[];
   try {
     entries = await fs.readdir(path.join(skillsDir, dirName));
@@ -45,39 +59,43 @@ async function loadMarkdownSkills(skillsDir: string, dirName: string, skills: Sk
   }
   for (const entry of entries) {
     if (!entry.endsWith('.md')) continue;
+    const rel = dirName ? `${dirName}/${entry}` : entry;
     const fullPath = path.join(skillsDir, dirName, entry);
     try {
       const text = await fs.readFile(fullPath, 'utf-8');
-      const parsed = parseSkillMarkdown(text, useFileFallback ? entry.replace(/\.md$/, '') : '');
-      if (!parsed) {
-        console.warn(`[skills] 跳过 ${entry}：缺少 name/description/prompt 字段`);
-        continue;
+      const parsed = parseSkillMarkdownDetailed(text, useFileFallback ? entry.replace(/\.md$/, '') : '');
+      if ('skill' in parsed) {
+        skills.push(parsed.skill);
+      } else {
+        errors.push({ file: rel, reason: parsed.reason });
       }
-      skills.push(parsed);
-    } catch (err) {
-      console.warn(`[skills] 跳过 ${entry}：读取失败 —`, err instanceof Error ? err.message : err);
+    } catch {
+      errors.push({ file: rel, reason: '读取失败' });
     }
   }
 }
 
-export async function loadSkills(workDir: string): Promise<SkillDef[]> {
+export async function loadSkillsWithErrors(
+  workDir: string,
+): Promise<{ skills: SkillDef[]; errors: SkillLoadError[] }> {
   const skillsDir = path.join(workDir, 'skills');
   let entries: string[];
   try {
     entries = await fs.readdir(skillsDir);
   } catch {
     // 目录不存在 → 静默
-    return [];
+    return { skills: [], errors: [] };
   }
 
   const skills: SkillDef[] = [];
-  await loadMarkdownSkills(skillsDir, '', skills, false);
+  const errors: SkillLoadError[] = [];
+  await loadMarkdownSkills(skillsDir, '', skills, errors, false);
   for (const entry of entries) {
     const fullPath = path.join(skillsDir, entry);
     if (entry.endsWith('.md')) continue;
     try {
       const stat = await fs.stat(fullPath);
-      if (stat.isDirectory()) await loadMarkdownSkills(skillsDir, entry, skills, true);
+      if (stat.isDirectory()) await loadMarkdownSkills(skillsDir, entry, skills, errors, true);
     } catch {
       // 忽略无法 stat 的条目
     }
@@ -86,30 +104,40 @@ export async function loadSkills(workDir: string): Promise<SkillDef[]> {
   for (const entry of entries) {
     if (!entry.endsWith('.json')) continue;
     const fullPath = path.join(skillsDir, entry);
+    let parsed: Record<string, unknown>;
     try {
       const text = await fs.readFile(fullPath, 'utf-8');
-      const parsed = JSON.parse(text) as Record<string, unknown>;
-      if (typeof parsed.name !== 'string' || !parsed.name) {
-        console.warn(`[skills] 跳过 ${entry}：缺少 "name" 字段`);
-        continue;
-      }
-      if (typeof parsed.description !== 'string' || !parsed.description) {
-        console.warn(`[skills] 跳过 ${entry}：缺少 "description" 字段`);
-        continue;
-      }
-      if (typeof parsed.prompt !== 'string' || !parsed.prompt) {
-        console.warn(`[skills] 跳过 ${entry}：缺少 "prompt" 字段`);
-        continue;
-      }
-      skills.push({
-        name: parsed.name as string,
-        description: parsed.description as string,
-        prompt: parsed.prompt as string,
-        format: 'json',
-      });
+      parsed = JSON.parse(text) as Record<string, unknown>;
     } catch (err) {
-      console.warn(`[skills] 跳过 ${entry}：JSON 解析失败 —`, err instanceof Error ? err.message : err);
+      errors.push({
+        file: entry,
+        reason: err instanceof SyntaxError ? '格式解析失败' : '读取失败',
+      });
+      continue;
     }
+    if (typeof parsed.name !== 'string' || !parsed.name) {
+      errors.push({ file: entry, reason: '缺少 name' });
+      continue;
+    }
+    if (typeof parsed.description !== 'string' || !parsed.description) {
+      errors.push({ file: entry, reason: '缺少 description' });
+      continue;
+    }
+    if (typeof parsed.prompt !== 'string' || !parsed.prompt) {
+      errors.push({ file: entry, reason: '缺少 prompt' });
+      continue;
+    }
+    skills.push({
+      name: parsed.name as string,
+      description: parsed.description as string,
+      prompt: parsed.prompt as string,
+      format: 'json',
+    });
   }
+  return { skills, errors: errors.sort((a, b) => a.file.localeCompare(b.file)) };
+}
+
+export async function loadSkills(workDir: string): Promise<SkillDef[]> {
+  const { skills } = await loadSkillsWithErrors(workDir);
   return skills;
 }

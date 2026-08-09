@@ -473,6 +473,18 @@ export interface SkillDef {
   format?: 'md' | 'json';
 }
 
+/** 无效技能文件的格式错误（界面标注「格式错误」用） */
+export interface SkillLoadError {
+  file: string;
+  reason: string;
+}
+
+/** skills:listDetailed 返回：可用技能 + 被跳过的格式错误文件 */
+export interface SkillListDetailedResponse {
+  items: SkillDef[];
+  errors: SkillLoadError[];
+}
+
 // ============================================
 // MCP 相关
 // ============================================
@@ -498,6 +510,14 @@ export interface McpToolInfo {
   name: string;
   description?: string;
   inputSchema?: unknown;
+}
+
+/** mcp:test 返回：连接成功时附带工具列表（白名单勾选用） */
+export interface McpTestResult {
+  ok: boolean;
+  toolCount?: number;
+  tools?: McpToolInfo[];
+  error?: string;
 }
 
 export interface CreateSessionArgs {
@@ -606,13 +626,15 @@ export interface ElectronAPI {
   };
   skills: {
     list: (workDir: string) => Promise<SkillDef[]>;
+    /** 含格式错误文件列表（设置面板「格式错误」标注用） */
+    listDetailed: (workDir: string) => Promise<SkillListDetailedResponse>;
   };
   mcp: {
     list: () => Promise<McpServerConfig[]>;
     add: (cfg: McpServerConfig) => Promise<void>;
     update: (id: string, patch: Partial<McpServerConfig>) => Promise<void>;
     remove: (id: string) => Promise<void>;
-    test: (cfg: McpServerConfig) => Promise<{ ok: boolean; toolCount?: number; error?: string }>;
+    test: (cfg: McpServerConfig) => Promise<McpTestResult>;
   };
   memory: {
     search: (query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => Promise<Memory[]>;

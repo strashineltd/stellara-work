@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { McpServerConfig } from '../../../shared/ipc';
+import type { McpServerConfig, McpTestResult, McpToolInfo } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 
 interface SettingsMcpSectionProps {
@@ -9,20 +9,14 @@ interface SettingsMcpSectionProps {
   refreshKey?: number;
 }
 
-interface TestResult {
-  ok: boolean;
-  toolCount?: number;
-  error?: string;
-}
-
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
 /**
- * 设置窗口「技能与 MCP」面板的 MCP 区块：服务器列表（传输徽章 / 启用开关 / 删除确认 / 展开工具数），
- * 折叠式添加表单（stdio → command+args，http → url）+ 测试连接。
- * 白名单勾选暂不实现：tools 留空 = 默认启用全部工具（展开区说明）。
+ * 设置窗口「技能与 MCP」面板的 MCP 区块：服务器列表（传输徽章 / 启用开关 / 删除确认 / 展开工具白名单勾选），
+ * 折叠式添加表单（stdio → command+args，http → url）+ 测试连接（结果 tools 缓存用于勾选回显）。
+ * 白名单语义：tools 空数组 = 默认启用全部工具；勾选变化即时 mcp.update 保存。
  */
 export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSectionProps) {
   const [servers, setServers] = useState<McpServerConfig[]>([]);
@@ -32,6 +26,10 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
   const [toolErrors, setToolErrors] = useState<Record<string, string>>({});
+  /** 展开区测试连接得到的工具列表缓存（本会话有效） */
+  const [toolsByServer, setToolsByServer] = useState<Record<string, McpToolInfo[]>>({});
+  /** 勾选状态：null = 默认全选（tools 存 []）；Set = 白名单 */
+  const [checkedByServer, setCheckedByServer] = useState<Record<string, Set<string> | null>>({});
 
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
@@ -40,7 +38,7 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
   const [args, setArgs] = useState('');
   const [url, setUrl] = useState('');
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [testResult, setTestResult] = useState<McpTestResult | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -82,6 +80,27 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
     }
   }
 
+  function loadServerTools(server: McpServerConfig) {
+    void window.electronAPI.mcp
+      .test(server)
+      .then((res) => {
+        if (!res.ok) {
+          setToolErrors((prev) => ({ ...prev, [server.id]: res.error ?? '未知错误' }));
+          return;
+        }
+        setToolCounts((prev) => ({ ...prev, [server.id]: res.toolCount ?? 0 }));
+        if (!res.tools) return;
+        setToolsByServer((prev) => ({ ...prev, [server.id]: res.tools! }));
+        setCheckedByServer((prev) => {
+          if (prev[server.id] !== undefined) return prev;
+          const whitelist =
+            server.tools && server.tools.length > 0 ? new Set(server.tools) : null;
+          return { ...prev, [server.id]: whitelist };
+        });
+      })
+      .catch((e) => setToolErrors((prev) => ({ ...prev, [server.id]: errorMessage(e) })));
+  }
+
   function toggleExpand(server: McpServerConfig) {
     const isOpen = expanded.has(server.id);
     setExpanded((prev) => {
@@ -90,16 +109,31 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
       else next.add(server.id);
       return next;
     });
-    // 首次展开：用当前配置测试连接，取工具数（工具白名单勾选留 backlog，默认启用全部）
+    // 首次展开：用当前配置测试连接，取工具列表（白名单勾选 + 回显）
     if (!isOpen && toolCounts[server.id] === undefined && !toolErrors[server.id]) {
-      void window.electronAPI.mcp
-        .test(server)
-        .then((res) => {
-          if (res.ok) setToolCounts((prev) => ({ ...prev, [server.id]: res.toolCount ?? 0 }));
-          else setToolErrors((prev) => ({ ...prev, [server.id]: res.error ?? '未知错误' }));
-        })
-        .catch((e) => setToolErrors((prev) => ({ ...prev, [server.id]: errorMessage(e) })));
+      loadServerTools(server);
     }
+  }
+
+  function toggleTool(server: McpServerConfig, toolName: string, checked: boolean) {
+    const names = (toolsByServer[server.id] ?? []).map((t) => t.name);
+    if (names.length === 0) return;
+    const prev = checkedByServer[server.id] ?? new Set(names);
+    const next = new Set(prev);
+    if (checked) next.add(toolName);
+    else next.delete(toolName);
+    // 全部勾选 → tools 存 []（默认启用全部）
+    const whitelist = names.every((n) => next.has(n)) ? [] : names.filter((n) => next.has(n));
+    setCheckedByServer((p) => ({ ...p, [server.id]: whitelist.length === 0 ? null : new Set(whitelist) }));
+    void window.electronAPI.mcp
+      .update(server.id, { tools: whitelist })
+      .catch((e) => setError(errorMessage(e)));
+    onChanged?.();
+  }
+
+  /** 表单字段变更时清掉过期测试结果（测试的是旧字段） */
+  function clearTestResult() {
+    setTestResult(null);
   }
 
   function resetForm() {
@@ -184,6 +218,8 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
           const isOpen = expanded.has(server.id);
           const count = toolCounts[server.id];
           const toolError = toolErrors[server.id];
+          const toolList = toolsByServer[server.id];
+          const checkedSet = checkedByServer[server.id];
           return (
             <div key={server.id} className="settings-item settings-mcp-row" data-server={server.id}>
               <button
@@ -210,9 +246,29 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
                     ) : toolError ? (
                       <div className="settings-mcp-tools__error">{toolError}</div>
                     ) : (
-                      <div className="settings-mcp-tools__loading">正在连接获取工具数…</div>
+                      <div className="settings-mcp-tools__loading">正在连接获取工具…</div>
                     )}
-                    <div className="settings-mcp-tools__hint">默认启用全部工具</div>
+                    {toolList && (
+                      <div className="settings-mcp-tools__list">
+                        {toolList.map((t) => {
+                          const checked = checkedSet === null || checkedSet.has(t.name);
+                          return (
+                            <label key={t.name} className="settings-mcp-tool">
+                              <input
+                                type="checkbox"
+                                className="settings-mcp-tool__checkbox"
+                                checked={checked}
+                                onChange={(e) => toggleTool(server, t.name, e.target.checked)}
+                              />
+                              <span className="settings-mcp-tool__name">{t.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="settings-mcp-tools__hint">
+                      勾选要启用的工具；全部勾选 = 默认启用全部工具
+                    </div>
                   </div>
                 )}
               </div>
@@ -277,7 +333,10 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
               type="text"
               placeholder="例如 GitHub API"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                clearTestResult();
+              }}
             />
           </div>
           <div className="form-row">
@@ -286,7 +345,10 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
               id="mcp-transport"
               className="settings-mcp-transport"
               value={transport}
-              onChange={(e) => setTransport(e.target.value as 'stdio' | 'http')}
+              onChange={(e) => {
+                setTransport(e.target.value as 'stdio' | 'http');
+                clearTestResult();
+              }}
             >
               <option value="stdio">stdio（本地进程）</option>
               <option value="http">http（远程服务器）</option>
@@ -301,7 +363,10 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
                   type="text"
                   placeholder="例如 npx"
                   value={command}
-                  onChange={(e) => setCommand(e.target.value)}
+                  onChange={(e) => {
+                    setCommand(e.target.value);
+                    clearTestResult();
+                  }}
                 />
               </div>
               <div className="form-row settings-mcp-field-args">
@@ -311,7 +376,10 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
                   type="text"
                   placeholder="例如 -y @modelcontextprotocol/server-filesystem"
                   value={args}
-                  onChange={(e) => setArgs(e.target.value)}
+                  onChange={(e) => {
+                    setArgs(e.target.value);
+                    clearTestResult();
+                  }}
                 />
               </div>
             </>
@@ -323,7 +391,10 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
                 type="text"
                 placeholder="https://mcp.example.com/github"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  clearTestResult();
+                }}
               />
             </div>
           )}
