@@ -38,6 +38,42 @@ export interface MemoryContextItem {
   source?: string;
 }
 
+export interface ContextStats {
+  promptTokens: number;
+  completionTokens: number;
+  toolCounts: Record<string, number>;
+  recentCalls: Array<{ name: string; ok: boolean; durationMs?: number }>;
+  compressedCount: number;
+  /** 最近一次 usage 是否为本地估算（provider 未上报 usage） */
+  estimated?: boolean;
+}
+
+/** 工具名 → 中文（spec 3.1；未映射的显示原名） */
+const TOOL_LABELS: Record<string, string> = {
+  read_file: '读取',
+  write_file: '写入',
+  edit_file: '编辑',
+  run_command: '命令',
+  search_files: '搜索',
+  search_content: '搜索',
+  list_files: '列出',
+  git_status: 'git',
+  git_diff: 'git',
+  git_log: 'git',
+  web_fetch: '网络',
+  memory_search: '记忆',
+  memory_save: '记忆',
+  task_complete: '完成',
+};
+
+function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? name;
+}
+
+function fmtK(n: number): string {
+  return `${(n / 1000).toFixed(1)}K`;
+}
+
 interface WorkspacePanelProps {
   workDir: string;
   goal: Goal | null;
@@ -49,6 +85,8 @@ interface WorkspacePanelProps {
   initialWidth?: number;
   onWidthChange?: (w: number) => void;
   memoryContext?: MemoryContextItem[];
+  contextStats?: ContextStats | null;
+  contextWindow?: number;
 }
 
 const MIN_WIDTH = 200;
@@ -57,7 +95,7 @@ const DEFAULT_WIDTH = 280;
 
 export function WorkspacePanel({
   workDir, goal, progress, deliverables, touchedFiles,
-  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext,
+  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext, contextStats, contextWindow,
 }: WorkspacePanelProps) {
   const [width, setWidth] = useState(initialWidth ?? DEFAULT_WIDTH);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -122,6 +160,7 @@ export function WorkspacePanel({
       </div>
       <GoalSection goal={goal} stepStatus={stepStatus} onStepToggle={onStepToggle} />
       <ProgressSection progress={progress} goal={goal} stepStatus={stepStatus} />
+      <ContextStatsSection contextStats={contextStats} contextWindow={contextWindow} />
       <DeliverablesSection deliverables={deliverables} />
       <MemoryInjectSection memoryContext={memoryContext} />
       <FileSection workDir={workDir} touchedFiles={touchedFiles} />
@@ -230,6 +269,82 @@ function ProgressSection({
       {total === 0 && (
         <div className="empty-hint">任务开始后会显示进度</div>
       )}
+    </details>
+  );
+}
+
+function ContextStatsSection({ contextStats, contextWindow }: { contextStats: ContextStats | null | undefined; contextWindow?: number }) {
+  if (!contextStats) {
+    return <div className="context-stats__empty">暂无任务数据</div>;
+  }
+  const pct = contextWindow ? (contextStats.promptTokens / contextWindow) * 100 : 0;
+  const toolRows = Object.entries(contextStats.toolCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({ name, count }));
+  const maxCount = toolRows.reduce((m, r) => Math.max(m, r.count), 0);
+  const totalTools = toolRows.reduce((m, r) => m + r.count, 0);
+
+  return (
+    <details className="workspace-section" open>
+      <summary className="workspace-section-header">
+        <span>上下文</span>
+      </summary>
+      <div className="context-stats">
+        <div className="context-stats__usage">
+          <div className="context-stats__usage-row">
+            <span>上下文使用率</span>
+            <span>
+              {fmtK(contextStats.promptTokens)} / {fmtK(contextWindow ?? 0)}
+              {contextStats.estimated && '（估算）'}
+            </span>
+          </div>
+          <div className="context-stats__bar">
+            <div
+              className={`context-stats__bar-fill${pct >= 80 ? ' warn' : ''}`}
+              style={{ width: `${Math.min(100, pct)}%` }}
+              role="progressbar"
+              aria-label="上下文使用率"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(pct)}
+            />
+          </div>
+        </div>
+        <div className="context-stats__tokens">
+          输入 {fmtK(contextStats.promptTokens)} · 输出 {fmtK(contextStats.completionTokens)}
+        </div>
+        {toolRows.length > 0 && (
+          <div className="context-stats__tools">
+            <span className="context-stats__label">工具调用 {totalTools} 次</span>
+            {toolRows.map((row) => (
+              <div key={row.name} className="context-stats__tool-row">
+                <span>{toolLabel(row.name)}</span>
+                <div className="context-stats__tool-bar">
+                  <div className="context-stats__tool-bar-fill" style={{ width: `${(row.count / maxCount) * 100}%` }} />
+                </div>
+                <span className="context-stats__tool-count">{row.count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {contextStats.recentCalls.length > 0 && (
+          <div className="context-stats__calls">
+            <span className="context-stats__label">最近调用</span>
+            {contextStats.recentCalls.map((c, i) => (
+              <div key={i} className="context-stats__call">
+                <span className={`context-stats__call-status ${c.ok ? 'ok' : 'fail'}`}>
+                  {c.ok ? '成功' : '失败'}
+                </span>
+                <span>{toolLabel(c.name)}</span>
+                {c.durationMs != null && <span className="context-stats__time">{(c.durationMs / 1000).toFixed(1)}s</span>}
+              </div>
+            ))}
+          </div>
+        )}
+        {contextStats.compressedCount > 0 && (
+          <div className="context-stats__compressed">已压缩 {contextStats.compressedCount} 条消息</div>
+        )}
+      </div>
     </details>
   );
 }

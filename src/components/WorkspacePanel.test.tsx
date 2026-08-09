@@ -124,6 +124,75 @@ describe('WorkspacePanel', () => {
   });
 });
 
+describe('WorkspacePanel context stats', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    (window as any).electronAPI = {
+      fs: {
+        listTree: vi.fn().mockResolvedValue(null),
+      },
+    };
+  });
+
+  const BASE = {
+    workDir: 'D:/test',
+    goal: GOAL,
+    progress: PROGRESS,
+    deliverables: DELIVERABLES,
+    touchedFiles: new Set<string>(),
+    contextWindow: 128000,
+  };
+
+  it('renders context stats: progress, token totals, tool counts, recent calls', () => {
+    const { container } = render(
+      <WorkspacePanel
+        {...BASE}
+        contextStats={{
+          promptTokens: 42000,
+          completionTokens: 6000,
+          toolCounts: { read_file: 8, run_command: 6 },
+          recentCalls: [
+            { name: 'run_command', ok: true, durationMs: 3200 },
+            { name: 'edit_file', ok: false },
+          ],
+          compressedCount: 1,
+        }}
+      />,
+    );
+    expect(container.querySelector('.context-stats')).toBeTruthy();
+    expect(container.textContent).toContain('42.0K');
+    expect(container.textContent).toContain('读取');
+    expect(container.textContent).toContain('命令');
+    expect(container.textContent).toContain('已压缩 1 条消息');
+    expect(container.textContent).toContain('3.2s');
+    expect(container.textContent).toContain('成功');
+    expect(container.textContent).toContain('失败');
+  });
+
+  it('shows warning color when usage exceeds 80%', () => {
+    const { container } = render(
+      <WorkspacePanel
+        {...BASE}
+        contextStats={{
+          promptTokens: 110000,
+          completionTokens: 0,
+          toolCounts: {},
+          recentCalls: [],
+          compressedCount: 0,
+        }}
+      />,
+    );
+    const fill = container.querySelector('.context-stats__bar-fill');
+    expect(fill?.classList.contains('warn')).toBe(true);
+  });
+
+  it('shows empty state when contextStats is null', () => {
+    const { container } = render(<WorkspacePanel {...BASE} contextStats={null} />);
+    expect(container.textContent).toContain('暂无任务数据');
+    expect(container.querySelector('.context-stats')).toBeNull();
+  });
+});
+
 describe('WorkspacePanel memory context', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

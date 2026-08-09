@@ -11,7 +11,7 @@ import {
 } from '../lib/chat-utils';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
-import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem } from './WorkspacePanel';
+import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats } from './WorkspacePanel';
 import { Header } from './chat/Header';
 import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
@@ -95,6 +95,8 @@ export function MainView(props: MainViewProps) {
   });
   // 本次任务注入的相关记忆（memory_context 事件）
   const [memoryContext, setMemoryContext] = useState<MemoryContextItem[]>([]);
+  // 本次任务的上下文统计（usage/tool_result/summary 事件累计）
+  const [contextStats, setContextStats] = useState<ContextStats | null>(null);
   // 会话结束后已沉淀记忆的提示（memories-extracted 事件）
   const [extractedNotice, setExtractedNotice] = useState<{ sessionId: string; count: number } | null>(null);
 
@@ -286,6 +288,7 @@ export function MainView(props: MainViewProps) {
   async function handleSend() {
     if (!input.trim() || busy) return;
     setMemoryContext([]);
+    setContextStats(null);
     if (!activeSessionId) {
       setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再发送任务。' }]);
       return;
@@ -314,6 +317,31 @@ export function MainView(props: MainViewProps) {
         });
         if (ev.type === 'memory_context' && ev.memories) {
           setMemoryContext(ev.memories);
+        }
+        if (ev.type === 'usage') {
+          setContextStats((prev) => ({
+            promptTokens: ev.totals?.promptTokens ?? prev?.promptTokens ?? 0,
+            completionTokens: ev.totals?.completionTokens ?? prev?.completionTokens ?? 0,
+            toolCounts: ev.toolCounts ?? prev?.toolCounts ?? {},
+            recentCalls: prev?.recentCalls ?? [],
+            compressedCount: prev?.compressedCount ?? 0,
+            estimated: ev.usage?.estimated ?? prev?.estimated,
+          }));
+        }
+        if (ev.type === 'tool_result' && ev.toolResult) {
+          setContextStats((prev) => {
+            if (!prev) return prev;
+            const meta = (ev.toolResult!.result as { meta?: { kind?: string; durationMs?: number } })?.meta;
+            const call = {
+              name: ev.toolResult!.name,
+              ok: (ev.toolResult!.result as { ok?: boolean })?.ok === true,
+              durationMs: meta?.durationMs,
+            };
+            return { ...prev, recentCalls: [call, ...prev.recentCalls].slice(0, 5) };
+          });
+        }
+        if (ev.type === 'summary') {
+          setContextStats((prev) => (prev ? { ...prev, compressedCount: prev.compressedCount + 1 } : prev));
         }
         if (ev.type === 'task_complete') {
           setEntries((prev) => {
@@ -647,6 +675,8 @@ export function MainView(props: MainViewProps) {
             deliverables={workspaceDeliverables}
             touchedFiles={touchedFiles}
             memoryContext={memoryContext}
+            contextStats={contextStats}
+            contextWindow={config.contextWindow}
           />
         )}
       </div>

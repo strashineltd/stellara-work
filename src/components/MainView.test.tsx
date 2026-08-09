@@ -373,3 +373,100 @@ describe('MainView memory context', () => {
     expect(querySelector('.memory-extracted-hint')).toBeNull();
   });
 });
+
+describe('MainView context stats', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  async function typeAndSend(querySelector: (sel: string) => Element | null, text: string) {
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+  }
+
+  it('builds context stats from usage/tool_result/summary events and keeps them after done', async () => {
+    const events = (async function* () {
+      yield {
+        type: 'usage',
+        usage: { promptTokens: 4000, completionTokens: 600, estimated: true },
+        totals: { promptTokens: 42000, completionTokens: 6000 },
+        toolCounts: { read_file: 8, run_command: 6 },
+      };
+      yield { type: 'tool_result', toolResult: { name: 'run_command', result: { ok: true, meta: { kind: 'command', command: 'npm test', stdout: '', stderr: '', exitCode: 0, durationMs: 3200 } } } };
+      yield { type: 'tool_result', toolResult: { name: 'edit_file', result: { ok: false } } };
+      yield { type: 'summary', summary: '压缩摘要' };
+      yield { type: 'done' };
+    })();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 's1', events });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { container, querySelector } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj', contextWindow: 128000 },
+    });
+    await typeAndSend(querySelector, '写个测试');
+    expect(container.textContent).toContain('42.0K / 128.0K（估算）');
+    expect(container.textContent).toContain('输入 42.0K · 输出 6.0K');
+    expect(container.textContent).toContain('读取');
+    expect(container.textContent).toContain('工具调用 14 次');
+    expect(container.textContent).toContain('3.2s');
+    expect(container.textContent).toContain('成功');
+    expect(container.textContent).toContain('失败');
+    expect(container.textContent).toContain('已压缩 1 条消息');
+  });
+
+  it('shows the empty hint before any usage data exists', async () => {
+    const { container } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj', contextWindow: 128000 },
+    });
+    expect(container.textContent).toContain('暂无任务数据');
+  });
+
+  it('clears context stats when a new task starts', async () => {
+    const firstEvents = (async function* () {
+      yield {
+        type: 'usage',
+        usage: { promptTokens: 1000, completionTokens: 500, estimated: false },
+        totals: { promptTokens: 5000, completionTokens: 500 },
+        toolCounts: { read_file: 1 },
+      };
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's1', events: firstEvents });
+    const { container, querySelector } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj', contextWindow: 128000 },
+    });
+    await typeAndSend(querySelector, '第一个任务');
+    expect(container.textContent).toContain('5.0K');
+    const secondEvents = (async function* () {
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's2', events: secondEvents });
+    await typeAndSend(querySelector, '第二个任务');
+    expect(container.textContent).toContain('暂无任务数据');
+  });
+});

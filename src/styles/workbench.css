@@ -2804,6 +2804,125 @@ html[data-platform='darwin'] .sidebar-toggle {
   white-space: nowrap;
 }
 
+/* ---- 任务面板：上下文统计 ---- */
+
+.context-stats {
+  margin-bottom: var(--space-4);
+}
+
+.context-stats__usage-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+}
+
+.context-stats__bar {
+  height: 4px;
+  margin-top: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+}
+
+.context-stats__bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width var(--motion-slow) var(--ease-out);
+}
+
+.context-stats__bar-fill.warn {
+  background: var(--color-warning);
+}
+
+.context-stats__tokens {
+  margin-top: var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xxs);
+}
+
+.context-stats__tools,
+.context-stats__calls {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.context-stats__label {
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+}
+
+.context-stats__tool-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 20px;
+  color: var(--color-text-soft);
+  font-size: var(--fs-xxs);
+}
+
+.context-stats__tool-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+}
+
+.context-stats__tool-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+}
+
+.context-stats__tool-count {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-stats__call {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 20px;
+  color: var(--color-text-soft);
+  font-size: var(--fs-xxs);
+}
+
+.context-stats__call-status.ok {
+  color: var(--color-success);
+}
+
+.context-stats__call-status.fail {
+  color: var(--color-danger);
+}
+
+.context-stats__time {
+  justify-self: end;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-stats__compressed {
+  margin-top: var(--space-2);
+  color: var(--color-warning);
+  font-size: var(--fs-xxs);
+}
+
+.context-stats__empty {
+  margin-bottom: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+}
+
 .deliverable-item {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
