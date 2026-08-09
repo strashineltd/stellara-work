@@ -22,7 +22,7 @@ describe('project window cross-layer contract', () => {
     expect(app).toContain('workDir: project.workDir');
     expect(app).toContain('entryFile: project.entryFile');
     expect(mainView).toContain('workDir: selection.workDir');
-    expect(mainView).toContain('entryFile: selection.path');
+    expect(mainView).toContain('entryFile: selection.entryFile');
   });
 
   it('opens project setup before persistence and keeps existing project rows as toggles', () => {
