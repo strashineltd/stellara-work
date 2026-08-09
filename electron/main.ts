@@ -823,6 +823,15 @@ async function runAgentLoopForIpc(
       // skills 加载失败不影响 agent 运行
     }
 
+    // 加载 MCP 工具（注入 extraTools）
+    let extraTools: import('../shared/ipc').OpenAITool[] = [];
+    try {
+      const { mcpManager } = await import('./mcp/mcp-manager');
+      extraTools = await mcpManager.getEnabledTools();
+    } catch {
+      // MCP 工具加载失败不影响 agent 运行
+    }
+
     for await (const event of runAgentLoop(last.content, {
       model,
       cwd,
@@ -831,6 +840,7 @@ async function runAgentLoopForIpc(
       planMode: request.planMode ?? false,
       platform: { platform: process.platform, arch: process.arch },
       skills,
+      extraTools,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         // P0-1: 向前端发送审批请求，等待用户响应

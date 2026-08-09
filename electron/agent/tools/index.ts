@@ -77,6 +77,11 @@ export async function invokeTool(
     case 'memory_save':
       return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[] }, cwd);
     default: {
+      const rawName = name as string;
+      if (rawName.startsWith('mcp__')) {
+        const { mcpManager } = await import('../../mcp/mcp-manager');
+        return mcpManager.callTool(name, args as Record<string, unknown>);
+      }
       const exhaustive: never = name;
       throw new Error(`未知 tool：${exhaustive}`);
     }

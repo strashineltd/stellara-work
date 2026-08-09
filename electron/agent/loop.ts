@@ -1,4 +1,4 @@
-import type { ModelConfig, ChatMessage, ChatStreamEvent, ToolCall, SkillDef } from '../../shared/ipc';
+import type { ModelConfig, ChatMessage, ChatStreamEvent, ToolCall, SkillDef, OpenAITool } from '../../shared/ipc';
 import { OpenAICompatClient } from '../llm/openai-compat';
 import { allTools, planModeTools, invokeTool } from './tools';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
@@ -26,6 +26,8 @@ export interface AgentLoopOptions {
   activeSkill?: SkillDef;
   /** 中断信号（abort controller） */
   signal?: AbortSignal;
+  /** 额外注入的 LLM 工具（如 MCP 工具），随每次 LLM 调用下发；不进 plan 模式 */
+  extraTools?: OpenAITool[];
   /**
    * 危险工具被调用前的批准回调。
    * 返回 true 放行；false 拒绝（agent 会收到"用户拒绝"错误并继续）。
@@ -145,7 +147,7 @@ export async function* runAgentLoop(
     }
 
     // 调 LLM
-    const tools = planMode ? planModeTools : allTools;
+    const tools = [...(planMode ? planModeTools : allTools), ...(options.extraTools ?? [])];
     const stream = client.chat(
       {
         model: model.model,
@@ -271,7 +273,7 @@ export async function* runAgentLoop(
     const readOnlyCalls: ToolCall[] = [];
     const writeCalls: ToolCall[] = [];
     for (const tc of toolCalls) {
-      if (READ_ONLY_TOOLS.has(tc.function.name) && !planMode) {
+      if (READ_ONLY_TOOLS.has(tc.function.name) && !tc.function.name.startsWith('mcp__') && !planMode) {
         readOnlyCalls.push(tc);
       } else {
         writeCalls.push(tc);
@@ -401,8 +403,8 @@ export async function* runAgentLoop(
         continue;
       }
 
-      // 危险操作需要批准
-      if (DANGEROUS_TOOLS.has(toolName)) {
+      // 危险操作需要批准（MCP 工具可能写数据，一律走审批）
+      if (DANGEROUS_TOOLS.has(toolName) || toolName.startsWith('mcp__')) {
         if (!onApproval) {
           yield {
             type: 'tool_result',

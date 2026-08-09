@@ -299,6 +299,122 @@ describe('memory_context event', () => {
   });
 });
 
+describe('mcp extraTools integration', () => {
+  beforeEach(() => {
+    mockChat.mockReset();
+    mockInvokeTool.mockReset();
+    mockChat.mockImplementation(() => contentThenDone(''));
+  });
+
+  it('passes extraTools into the LLM tools array', async () => {
+    const extraTools = [
+      {
+        type: 'function' as const,
+        function: {
+          name: 'mcp__srv__tool_a',
+          description: 'demo tool',
+          parameters: { type: 'object' },
+        },
+      },
+    ];
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', {
+      model: makeConfig(),
+      cwd: '/work',
+      extraTools,
+    })) {
+      events.push(ev);
+    }
+
+    expect(mockChat).toHaveBeenCalledTimes(1);
+    const sentTools = mockChat.mock.calls[0][0].tools as unknown[];
+    expect(sentTools).toContainEqual(extraTools[0]);
+    expect(sentTools.some((t) => (t as { function: { name: string } }).function.name === 'read_file')).toBe(true);
+  });
+
+  it('dispatches mcp__ tool calls to invokeTool with parsed args', async () => {
+    mockChat.mockReturnValueOnce((async function* () {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: 'm1',
+          type: 'function',
+          function: { name: 'mcp__srv__do_thing', arguments: '{"x":1}' },
+        },
+      };
+      yield { type: 'done' };
+    })());
+    mockInvokeTool.mockResolvedValue({ ok: true, output: 'ok' });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', { model: makeConfig(), cwd: '/work', onApproval: async () => true })) {
+      events.push(ev);
+    }
+
+    expect(mockInvokeTool).toHaveBeenCalledTimes(1);
+    expect(mockInvokeTool).toHaveBeenCalledWith('mcp__srv__do_thing', { x: 1 }, '/work');
+    const result = events.find((e) => e.type === 'tool_result');
+    expect(result?.type === 'tool_result' && result.toolResult?.result).toEqual({ ok: true, output: 'ok' });
+  });
+
+  it('requires onApproval for mcp__ tool calls (dangerous)', async () => {
+    mockChat.mockReturnValueOnce((async function* () {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: 'm2',
+          type: 'function',
+          function: { name: 'mcp__srv__write_db', arguments: '{}' },
+        },
+      };
+      yield { type: 'done' };
+    })());
+
+    const approvals: string[] = [];
+    const events: ChatStreamEvent[] = [];
+    mockInvokeTool.mockResolvedValue({ ok: true, output: 'written' });
+    for await (const ev of collect('task', {
+      model: makeConfig(),
+      cwd: '/work',
+      onApproval: async (tc) => {
+        approvals.push(tc.function.name);
+        return true;
+      },
+    })) {
+      events.push(ev);
+    }
+
+    expect(approvals).toEqual(['mcp__srv__write_db']);
+    expect(mockInvokeTool).toHaveBeenCalledWith('mcp__srv__write_db', {}, '/work');
+  });
+
+  it('rejects mcp__ tool calls when onApproval is not provided', async () => {
+    mockChat.mockReturnValueOnce((async function* () {
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: 'm3',
+          type: 'function',
+          function: { name: 'mcp__srv__risky', arguments: '{}' },
+        },
+      };
+      yield { type: 'done' };
+    })());
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', { model: makeConfig(), cwd: '/work' })) {
+      events.push(ev);
+    }
+
+    expect(mockInvokeTool).not.toHaveBeenCalled();
+    const result = events.find((e) => e.type === 'tool_result');
+    expect(result?.type === 'tool_result' && result.toolResult?.result).toEqual({
+      ok: false,
+      error: '危险工具未提供 onApproval，默认拒绝',
+    });
+  });
+});
+
 describe('cumulative usage events', () => {
   beforeEach(() => {
     mockChat.mockReset();
