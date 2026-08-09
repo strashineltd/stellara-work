@@ -120,11 +120,18 @@ describe('callMcpTool', () => {
     expect(res).toEqual({ ok: true, output: 'a\nb' });
   });
 
-  it('isError returns ok:false with error text', async () => {
+  it('isError returns ok:false with prefixed error text', async () => {
     const client = makeClient();
     client.callTool.mockResolvedValue({ content: [{ type: 'text', text: 'permission denied' }], isError: true });
     const res = await callMcpTool(client as never, 'write', {});
-    expect(res).toEqual({ ok: false, output: 'permission denied', error: 'permission denied' });
+    expect(res).toEqual({ ok: false, output: 'permission denied', error: 'MCP 工具执行错误: permission denied' });
+  });
+
+  it('isError with empty content returns sentinel error', async () => {
+    const client = makeClient();
+    client.callTool.mockResolvedValue({ content: [], isError: true });
+    const res = await callMcpTool(client as never, 'write', {});
+    expect(res).toEqual({ ok: false, output: '', error: 'MCP 工具执行错误' });
   });
 
   it('swallows rejected calls into ok:false', async () => {
@@ -431,7 +438,20 @@ describe('McpManager', () => {
         return client;
       });
       const res = await mcpManager.callTool('mcp__s1__write', {});
-      expect(res).toEqual({ ok: false, output: 'permission denied', error: 'permission denied' });
+      expect(res).toEqual({ ok: false, output: 'permission denied', error: 'MCP 工具执行错误: permission denied' });
+      expect(mockClient).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not reconnect on isError with empty content', async () => {
+      await seed(stdioCfg);
+      const client = makeClient();
+      client.callTool.mockResolvedValue({ content: [], isError: true });
+      mockClient.mockImplementation(function () {
+        return client;
+      });
+      await mcpManager.getEnabledTools();
+      const res = await mcpManager.callTool('mcp__s1__read', {});
+      expect(res).toEqual({ ok: false, output: '', error: 'MCP 工具执行错误' });
       expect(mockClient).toHaveBeenCalledTimes(1);
     });
   });

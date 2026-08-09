@@ -124,7 +124,7 @@ export class McpManager {
       return { ok: false, output: '', error: errorMessage(e) };
     }
     const result = await callMcpTool(entry.client, toolName, args);
-    if (result.ok || result.output !== '') return result;
+    if (result.ok || result.error?.startsWith('MCP 工具执行错误')) return result;
     this.invalidateFor(serverId);
     try {
       return await callMcpTool((await this.getEntry(serverId)).client, toolName, args);

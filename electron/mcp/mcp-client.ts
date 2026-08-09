@@ -54,7 +54,8 @@ export async function callMcpTool(client: Client, name: string, args: unknown): 
     })) as unknown as CallToolResponse;
     const output = extractText(res);
     if (res.isError) {
-      return { ok: false, output, error: output || 'MCP 工具调用失败' };
+      const error = output ? `MCP 工具执行错误: ${output}` : 'MCP 工具执行错误';
+      return { ok: false, output, error };
     }
     return { ok: true, output };
   } catch (e) {
