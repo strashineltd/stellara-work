@@ -7,7 +7,7 @@ interface ProjectDialogProps {
   mode?: 'create' | 'edit';
   project?: ProjectSummary;
   workDir?: string;
-  onCreate?: (name: string, selection: ProjectFileSelection) => void | Promise<void>;
+  onCreate?: (name: string, selection: { workDir: string; entryFile?: string }) => void | Promise<void>;
   onRename?: (id: string, name: string) => void | Promise<void>;
   onUpdateFile?: (id: string, selection: ProjectFileSelection) => Project | Promise<Project>;
   onClose: () => void;
@@ -39,7 +39,7 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
   const [savedName, setSavedName] = useState(initialName);
   const [projectWorkDir, setProjectWorkDir] = useState(workDir ?? '');
   const [selectedFile, setSelectedFile] = useState<string | null>(project?.entryFile ?? null);
-  const [busyAction, setBusyAction] = useState<'createProject' | 'rename' | 'pick' | 'create' | 'open' | null>(null);
+  const [busyAction, setBusyAction] = useState<'createProject' | 'rename' | 'pick' | 'pickDir' | 'create' | 'open' | null>(null);
   const [feedback, setFeedback] = useState<DialogFeedback | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -71,14 +71,14 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
     }
     if (isCreateMode) {
       if (!onCreate) return;
-      if (!selectedFile || !projectWorkDir) {
-        setFeedback({ kind: 'error', message: '请先选择现有文件或新建一个文件', scope: 'file' });
+      if (!projectWorkDir) {
+        setFeedback({ kind: 'error', message: '请先选择工作区文件夹或入口文件', scope: 'file' });
         return;
       }
       setBusyAction('createProject');
       setFeedback(null);
       try {
-        await onCreate(nextName, { path: selectedFile, workDir: projectWorkDir });
+        await onCreate(nextName, { workDir: projectWorkDir, entryFile: selectedFile ?? undefined });
       } catch (error) {
         setFeedback({ kind: 'error', message: `项目创建失败：${errorMessage(error)}`, scope: 'name' });
         requestAnimationFrame(() => nameInputRef.current?.focus());
@@ -119,6 +119,22 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
       setFeedback({ kind: 'success', message: '已选择文件', scope: 'file' });
     } catch (error) {
       setFeedback({ kind: 'error', message: `选择文件失败：${errorMessage(error)}`, scope: 'file' });
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handlePickDir() {
+    setBusyAction('pickDir');
+    setFeedback(null);
+    try {
+      const result = await window.electronAPI.dialog.selectProjectDir();
+      if (!result) return;
+      setProjectWorkDir(result.workDir);
+      setSelectedFile(result.entryFile ?? null);
+      setFeedback({ kind: 'success', message: `已选择工作区 ${basename(result.workDir)}`, scope: 'file' });
+    } catch (error) {
+      setFeedback({ kind: 'error', message: `选择文件夹失败：${errorMessage(error)}`, scope: 'file' });
     } finally {
       setBusyAction(null);
     }
@@ -216,13 +232,22 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
         <section className="project-dialog-files" aria-labelledby="project-dialog-files-title">
           <div className="project-dialog-section-heading">
             <div>
-              <h3 id="project-dialog-files-title">项目入口文件{isCreateMode ? '（必选）' : ''}</h3>
-              <p>{isCreateMode ? '选择现有文件或新建文件，文件所在目录将成为该项目的工作区。' : '可重新选择或新建入口文件，项目工作区会同步切换到文件所在目录。'}</p>
+              <h3 id="project-dialog-files-title">项目入口文件{isCreateMode ? '（可选）' : ''}</h3>
+              <p>{isCreateMode ? '选择文件夹作为项目工作区；可另选入口文件（可选）。' : '可重新选择或新建入口文件，项目工作区会同步切换到文件所在目录。'}</p>
             </div>
             <code title={projectWorkDir}>{projectWorkDir ? basename(projectWorkDir) : '尚未选择'}</code>
           </div>
 
           <div className="project-file-actions">
+            {isCreateMode && (
+              <button type="button" className="project-file-action" onClick={() => void handlePickDir()} disabled={isBusy}>
+                <Icon name="folder" size={16} />
+                <span>
+                  <strong>{busyAction === 'pickDir' ? '正在选择…' : '选择文件夹'}</strong>
+                  <small>选择文件夹作为项目工作区</small>
+                </span>
+              </button>
+            )}
             <button type="button" className="project-file-action" onClick={() => void handlePickFile()} disabled={isBusy}>
               <Icon name="folder" size={16} />
               <span>
@@ -245,7 +270,7 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
           </div>
 
           {!selectedFile && (
-            <p className="project-dialog-empty" role="status">程序不会预设工作项目。请为这个项目选择一个入口文件。</p>
+            <p className="project-dialog-empty" role="status">{isCreateMode ? '尚未选择入口文件（可选），不会影响项目创建。' : '程序不会预设工作项目。请为这个项目选择一个入口文件。'}</p>
           )}
 
           {selectedFile && projectWorkDir && (
@@ -273,7 +298,7 @@ export function ProjectDialog({ mode = 'edit', project, workDir, onCreate, onRen
           {isCreateMode ? (
             <>
               <button className="btn btn-secondary" type="button" onClick={onClose} disabled={isBusy}>取消</button>
-              <button className="btn btn-primary" type="submit" form="project-dialog-name-form" disabled={isBusy || !name.trim() || !selectedFile || !projectWorkDir}>
+              <button className="btn btn-primary" type="submit" form="project-dialog-name-form" disabled={isBusy || !name.trim() || !projectWorkDir}>
                 {busyAction === 'createProject' ? '创建中…' : '创建项目'}
               </button>
             </>

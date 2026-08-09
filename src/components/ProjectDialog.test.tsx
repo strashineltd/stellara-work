@@ -17,12 +17,13 @@ function installApi(overrides?: Partial<ElectronAPI['dialog']>) {
   const openFile = vi.fn().mockResolvedValue('D:\\Stellara Work\\README.md');
   const selectProjectFile = vi.fn().mockResolvedValue({ path: 'D:\\Stellara Work\\README.md', workDir: 'D:\\Stellara Work' });
   const createProjectFile = vi.fn().mockResolvedValue({ path: 'D:\\Stellara Work\\notes.md', workDir: 'D:\\Stellara Work' });
+  const selectProjectDir = vi.fn().mockResolvedValue({ workDir: 'D:/workspace/folder-project', entryFile: 'D:/workspace/folder-project/README.md' });
   const createFile = vi.fn().mockResolvedValue({ path: 'D:\\Stellara Work\\notes.md' });
   const openPath = vi.fn().mockResolvedValue(true);
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      dialog: { openFile, openDirectory: vi.fn(), selectProjectFile, createProjectFile, ...overrides },
+      dialog: { openFile, openDirectory: vi.fn(), selectProjectFile, createProjectFile, selectProjectDir, ...overrides },
       fs: {
         listTree: vi.fn(),
         readFile: vi.fn(),
@@ -31,7 +32,7 @@ function installApi(overrides?: Partial<ElectronAPI['dialog']>) {
       },
     } as unknown as ElectronAPI,
   });
-  return { openFile, selectProjectFile, createProjectFile, createFile, openPath };
+  return { openFile, selectProjectFile, createProjectFile, selectProjectDir, createFile, openPath };
 }
 
 function renderDialog(props?: Partial<React.ComponentProps<typeof ProjectDialog>>) {
@@ -69,7 +70,10 @@ function fireInput(element: HTMLInputElement | null, value: string) {
 }
 
 function buttonByText(container: ParentNode, text: string): HTMLButtonElement | null {
-  return Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes(text)) ?? null;
+  const buttons = Array.from(container.querySelectorAll('button'));
+  const exact = buttons.find((button) => button.querySelector('strong')?.textContent === text);
+  if (exact) return exact;
+  return buttons.find((button) => button.textContent?.includes(text)) ?? null;
 }
 
 describe('ProjectDialog', () => {
@@ -96,7 +100,7 @@ describe('ProjectDialog', () => {
     const name = container.querySelector('#project-dialog-name') as HTMLInputElement;
     expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-labelledby')).toBe('project-dialog-title');
     expect(container.textContent).toContain('创建项目');
-    expect(container.textContent).toContain('项目入口文件（必选）');
+    expect(container.textContent).toContain('项目入口文件（可选）');
     expect(name.value).toBe('');
     expect(name.required).toBe(true);
     expect(container.textContent).toContain('必填');
@@ -132,8 +136,8 @@ describe('ProjectDialog', () => {
     });
     expect(onCreate).toHaveBeenCalledOnce();
     expect(onCreate).toHaveBeenCalledWith('桌面工具', {
-      path: 'D:\\Stellara Work\\README.md',
       workDir: 'D:\\Stellara Work',
+      entryFile: 'D:\\Stellara Work\\README.md',
     });
   });
 
@@ -207,5 +211,53 @@ describe('ProjectDialog', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('文件已存在');
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('selects a folder as the project workspace and auto-fills README', async () => {
+    const api = installApi();
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderDialog({ mode: 'create', project: undefined, onCreate });
+    fireInput(container.querySelector('#project-dialog-name'), '文件夹项目');
+    expect(buttonByText(container, '选择文件夹')).toBeTruthy();
+    await act(async () => {
+      fireClick(buttonByText(container, '选择文件夹'));
+      await Promise.resolve();
+    });
+    expect(api.selectProjectDir).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('folder-project');
+    expect(container.textContent).toContain('README.md');
+    await act(async () => {
+      fireClick(buttonByText(container, '创建项目'));
+      await Promise.resolve();
+    });
+    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onCreate).toHaveBeenCalledWith('文件夹项目', {
+      workDir: 'D:/workspace/folder-project',
+      entryFile: 'D:/workspace/folder-project/README.md',
+    });
+  });
+
+  it('allows creating a project without an entry file', async () => {
+    const selectProjectDir = vi.fn().mockResolvedValue({ workDir: 'D:/workspace/folder-project' });
+    installApi({ selectProjectDir });
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderDialog({ mode: 'create', project: undefined, onCreate });
+    fireInput(container.querySelector('#project-dialog-name'), '纯文件夹');
+    await act(async () => {
+      fireClick(buttonByText(container, '选择文件夹'));
+      await Promise.resolve();
+    });
+    expect(selectProjectDir).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain('README.md');
+    expect(buttonByText(container, '创建项目')?.disabled).toBe(false);
+    await act(async () => {
+      fireClick(buttonByText(container, '创建项目'));
+      await Promise.resolve();
+    });
+    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onCreate).toHaveBeenCalledWith('纯文件夹', {
+      workDir: 'D:/workspace/folder-project',
+      entryFile: undefined,
+    });
   });
 });

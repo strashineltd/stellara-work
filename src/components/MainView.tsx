@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AppInfo, ApprovalRequest, ConfiguredModel, ModelListItem,
-  SessionSummary, Session, SkillDef, Project, ProjectFileSelection,
+  SessionSummary, Session, SkillDef, Project,
 } from '../../shared/ipc';
 import {
   type DisplayEntry,
@@ -465,11 +465,11 @@ export function MainView(props: MainViewProps) {
     }
   }
 
-  async function handleCreateProject(name: string, selection: ProjectFileSelection) {
+  async function handleCreateProject(name: string, selection: { workDir: string; entryFile?: string }) {
     const project = await window.electronAPI.projects.create({
       name,
       workDir: selection.workDir,
-      entryFile: selection.path,
+      entryFile: selection.entryFile,
     });
     onProjectCreated(project);
     setCreateProjectOpen(false);
