@@ -661,13 +661,17 @@ function registerIpcHandlers(): void {
     };
   });
 
-  // 校验技能文件相对路径：resolve 后必须在 workDir/skills 内，返回绝对路径
-  async function assertSkillFile(workDir: string, file: string): Promise<string> {
+  // 校验技能文件相对路径：resolve 后必须在 workDir/skills 内，返回绝对路径。
+  // mode 'existing'（update/delete）用 verifyExistingPath 做真实路径校验（防 symlink 指向外部被覆盖/删除），
+  // mode 'write'（create）用 verifyWritePath 校验父目录，失败均抛其 error。
+  async function assertSkillFile(workDir: string, file: string, mode: 'existing' | 'write'): Promise<string> {
     const skillsDir = path.join(workDir, 'skills');
     const resolved = path.resolve(skillsDir, file);
-    const { isWithinDir } = await import('./fs/path-security');
-    if (!isWithinDir(resolved, skillsDir)) throw new Error('技能文件超出 skills 目录');
-    return resolved;
+    const { verifyExistingPath, verifyWritePath } = await import('./fs/path-security');
+    const check =
+      mode === 'write' ? await verifyWritePath(resolved, skillsDir) : await verifyExistingPath(resolved, skillsDir);
+    if (!check.ok) throw new Error(check.error);
+    return check.realPath;
   }
 
   ipcMain.handle('skills:list', async (_e, workDir: string) => {
@@ -689,7 +693,7 @@ function registerIpcHandlers(): void {
     const name = sanitizeSkillName(input.name);
     if (!name) throw new Error('技能名称不能为空');
     const file = `${name}.md`;
-    const resolved = await assertSkillFile(workDir, file);
+    const resolved = await assertSkillFile(workDir, file, 'write');
     let exists = true;
     try {
       await fs.access(resolved);
@@ -707,7 +711,7 @@ function registerIpcHandlers(): void {
     if (path.isAbsolute(file)) throw new Error('技能文件需为相对路径');
     if (!file.endsWith('.md')) throw new Error('旧格式技能仅支持删除');
     const { mergeSkillFrontmatter } = await import('./agent/skills');
-    const resolved = await assertSkillFile(workDir, file);
+    const resolved = await assertSkillFile(workDir, file, 'existing');
     const original = await fs.readFile(resolved, 'utf-8');
     await fs.writeFile(resolved, mergeSkillFrontmatter(original, patch), 'utf-8');
     broadcastSettingsChanged();
@@ -716,7 +720,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('skills:delete', async (_e, workDir: string, file: string) => {
     await assertWorkDirAllowed(workDir);
     if (path.isAbsolute(file)) throw new Error('技能文件需为相对路径');
-    const resolved = await assertSkillFile(workDir, file);
+    const resolved = await assertSkillFile(workDir, file, 'existing');
     await fs.unlink(resolved);
     broadcastSettingsChanged();
   });

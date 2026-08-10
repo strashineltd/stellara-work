@@ -190,7 +190,10 @@ export function mergeSkillFrontmatter(original: string, patch: SkillPatch): stri
   const seen = new Set<string>();
   for (const raw of m[1].split('\n')) {
     const fm = /^([^:\n]+):/.exec(raw);
-    if (!fm) continue;
+    if (!fm) {
+      lines.push(raw);
+      continue;
+    }
     const key = fm[1].trim();
     if (seen.has(key)) continue;
     seen.add(key);

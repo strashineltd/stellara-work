@@ -285,6 +285,19 @@ describe('mergeSkillFrontmatter', () => {
     const merged = mergeSkillFrontmatter('# 标题\n\n正文', { name: 'x', description: 'd', prompt: 'p' });
     expect(merged).toBe('---\nname: x\ndescription: d\n---\n\np');
   });
+
+  it('patch description 保留多行字段的缩进续行与注释', () => {
+    const merged = mergeSkillFrontmatter(
+      '---\nname: review\ndescription: 旧描述\nallowed-tools:\n  - read\n  - grep\n# 注释\n\n---\n\n正文',
+      { description: '新描述' },
+    );
+    expect(merged).toContain('allowed-tools:');
+    expect(merged).toContain('  - read');
+    expect(merged).toContain('  - grep');
+    expect(merged).toContain('# 注释');
+    expect(merged).toContain('description: 新描述');
+    expect(merged).not.toContain('旧描述');
+  });
 });
 
 describe('sanitizeSkillName', () => {
