@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>技能可视化管理 · 设计预览 · Stellara Work</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", system-ui, sans-serif;
+    font-size: 13px; color: var(--text); background: var(--bg-app);
+    -webkit-font-smoothing: antialiased;
+  }
+  :root {
+    --bg-app: #f1f5fb; --bg-content: #ffffff; --bg-soft: #f6f8fc; --bg-input: #ffffff;
+    --bg-selected: #edf4ff; --bg-code: #f4f7fb;
+    --text: #293449; --text-strong: #111827; --text-soft: #64748b; --text-faint: #667085;
+    --border: #e6ebf2; --border-strong: #dce3ed; --border-dark: #c8d2e1;
+    --accent: #2f7cf4; --on-accent: #ffffff; --accent-soft: #edf4ff; --accent-hover: #2469d8;
+    --accent-tint: rgba(47,124,244,0.14); --hover: rgba(47,94,157,0.06);
+    --danger: #c14f57; --danger-bg: #fff0f1; --danger-soft: rgba(193,79,87,0.1);
+    --success: #32845d; --success-bg: #edf8f2; --warning: #9a6822; --warning-bg: #fff7e8;
+    --shadow: 0 18px 50px rgba(30,45,75,0.18);
+  }
+  :root[data-theme="dark"] {
+    --bg-app: #14161a; --bg-content: #1e2126; --bg-soft: #22252b; --bg-input: #22252b;
+    --bg-selected: #2c3038; --bg-code: #171a1f;
+    --text: #e8eaf0; --text-strong: #f7f8fa; --text-soft: #b6bcc6; --text-faint: #9aa1ac;
+    --border: #31353d; --border-strong: #3b4049; --border-dark: #525863;
+    --accent: #8ba2bd; --on-accent: #12161c; --accent-soft: #2b313a; --accent-hover: #9db2cb;
+    --accent-tint: rgba(139,162,189,0.18); --hover: rgba(255,255,255,0.055);
+    --danger: #dc908a; --danger-bg: #422c2a; --danger-soft: rgba(220,144,138,0.12);
+    --success: #83b292; --success-bg: #2b3b30; --warning: #d0aa69; --warning-bg: #3c3426;
+    --shadow: 0 18px 50px rgba(0,0,0,0.5);
+  }
+
+  .stage { min-height: 100vh; display: grid; place-items: center; padding: 40px 20px; }
+  .settings-win {
+    width: 760px; height: 680px;
+    background: var(--bg-content); border: 1px solid var(--border-strong);
+    border-radius: 14px; box-shadow: var(--shadow);
+    display: grid; grid-template-rows: 46px minmax(0, 1fr); overflow: hidden;
+  }
+  .win-titlebar { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+  .win-titlebar .dots { display: flex; gap: 7px; }
+  .win-titlebar .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .win-titlebar .dot.r { background: #ff5f57; } .win-titlebar .dot.y { background: #febc2e; } .win-titlebar .dot.g { background: #28c840; }
+  .win-titlebar .t { margin-left: 8px; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+  .win-titlebar .spacer { flex: 1; }
+
+  .win-body { display: grid; grid-template-columns: 168px minmax(0, 1fr); min-height: 0; }
+  .nav { background: var(--bg-soft); border-right: 1px solid var(--border); padding: 10px 8px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 0 10px;
+    border: none; background: transparent; border-radius: 8px; color: var(--text-soft); font-size: 12.5px; cursor: pointer; text-align: left;
+  }
+  .nav-item.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .nav-item svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+
+  .panel { padding: 18px 20px; overflow: auto; min-height: 0; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .panel-head h2 { font-size: 15px; font-weight: 650; color: var(--text-strong); }
+  .panel-head .sub { color: var(--text-faint); font-size: 11.5px; margin-top: 3px; }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid transparent; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
+  .btn.ghost { background: transparent; border-color: var(--border-strong); color: var(--text-soft); }
+  .btn.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-soft); }
+  .btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+
+  .section { margin-bottom: 18px; }
+  .section-title { display: flex; align-items: center; gap: 7px; color: var(--text-soft); font-size: 11.5px; font-weight: 650; letter-spacing: 0.02em; margin-bottom: 8px; }
+  .section-title .count { color: var(--text-faint); font-weight: 500; }
+  .group { background: var(--bg-content); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; min-height: 46px; }
+  .row + .row { border-top: 1px solid var(--border); }
+  .row .grow { flex: 1; min-width: 0; }
+
+  .search { display: flex; align-items: center; gap: 8px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 9px; padding: 0 10px; height: 32px; margin-bottom: 10px; color: var(--text-faint); }
+  .search svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+  .search input { border: none; outline: none; background: transparent; flex: 1; color: var(--text); font-size: 12px; }
+
+  /* Skill card */
+  .skill-row { align-items: flex-start; }
+  .skill-icon { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+  .skill-icon svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+  .skill-name { display: flex; align-items: center; gap: 8px; font-weight: 620; font-size: 12.5px; color: var(--text); }
+  .fmt-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; }
+  .fmt-badge.md { color: var(--accent); background: var(--accent-soft); }
+  .fmt-badge.json { color: var(--warning); background: var(--warning-bg); }
+  .skill-desc { color: var(--text-faint); font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
+  .skill-path { color: var(--text-faint); font-family: var(--mono); font-size: 10.5px; margin-top: 6px; }
+  .skill-ops { display: flex; align-items: center; gap: 6px; }
+  .icon-btn { width: 26px; height: 26px; display: grid; place-items: center; border: none; background: transparent; border-radius: 7px; color: var(--text-faint); cursor: pointer; }
+  .icon-btn:hover { color: var(--text); background: var(--hover); }
+  .icon-btn.danger:hover { color: var(--danger); background: var(--danger-soft); }
+  .icon-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+  .skill-prompt { max-height: 200px; margin: 10px 0 0; padding: 10px 12px; overflow: auto; color: var(--text-soft); border: 1px solid var(--border); border-radius: 9px; background: var(--bg-code); font-size: 11px; line-height: 1.6; white-space: pre-wrap; }
+
+  /* Toggle switch */
+  .switch { position: relative; display: inline-block; width: 34px; height: 20px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider { position: absolute; inset: 0; background: var(--border-dark); border-radius: 999px; transition: 150ms; cursor: pointer; }
+  .switch .slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: var(--bg-content); border-radius: 50%; transition: 150ms; }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(14px); }
+
+  /* Add/edit form */
+  .form-panel { border: 1px solid var(--accent-tint); border-radius: 12px; background: var(--bg-content); padding: 14px; margin-bottom: 14px; }
+  .form-row { display: grid; gap: 5px; margin-bottom: 12px; }
+  .form-row label { font-size: 11.5px; color: var(--text-soft); font-weight: 550; }
+  .form-row input, .form-row textarea {
+    border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-input);
+    color: var(--text); font-size: 12.5px; padding: 8px 10px; outline: none; font-family: inherit; resize: vertical;
+  }
+  .form-row input:focus, .form-row textarea:focus { border-color: var(--accent); }
+  .form-row textarea { min-height: 90px; font-family: "SFMono-Regular", ui-monospace, monospace; font-size: 11.5px; line-height: 1.6; }
+  .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .form-hint { color: var(--text-faint); font-size: 10.5px; margin-top: 3px; }
+
+  /* MCP section */
+  .mcp-row .grow .top { display: flex; align-items: center; gap: 8px; }
+  .mcp-name { font-weight: 620; font-size: 12.5px; }
+  .transport-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; color: var(--text-soft); background: var(--bg-soft); }
+  .mcp-desc { color: var(--text-faint); font-size: 11px; margin-top: 3px; }
+  .mcp-detail { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-soft); }
+  .mcp-detail .title { font-size: 11px; font-weight: 600; color: var(--text-soft); margin-bottom: 8px; }
+  .tool-check { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: var(--text); }
+  .tool-check input { accent-color: var(--accent); }
+
+  .empty-hint { padding: 14px; color: var(--text-faint); font-size: 12px; line-height: 1.7; }
+
+  .theme-switch { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: inline-flex; gap: 6px; padding: 5px; background: var(--bg-content); border: 1px solid var(--border-strong); border-radius: 999px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+  .theme-switch button { border: none; background: transparent; padding: 6px 12px; border-radius: 999px; color: var(--text-soft); font-size: 12px; cursor: pointer; }
+  .theme-switch button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="settings-win">
+    <div class="win-titlebar">
+      <span class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></span>
+      <span class="t">设置</span>
+      <span class="spacer"></span>
+      <span class="t" style="font-weight:400">Stellara Work 0.9.0</span>
+    </div>
+    <div class="win-body">
+      <nav class="nav">
+        <div class="nav-item"><svg><path d="M3 8.5 8 3l5 5.5M4.5 7.5V13h7V7.5"/></svg>模型</div>
+        <div class="nav-item"><svg><path d="M3 4h10v9H3zM6 3v2M10 3v2"/></svg>会话</div>
+        <div class="nav-item"><svg><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.3M8 12.9v1.3M14.2 8h-1.3M3.1 8H1.8M12.4 3.6l-.9.9M4.5 11.5l-.9.9M12.4 12.4l-.9-.9M4.5 4.5l-.9-.9"/></svg>应用</div>
+        <div class="nav-item active"><svg><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M8 6v4M6 8h4"/></svg>技能与 MCP</div>
+        <div class="nav-item"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg>快捷键</div>
+      </nav>
+
+      <main class="panel">
+        <div class="panel-head">
+          <div><h2>技能与 MCP</h2><div class="sub">项目技能与 MCP 服务器</div></div>
+        </div>
+
+        <!-- 技能区块 -->
+        <div class="section">
+          <div class="section-title">技能 <span class="count">3</span></div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <div class="search" style="margin-bottom:0;flex:1">
+              <svg><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+              <input placeholder="搜索技能名称或描述…" />
+            </div>
+            <button class="btn primary" onclick="toggleForm()"><svg><path d="M8 3v10M3 8h10"/></svg>新建技能</button>
+          </div>
+
+          <!-- 新建/编辑表单（折叠） -->
+          <div class="form-panel" id="skill-form" style="display:none">
+            <div class="form-row">
+              <label>名称</label>
+              <input placeholder="如 code-review（将生成 skills/code-review.md）" />
+            </div>
+            <div class="form-row">
+              <label>描述</label>
+              <input placeholder="何时使用这个技能" />
+            </div>
+            <div class="form-row">
+              <label>内容（prompt）</label>
+              <textarea placeholder="技能的执行指令，支持 Markdown…"></textarea>
+            </div>
+            <div class="form-actions">
+              <button class="btn ghost" onclick="toggleForm()">取消</button>
+              <button class="btn primary" onclick="toggleForm()">保存</button>
+            </div>
+          </div>
+
+          <div class="group">
+            <!-- 启用中的技能 -->
+            <div class="row skill-row">
+              <span class="skill-icon"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg></span>
+              <div class="grow">
+                <div class="skill-name">代码审查 <span class="fmt-badge md">.md</span></div>
+                <div class="skill-desc">对当前变更做全面代码审查，输出发现清单与修复建议</div>
+                <div class="skill-path">skills/review/code-review.md</div>
+                <div class="skill-prompt" id="prompt-1" style="display:none">---
+name: code-review
+description: 对当前变更做全面代码审查，输出发现清单与修复建议。
+---
+
+审查当前 git 变更：
+1. 用 git_status 查看变更文件
+2. 逐个用 git_diff 查看改动
+3. 检查：逻辑错误 / 边界情况 / 安全风险 / 可读性
+4. 输出：发现清单（严重程度分级）+ 修复建议</div>
+              </div>
+              <div class="skill-ops">
+                <label class="switch" title="启用/禁用">
+                  <input type="checkbox" checked onchange="toggleSkill(1, this)">
+                  <span class="slider"></span>
+                </label>
+                <button class="icon-btn" title="展开详情" onclick="togglePrompt(1)"><svg><path d="M8 2.5 9.7 6l3.8.5-2.8 2.6.7 3.8L8 10.8l-3.4 1.9.7-3.8L2.5 6.5 6.3 6z"/></svg></button>
+                <button class="icon-btn" title="编辑" onclick="editSkill()"><svg><path d="m4 12-.5 2.5L6 14l7.5-7.5-2-2zM9 7.5l2 2"/></svg></button>
+                <button class="icon-btn danger" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+            </div>
+
+            <!-- 启用的技能 -->
+            <div class="row skill-row">
+              <span class="skill-icon"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg></span>
+              <div class="grow">
+                <div class="skill-name">macOS 打包 <span class="fmt-badge md">.md</span></div>
+                <div class="skill-desc">构建 arm64 dmg/zip 并验证产物</div>
+                <div class="skill-path">skills/macos-packaging.md</div>
+              </div>
+              <div class="skill-ops">
+                <label class="switch" title="启用/禁用">
+                  <input type="checkbox" checked>
+                  <span class="slider"></span>
+                </label>
+                <button class="icon-btn" title="展开详情"><svg><path d="M8 2.5 9.7 6l3.8.5-2.8 2.6.7 3.8L8 10.8l-3.4 1.9.7-3.8L2.5 6.5 6.3 6z"/></svg></button>
+                <button class="icon-btn" title="编辑"><svg><path d="m4 12-.5 2.5L6 14l7.5-7.5-2-2zM9 7.5l2 2"/></svg></button>
+                <button class="icon-btn danger" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+            </div>
+
+            <!-- 禁用的技能（开关关闭 → 灰显） -->
+            <div class="row skill-row" style="opacity:.55">
+              <span class="skill-icon"><svg><path d="M3 3h10v7.5L8 14l-5-3.5z"/><path d="M5.5 6.5h5M5.5 9h3"/></svg></span>
+              <div class="grow">
+                <div class="skill-name">旧版笔记 <span class="fmt-badge json">.json</span></div>
+                <div class="skill-desc">旧格式技能（已禁用，不会注入 Agent）</div>
+                <div class="skill-path">skills/legacy-notes.json · 旧格式仅可删除</div>
+              </div>
+              <div class="skill-ops">
+                <label class="switch" title="启用/禁用">
+                  <input type="checkbox">
+                  <span class="slider"></span>
+                </label>
+                <button class="icon-btn" title="展开详情"><svg><path d="M8 2.5 9.7 6l3.8.5-2.8 2.6.7 3.8L8 10.8l-3.4 1.9.7-3.8L2.5 6.5 6.3 6z"/></svg></button>
+                <button class="icon-btn danger" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+            </div>
+
+            <div class="row" style="color:var(--warning);background:var(--warning-bg)">
+              <span style="font-size:12px">1 个文件格式错误：skills/broken.md（缺少 description）</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MCP 区块（现有形态） -->
+        <div class="section">
+          <div class="section-title">MCP 服务器 <span class="count">1</span></div>
+          <div class="group">
+            <div class="row mcp-row">
+              <div class="grow">
+                <div class="top">
+                  <span class="mcp-name">文件系统</span>
+                  <span class="transport-badge">stdio</span>
+                  <span class="transport-badge" style="color:var(--success);background:var(--success-bg)">已连接 · 4 工具</span>
+                </div>
+                <div class="mcp-desc">npx @modelcontextprotocol/server-filesystem</div>
+                <div class="mcp-detail">
+                  <div class="title">工具（勾选启用，默认全部）</div>
+                  <label class="tool-check"><input type="checkbox" checked> read_file — 读取文件内容</label>
+                  <label class="tool-check"><input type="checkbox" checked> write_file — 写入文件</label>
+                  <label class="tool-check"><input type="checkbox" checked> list_directory — 列出目录</label>
+                  <label class="tool-check"><input type="checkbox" checked> search_files — 搜索文件</label>
+                </div>
+              </div>
+              <div class="skill-ops">
+                <label class="switch" title="启用/禁用"><input type="checkbox" checked><span class="slider"></span></label>
+                <button class="icon-btn danger" title="删除"><svg><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:10px">
+            <button class="btn ghost"><svg><path d="M8 3v10M3 8h10"/></svg>添加服务器</button>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
+
+<div class="theme-switch">
+  <button id="sw-light" class="on" onclick="setTheme('light')">浅色</button>
+  <button id="sw-dark" onclick="setTheme('dark')">深色</button>
+</div>
+
+<script>
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  document.getElementById('sw-light').classList.toggle('on', t === 'light');
+  document.getElementById('sw-dark').classList.toggle('on', t === 'dark');
+}
+function toggleForm() {
+  const f = document.getElementById('skill-form');
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+}
+function togglePrompt(id) {
+  const p = document.getElementById('prompt-' + id);
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+function toggleSkill(id, input) {
+  const row = input.closest('.skill-row');
+  row.style.opacity = input.checked ? 1 : 0.55;
+}
+function editSkill() {
+  const f = document.getElementById('skill-form');
+  f.style.display = '';
+  f.querySelector('label').textContent = '名称（编辑）';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+</body>
+</html>
