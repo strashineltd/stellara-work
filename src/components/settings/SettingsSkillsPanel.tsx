@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SkillDef, SkillLoadError } from '../../../shared/ipc';
+import type { SkillDetailedItem, SkillLoadError } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 import { SettingsMcpSection } from './SettingsMcpSection';
 
@@ -22,11 +22,6 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** 由 SkillDef 推导 skills/ 下的相对文件名（create 固定写 skills/{name}.md；json 仅扫描根目录） */
-function skillFile(s: SkillDef): string {
-  return `${s.name}.${s.format === 'json' ? 'json' : 'md'}`;
-}
-
 /**
  * 设置窗口「技能与 MCP」面板：workDir 从 models.list() 的 configured.workDir 获取，
  * 展示 skills.listDetailed() 返回的全部技能（含禁用项与格式错误），支持：
@@ -35,7 +30,7 @@ function skillFile(s: SkillDef): string {
  */
 export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkillsPanelProps) {
   const [workDir, setWorkDir] = useState<string | null>(null);
-  const [skills, setSkills] = useState<SkillDef[]>([]);
+  const [skills, setSkills] = useState<SkillDetailedItem[]>([]);
   const [skillErrors, setSkillErrors] = useState<SkillLoadError[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -79,34 +74,34 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
     })();
   }, [refreshKey]);
 
-  function toggleSkill(name: string) {
+  function toggleSkill(file: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(file)) next.delete(file);
+      else next.add(file);
       return next;
     });
   }
 
-  function toggleEnabled(s: SkillDef) {
+  function toggleEnabled(s: SkillDetailedItem) {
     const next = !(s.enabled !== false);
     void window.electronAPI.skills
-      .update(workDir!, skillFile(s), { enabled: next })
+      .update(workDir!, s.file, { enabled: next })
       .then(() => {
-        setSkills((prev) => prev.map((x) => (x.name === s.name ? { ...x, enabled: next } : x)));
+        setSkills((prev) => prev.map((x) => (x.file === s.file ? { ...x, enabled: next } : x)));
       })
       .catch((e) => setError(errorMessage(e)));
     onChanged?.();
   }
 
-  function confirmDelete(s: SkillDef) {
-    setConfirmingDelete(s.name);
+  function confirmDelete(s: SkillDetailedItem) {
+    setConfirmingDelete(s.file);
   }
 
-  async function doDelete(s: SkillDef) {
+  async function doDelete(s: SkillDetailedItem) {
     try {
-      await window.electronAPI.skills.delete(workDir!, skillFile(s));
-      setSkills((prev) => prev.filter((x) => x.name !== s.name));
+      await window.electronAPI.skills.delete(workDir!, s.file);
+      setSkills((prev) => prev.filter((x) => x.file !== s.file));
       setConfirmingDelete(null);
       onChanged?.();
     } catch (e) {
@@ -138,9 +133,9 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
     setFormError(null);
   }
 
-  function openEdit(s: SkillDef) {
+  function openEdit(s: SkillDetailedItem) {
     setShowForm('edit');
-    setEditingFile(skillFile(s));
+    setEditingFile(s.file);
     setFormName(s.name);
     setFormDesc(s.description);
     setFormPrompt(s.prompt);
@@ -331,15 +326,15 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
                 </div>
               )}
               {filtered.map((s) => {
-                const isOpen = expanded.has(s.name);
+                const isOpen = expanded.has(s.file);
                 const enabled = s.enabled !== false;
                 const isJson = s.format === 'json';
                 return (
                   <div
-                    key={s.name}
+                    key={s.file}
                     className={`settings-item settings-skill-row${enabled ? '' : ' settings-skill-row--disabled'}`}
-                    data-skill={s.name}
-                    onClick={() => toggleSkill(s.name)}
+                    data-skill={s.file}
+                    onClick={() => toggleSkill(s.file)}
                   >
                     <span className="settings-skill-row__icon" aria-hidden="true">
                       <Icon name="tool" size={15} />
@@ -357,7 +352,7 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
                       {isOpen && (
                         <>
                           <div className="settings-skill-path">
-                            {`skills/${skillFile(s)}`}
+                            {`skills/${s.file}`}
                             {isJson && ' · 旧格式仅可删除'}
                           </div>
                           <pre className="settings-skill-prompt">{s.prompt}</pre>
@@ -386,7 +381,7 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
                         title={isOpen ? '收起 prompt' : '展开 prompt'}
                         onClick={(e) => {
                           e.stopPropagation();
-                          toggleSkill(s.name);
+                          toggleSkill(s.file);
                         }}
                         type="button"
                       >
@@ -406,7 +401,7 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
                           <Icon name="edit" size={14} />
                         </button>
                       )}
-                      {confirmingDelete === s.name ? (
+                      {confirmingDelete === s.file ? (
                         <div className="settings-item__ops">
                           <button
                             className="btn btn-danger"

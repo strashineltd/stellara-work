@@ -1,15 +1,16 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConfiguredModel, ElectronAPI, SkillDef } from '../../../shared/ipc';
+import type { ConfiguredModel, ElectronAPI, SkillDetailedItem } from '../../../shared/ipc';
 import { SettingsSkillsPanel } from './SettingsSkillsPanel';
 
 const WORKDIR = '/Users/lhy/Stellara Work';
 
-const SKILLS: SkillDef[] = [
-  { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md' },
-  { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…', format: 'md', enabled: false },
-  { name: 'legacy-notes', description: '旧格式技能，仅可删除', prompt: 'JSON 格式内容', format: 'json' },
+const SKILLS: SkillDetailedItem[] = [
+  { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md', file: 'code-review.md' },
+  { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…', format: 'md', enabled: false, file: 'macos-pack.md' },
+  { name: 'legacy-notes', description: '旧格式技能，仅可删除', prompt: 'JSON 格式内容', format: 'json', file: 'legacy-notes.json' },
+  { name: 'subdir-review', description: '子目录代码审查', prompt: '子目录审查指令…', format: 'md', file: 'review/subdir-review.md' },
 ];
 
 const CONFIGURED: ConfiguredModel = {
@@ -110,11 +111,11 @@ describe('SettingsSkillsPanel', () => {
     expect(mocks.skillsList).toHaveBeenCalledWith(WORKDIR);
 
     const rows = container.querySelectorAll('.settings-skill-row');
-    expect(rows.length).toBe(3);
+    expect(rows.length).toBe(4);
     expect(byText(container, 'code-review')).toBeTruthy();
     expect(byText(container, '对当前变更做全面代码审查，输出发现清单')).toBeTruthy();
     expect(byText(container, 'macos-pack')).toBeTruthy();
-    expect(container.querySelector('.settings-section__title')?.textContent).toContain('3');
+    expect(container.querySelector('.settings-section__title')?.textContent).toContain('4');
     expect(container.querySelector('.settings-skill-row .settings-skill-row__icon')).toBeTruthy();
   });
 
@@ -123,7 +124,7 @@ describe('SettingsSkillsPanel', () => {
 
     expect(byText(container, '请先读取当前 diff')).toBeNull();
 
-    const row = container.querySelector('.settings-skill-row[data-skill="code-review"]');
+    const row = container.querySelector('.settings-skill-row[data-skill="code-review.md"]');
     await fireClick(row);
     expect(byText(container, '请先读取当前 diff')).toBeTruthy();
 
@@ -207,7 +208,7 @@ describe('SettingsSkillsPanel', () => {
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
     await fireClick(
-      container.querySelector('.settings-skill-row[data-skill="code-review"] .settings-skill-edit'),
+      container.querySelector('.settings-skill-row[data-skill="code-review.md"] .settings-skill-edit'),
     );
 
     expect(container.querySelector('.settings-skill-form')).toBeTruthy();
@@ -233,7 +234,7 @@ describe('SettingsSkillsPanel', () => {
   it('toggles the enabled switch via skills.update({ enabled }) and grays the disabled row', async () => {
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
-    const row = container.querySelector('.settings-skill-row[data-skill="code-review"]');
+    const row = container.querySelector('.settings-skill-row[data-skill="code-review.md"]');
     const toggle = row?.querySelector('.settings-switch');
     expect(toggle?.getAttribute('role')).toBe('switch');
     expect(toggle?.getAttribute('aria-checked')).toBe('true');
@@ -249,7 +250,7 @@ describe('SettingsSkillsPanel', () => {
   it('renders a disabled skill with the gray class and the switch off', async () => {
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
-    const row = container.querySelector('.settings-skill-row[data-skill="macos-pack"]');
+    const row = container.querySelector('.settings-skill-row[data-skill="macos-pack.md"]');
     expect(row?.classList.contains('settings-skill-row--disabled')).toBe(true);
     expect(row?.querySelector('.settings-switch')?.getAttribute('aria-checked')).toBe('false');
   });
@@ -258,7 +259,7 @@ describe('SettingsSkillsPanel', () => {
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
     await fireClick(
-      container.querySelector('.settings-skill-row[data-skill="code-review"] .settings-skill-delete'),
+      container.querySelector('.settings-skill-row[data-skill="code-review.md"] .settings-skill-delete'),
     );
     expect(mocks.skillsDelete).not.toHaveBeenCalled();
     expect(byText(container, '确认删除')).toBeTruthy();
@@ -266,17 +267,45 @@ describe('SettingsSkillsPanel', () => {
     await fireClick(byText(container, '确认删除'));
 
     expect(mocks.skillsDelete).toHaveBeenCalledWith(WORKDIR, 'code-review.md');
-    expect(container.querySelector('.settings-skill-row[data-skill="code-review"]')).toBeNull();
+    expect(container.querySelector('.settings-skill-row[data-skill="code-review.md"]')).toBeNull();
   });
 
   it('renders json skills without an edit button or toggle (delete only)', async () => {
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
-    const row = container.querySelector('.settings-skill-row[data-skill="legacy-notes"]');
+    const row = container.querySelector('.settings-skill-row[data-skill="legacy-notes.json"]');
     expect(row?.querySelector('.settings-skill-edit')).toBeNull();
     expect(row?.querySelector('.settings-switch')).toBeNull();
     expect(row?.querySelector('.settings-skill-expand')).toBeTruthy();
     expect(row?.querySelector('.settings-skill-delete')).toBeTruthy();
     expect(row?.querySelector('.settings-skill-badge--json')).toBeTruthy();
+  });
+
+  it('uses the file field for subdirectory skills in edit and delete (no name-derived path)', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    const subdirRow = container.querySelector('.settings-skill-row[data-skill="review/subdir-review.md"]');
+    expect(subdirRow).toBeTruthy();
+    expect(byText(container, '子目录代码审查')).toBeTruthy();
+
+    await fireClick(subdirRow?.querySelector('.settings-skill-edit'));
+    const nameInput = container.querySelector('.settings-skill-field-name input') as HTMLInputElement;
+    expect(nameInput.value).toBe('subdir-review');
+    await fireClick(container.querySelector('.settings-skill-save'));
+
+    expect(mocks.skillsUpdate).toHaveBeenCalledWith(WORKDIR, 'review/subdir-review.md', {
+      name: 'subdir-review',
+      description: '子目录代码审查',
+      prompt: '子目录审查指令…',
+    });
+
+    await fireClick(subdirRow?.querySelector('.settings-skill-delete'));
+    expect(mocks.skillsDelete).not.toHaveBeenCalled();
+    await fireClick(byText(container, '确认删除'));
+
+    expect(mocks.skillsDelete).toHaveBeenCalledWith(WORKDIR, 'review/subdir-review.md');
+    expect(mocks.skillsDelete).not.toHaveBeenCalledWith(WORKDIR, 'subdir-review.md');
+    expect(container.querySelector('.settings-skill-row[data-skill="review/subdir-review.md"]')).toBeNull();
+    expect(container.querySelector('.settings-skill-row[data-skill="code-review.md"]')).toBeTruthy();
   });
 });

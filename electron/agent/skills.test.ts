@@ -116,7 +116,21 @@ describe('loadSkills', () => {
 describe('loadSkillsWithErrors', () => {
   it('目录不存在 → 空 skills + 空 errors', async () => {
     const res = await loadSkillsWithErrors(path.join(tmpDir, 'no-skills'));
-    expect(res).toEqual({ skills: [], errors: [] });
+    expect(res).toEqual({ items: [], errors: [] });
+  });
+
+  it('items 携带相对 skills/ 的 file 字段（根 md / 子目录 md / json）', async () => {
+    await writeSkill('skills/code-review.md', '---\nname: code-review\ndescription: d\n---\n正文');
+    await writeSkill('skills/review/code.md', '---\ndescription: 子目录技能\n---\n正文');
+    await writeSkill('skills/old.json', JSON.stringify({ name: 'old', description: 'x', prompt: 'y' }));
+    const res = await loadSkillsWithErrors(tmpDir);
+    expect(res.items.map((s) => s.file).sort()).toEqual(['code-review.md', 'old.json', 'review/code.md']);
+    const code = res.items.find((s) => s.name === 'code-review')!;
+    expect(code.file).toBe('code-review.md');
+    const sub = res.items.find((s) => s.name === 'code')!;
+    expect(sub.file).toBe('review/code.md');
+    const old = res.items.find((s) => s.name === 'old')!;
+    expect(old.file).toBe('old.json');
   });
 
   it('区分字段的格式错误列表（json）', async () => {
@@ -128,7 +142,7 @@ describe('loadSkillsWithErrors', () => {
     await fs.writeFile(path.join(skillsDir, 'broken.json'), 'not json{');
     await fs.writeFile(path.join(skillsDir, 'good.json'), JSON.stringify({ name: 'good', description: 'x', prompt: 'y' }));
     const res = await loadSkillsWithErrors(tmpDir);
-    expect(res.skills.map((s) => s.name)).toEqual(['good']);
+    expect(res.items.map((s) => s.name)).toEqual(['good']);
     expect(res.errors).toEqual([
       { file: 'broken.json', reason: '格式解析失败' },
       { file: 'nodesc.json', reason: '缺少 description' },
@@ -143,7 +157,7 @@ describe('loadSkillsWithErrors', () => {
     await writeSkill('skills/nodesc.md', '---\nname: x\n---\n正文');
     await writeSkill('skills/ok.md', '---\nname: ok\ndescription: 好\n---\n正文');
     const res = await loadSkillsWithErrors(tmpDir);
-    expect(res.skills.map((s) => s.name)).toEqual(['ok']);
+    expect(res.items.map((s) => s.name)).toEqual(['ok']);
     expect(res.errors).toEqual([
       { file: 'bad.md', reason: '格式解析失败' },
       { file: 'nodesc.md', reason: '缺少 description' },
@@ -156,7 +170,7 @@ describe('loadSkillsWithErrors', () => {
     await fs.mkdir(skillsDir);
     await fs.writeFile(path.join(skillsDir, 'bad.json'), JSON.stringify({ description: 'x', prompt: 'y' }));
     await fs.writeFile(path.join(skillsDir, 'good.json'), JSON.stringify({ name: 'good', description: 'x', prompt: 'y' }));
-    expect(await loadSkills(tmpDir)).toEqual([{ name: 'good', description: 'x', prompt: 'y', format: 'json' }]);
+    expect(await loadSkills(tmpDir)).toEqual([{ name: 'good', description: 'x', prompt: 'y', format: 'json', file: 'good.json' }]);
   });
 });
 
@@ -183,7 +197,7 @@ describe('loadSkills markdown format', () => {
     await writeSkill('skills/review.md', `---\nname: review\n描述行: 忽略\ndescription: 代码审查技能\n---\n\n审查当前变更并输出发现清单。`);
     const skills = await loadSkills(tmpDir);
     expect(skills).toHaveLength(1);
-    expect(skills[0]).toEqual({ name: 'review', description: '代码审查技能', prompt: '审查当前变更并输出发现清单。', format: 'md' });
+    expect(skills[0]).toEqual({ name: 'review', description: '代码审查技能', prompt: '审查当前变更并输出发现清单。', format: 'md', file: 'review.md' });
   });
 
   it('skips .md without required frontmatter fields', async () => {
@@ -211,9 +225,9 @@ describe('enabled flag', () => {
     await writeSkill('skills/off.md', '---\nname: off\ndescription: 关闭\nenabled: false\n---\n正文');
     await writeSkill('skills/on.md', '---\nname: on\ndescription: 开启\n---\n正文');
     const res = await loadSkillsWithErrors(tmpDir);
-    const off = res.skills.find((s) => s.name === 'off')!;
+    const off = res.items.find((s) => s.name === 'off')!;
     expect(off.enabled).toBe(false);
-    const on = res.skills.find((s) => s.name === 'on')!;
+    const on = res.items.find((s) => s.name === 'on')!;
     expect(on.enabled).toBeUndefined();
   });
 
@@ -221,13 +235,13 @@ describe('enabled flag', () => {
     await writeSkill('skills/off.md', '---\nname: off\ndescription: 关闭\nenabled: false\n---\n正文');
     await writeSkill('skills/on.md', '---\nname: on\ndescription: 开启\n---\n正文');
     expect((await loadSkills(tmpDir)).map((s) => s.name).sort()).toEqual(['on']);
-    expect((await loadSkillsWithErrors(tmpDir)).skills.map((s) => s.name).sort()).toEqual(['off', 'on']);
+    expect((await loadSkillsWithErrors(tmpDir)).items.map((s) => s.name).sort()).toEqual(['off', 'on']);
   });
 
   it('json 恒启用（无 enabled 字段）', async () => {
     await writeSkill('skills/old.json', JSON.stringify({ name: 'old', description: 'x', prompt: 'y' }));
     const res = await loadSkillsWithErrors(tmpDir);
-    expect(res.skills[0]!.enabled).toBeUndefined();
+    expect(res.items[0]!.enabled).toBeUndefined();
   });
 });
 

@@ -481,9 +481,15 @@ export interface SkillLoadError {
   reason: string;
 }
 
+/** listDetailed 返回的技能项：SkillDef + 相对 skills/ 的文件路径 */
+export type SkillDetailedItem = SkillDef & {
+  /** 相对 skills/ 的路径（如 'review/code-review.md' 或 'code-review.md'） */
+  file: string;
+};
+
 /** skills:listDetailed 返回：可用技能 + 被跳过的格式错误文件 */
 export interface SkillListDetailedResponse {
-  items: SkillDef[];
+  items: SkillDetailedItem[];
   errors: SkillLoadError[];
 }
 

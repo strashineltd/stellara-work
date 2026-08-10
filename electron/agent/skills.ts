@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { SkillDef, SkillLoadError } from '../../shared/ipc';
+import type { SkillDef, SkillDetailedItem, SkillLoadError } from '../../shared/ipc';
 
 /**
  * 扫描项目 workDir 下的 skills/ 目录，加载所有 .json 文件。
@@ -50,7 +50,7 @@ export function parseSkillMarkdown(text: string, fallbackName: string): SkillDef
 async function loadMarkdownSkills(
   skillsDir: string,
   dirName: string,
-  skills: SkillDef[],
+  skills: SkillDetailedItem[],
   errors: SkillLoadError[],
   useFileFallback: boolean,
 ): Promise<void> {
@@ -68,7 +68,7 @@ async function loadMarkdownSkills(
       const text = await fs.readFile(fullPath, 'utf-8');
       const parsed = parseSkillMarkdownDetailed(text, useFileFallback ? entry.replace(/\.md$/, '') : '');
       if ('skill' in parsed) {
-        skills.push(parsed.skill);
+        skills.push({ ...parsed.skill, file: rel });
       } else {
         errors.push({ file: rel, reason: parsed.reason });
       }
@@ -80,17 +80,17 @@ async function loadMarkdownSkills(
 
 export async function loadSkillsWithErrors(
   workDir: string,
-): Promise<{ skills: SkillDef[]; errors: SkillLoadError[] }> {
+): Promise<{ items: SkillDetailedItem[]; errors: SkillLoadError[] }> {
   const skillsDir = path.join(workDir, 'skills');
   let entries: string[];
   try {
     entries = await fs.readdir(skillsDir);
   } catch {
     // 目录不存在 → 静默
-    return { skills: [], errors: [] };
+    return { items: [], errors: [] };
   }
 
-  const skills: SkillDef[] = [];
+  const skills: SkillDetailedItem[] = [];
   const errors: SkillLoadError[] = [];
   await loadMarkdownSkills(skillsDir, '', skills, errors, false);
   for (const entry of entries) {
@@ -135,14 +135,15 @@ export async function loadSkillsWithErrors(
       description: parsed.description as string,
       prompt: parsed.prompt as string,
       format: 'json',
+      file: entry,
     });
   }
-  return { skills, errors: errors.sort((a, b) => a.file.localeCompare(b.file)) };
+  return { items: skills, errors: errors.sort((a, b) => a.file.localeCompare(b.file)) };
 }
 
 export async function loadSkills(workDir: string): Promise<SkillDef[]> {
-  const { skills } = await loadSkillsWithErrors(workDir);
-  return skills.filter((s) => s.enabled !== false);
+  const { items } = await loadSkillsWithErrors(workDir);
+  return items.filter((s) => s.enabled !== false);
 }
 
 /**
