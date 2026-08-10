@@ -173,6 +173,9 @@ export function installDevPreviewApi(): void {
           { file: 'broken.md', reason: '格式解析失败' },
         ],
       }),
+      create: async () => ({ file: 'preview-skill.md' }),
+      update: async () => {},
+      delete: async () => {},
     },
     mcp: {
       list: async () => [

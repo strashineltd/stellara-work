@@ -163,6 +163,11 @@ const api: ElectronAPI = {
   skills: {
     list: (workDir: string) => ipcRenderer.invoke('skills:list', workDir),
     listDetailed: (workDir: string) => ipcRenderer.invoke('skills:listDetailed', workDir),
+    create: (workDir: string, skill: { name: string; description: string; prompt: string }) =>
+      ipcRenderer.invoke('skills:create', workDir, skill),
+    update: (workDir: string, file: string, patch: { name?: string; description?: string; prompt?: string; enabled?: boolean }) =>
+      ipcRenderer.invoke('skills:update', workDir, file, patch),
+    delete: (workDir: string, file: string) => ipcRenderer.invoke('skills:delete', workDir, file),
   },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),

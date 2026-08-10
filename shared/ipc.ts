@@ -630,6 +630,16 @@ export interface ElectronAPI {
     list: (workDir: string) => Promise<SkillDef[]>;
     /** 含格式错误文件列表（设置面板「格式错误」标注用） */
     listDetailed: (workDir: string) => Promise<SkillListDetailedResponse>;
+    /** 创建技能文件 skills/{name}.md（name 自动清洗非法字符），返回文件名 */
+    create: (workDir: string, skill: { name: string; description: string; prompt: string }) => Promise<{ file: string }>;
+    /** 更新技能文件（仅 .md；旧 .json 格式仅支持删除） */
+    update: (
+      workDir: string,
+      file: string,
+      patch: { name?: string; description?: string; prompt?: string; enabled?: boolean },
+    ) => Promise<void>;
+    /** 删除技能文件（.md / .json 均可） */
+    delete: (workDir: string, file: string) => Promise<void>;
   };
   mcp: {
     list: () => Promise<McpServerConfig[]>;

@@ -661,6 +661,15 @@ function registerIpcHandlers(): void {
     };
   });
 
+  // 校验技能文件相对路径：resolve 后必须在 workDir/skills 内，返回绝对路径
+  async function assertSkillFile(workDir: string, file: string): Promise<string> {
+    const skillsDir = path.join(workDir, 'skills');
+    const resolved = path.resolve(skillsDir, file);
+    const { isWithinDir } = await import('./fs/path-security');
+    if (!isWithinDir(resolved, skillsDir)) throw new Error('技能文件超出 skills 目录');
+    return resolved;
+  }
+
   ipcMain.handle('skills:list', async (_e, workDir: string) => {
     // 安全：只允许读取已授权项目工作目录内的 skills/
     await assertWorkDirAllowed(workDir);
@@ -672,6 +681,44 @@ function registerIpcHandlers(): void {
     await assertWorkDirAllowed(workDir);
     const { loadSkillsWithErrors } = await import('./agent/skills');
     return loadSkillsWithErrors(workDir);
+  });
+
+  ipcMain.handle('skills:create', async (_e, workDir: string, input: { name: string; description: string; prompt: string }) => {
+    await assertWorkDirAllowed(workDir);
+    const { buildSkillMarkdown, sanitizeSkillName } = await import('./agent/skills');
+    const name = sanitizeSkillName(input.name);
+    if (!name) throw new Error('技能名称不能为空');
+    const file = `${name}.md`;
+    const resolved = await assertSkillFile(workDir, file);
+    let exists = true;
+    try {
+      await fs.access(resolved);
+    } catch {
+      exists = false;
+    }
+    if (exists) throw new Error(`技能已存在：${file}`);
+    await fs.writeFile(resolved, buildSkillMarkdown({ name, description: input.description, prompt: input.prompt }), 'utf-8');
+    broadcastSettingsChanged();
+    return { file };
+  });
+
+  ipcMain.handle('skills:update', async (_e, workDir: string, file: string, patch: { name?: string; description?: string; prompt?: string; enabled?: boolean }) => {
+    await assertWorkDirAllowed(workDir);
+    if (path.isAbsolute(file)) throw new Error('技能文件需为相对路径');
+    if (!file.endsWith('.md')) throw new Error('旧格式技能仅支持删除');
+    const { mergeSkillFrontmatter } = await import('./agent/skills');
+    const resolved = await assertSkillFile(workDir, file);
+    const original = await fs.readFile(resolved, 'utf-8');
+    await fs.writeFile(resolved, mergeSkillFrontmatter(original, patch), 'utf-8');
+    broadcastSettingsChanged();
+  });
+
+  ipcMain.handle('skills:delete', async (_e, workDir: string, file: string) => {
+    await assertWorkDirAllowed(workDir);
+    if (path.isAbsolute(file)) throw new Error('技能文件需为相对路径');
+    const resolved = await assertSkillFile(workDir, file);
+    await fs.unlink(resolved);
+    broadcastSettingsChanged();
   });
 
   // MCP 服务器管理
