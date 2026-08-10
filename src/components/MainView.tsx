@@ -24,7 +24,8 @@ import { CommandPalette } from './CommandPalette';
 import { useShortcuts } from '../hooks/useShortcuts';
 
 interface MainViewProps {
-  config: ConfiguredModel;
+  /** 可为 null：跳过引导后无模型配置（完整判空 UI 在 T2，此处用占位配置兜底） */
+  config: ConfiguredModel | null;
   info: AppInfo;
   sidebarOpen: boolean;
   workspaceMode?: 'sidebar' | 'tabs';
@@ -61,6 +62,11 @@ export function MainView(props: MainViewProps) {
   } = props;
   void _info;
 
+  // 未配置模型时的占位配置：Header/HomeDashboard 显示"未配置模型"，不参与会话创建
+  const effectiveConfig: ConfiguredModel = config ?? {
+    id: 'custom', label: '未配置模型', baseUrl: '', model: '', isCustom: true, hasKey: false,
+  };
+
   const tabBarTabs = useMemo<TabBarTab[]>(() =>
     sessions.map((s) => ({
       id: s.id,
@@ -71,7 +77,7 @@ export function MainView(props: MainViewProps) {
   );
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const activeProject = projects.find((project) => project.id === activeSession?.projectId);
-  const activeWorkDir = activeProject?.workDir ?? activeSession?.workDir ?? config.workDir;
+  const activeWorkDir = activeProject?.workDir ?? activeSession?.workDir ?? config?.workDir;
 
   // ---- State ----
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
@@ -104,7 +110,7 @@ export function MainView(props: MainViewProps) {
   // ---- Model list ----
   useEffect(() => {
     void window.electronAPI.models.getAll().then(setModelList).catch(() => { /* ignore */ });
-  }, [config.id]);
+  }, [config?.id]);
 
   // 监听主进程"会话结束已提取记忆"事件，显示轻提示
   useEffect(() => {
@@ -112,7 +118,7 @@ export function MainView(props: MainViewProps) {
   }, []);
 
   async function handleSwitchModel(id: string) {
-    if (id === config.id || switchingModel) return;
+    if (!config || id === config.id || switchingModel) return;
     setSwitchingModel(true);
     try {
       await window.electronAPI.models.setActive(id);
@@ -288,6 +294,10 @@ export function MainView(props: MainViewProps) {
 
   async function handleSend() {
     if (!input.trim() || busy) return;
+    if (!config) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先配置模型后再发送任务。' }]);
+      return;
+    }
     setMemoryContext([]);
     setContextStats(null);
     if (!activeSessionId) {
@@ -450,7 +460,7 @@ export function MainView(props: MainViewProps) {
 
   // ---- Session CRUD ----
   async function handleNewSession(projectId?: string) {
-    if (busy) return;
+    if (busy || !config) return;
     const targetProjectId = projectId ?? activeSession?.projectId;
     if (!targetProjectId) {
       setActiveSection('projects');
@@ -514,7 +524,7 @@ export function MainView(props: MainViewProps) {
     <div className="main-view">
       {activeSection === 'tasks' && <a className="skip-link" href="#task-stream">跳到工作记录</a>}
       <Header
-        config={config}
+        config={effectiveConfig}
         sidebarOpen={sidebarOpen}
         workspaceOpen={props.workspaceOpen}
         modelList={modelList}
@@ -655,7 +665,7 @@ export function MainView(props: MainViewProps) {
           ) : (
             <HomeDashboard
               section={activeSection}
-              config={config}
+              config={effectiveConfig}
               workDir={activeWorkDir}
               projectName={activeProject?.name}
               projects={projects}
@@ -687,7 +697,7 @@ export function MainView(props: MainViewProps) {
             touchedFiles={touchedFiles}
             memoryContext={memoryContext}
             contextStats={contextStats}
-            contextWindow={config.contextWindow}
+            contextWindow={effectiveConfig.contextWindow}
           />
         )}
       </div>
@@ -729,7 +739,7 @@ export function MainView(props: MainViewProps) {
           sessions={sessions}
           modelList={modelList}
           activeSessionId={activeSessionId}
-          activeModelId={config.id}
+          activeModelId={effectiveConfig.id}
           theme={props.theme ?? 'light'}
           onSelectSession={handleSelectSession}
           onNewSession={() => void handleNewSession()}

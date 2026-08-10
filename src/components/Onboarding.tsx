@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
 import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId, ProjectSummary } from '../../shared/ipc';
-import { Icon } from './Icon';
 
 interface OnboardingProps {
   presets: ModelPreset[];
   /** 已有配置（用于"重新配置"模式：无 apiKey，仅 hasKey 提示已配） */
   initialConfig?: ConfiguredModel | null;
-  /** 已有项目列表（环境初始化步骤选择工作目录用） */
+  /** 已有项目列表（保留 prop；环境初始化已移除） */
   projects?: ProjectSummary[];
-  onComplete: (config: ConfiguredModel, projectId?: string) => void;
+  /** 完成（配置成功传 ConfiguredModel）或跳过（传 null） */
+  onComplete: (config: ConfiguredModel | null) => void;
 }
 
-/** Wizard: welcome → model pick → connection details → environment init */
+/** Wizard: welcome → model pick → connection；三步均可跳过 */
 export function Onboarding({ presets, initialConfig, projects, onComplete }: OnboardingProps) {
-  const [step, setStep] = useState<'welcome' | 'pick' | 'workdir' | 'env'>(
-    initialConfig ? 'workdir' : 'welcome',
+  void projects;
+  const [step, setStep] = useState<'welcome' | 'pick' | 'connection'>(
+    initialConfig ? 'connection' : 'welcome',
   );
   const [selectedId, setSelectedId] = useState<PresetModelId>(
     initialConfig?.id ?? 'deepseek-v4-pro',
@@ -24,8 +25,6 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
   const [model, setModel] = useState(initialConfig?.model ?? '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'testing' | 'saving' | 'ok' | 'fail'>('idle');
   const [saveError, setSaveError] = useState('');
-  const [savedConfig, setSavedConfig] = useState<ConfiguredModel | null>(null);
-  const [envProjectId, setEnvProjectId] = useState<string | null>(null);
 
   // Seed baseUrl + model from selected preset (unless custom)
   useEffect(() => {
@@ -35,6 +34,11 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
       setModel(preset.model);
     }
   }, [selectedId, presets]);
+
+  /** 跳过：不校验 key，直接完成 */
+  function handleSkip() {
+    onComplete(null);
+  }
 
   async function handleComplete() {
     // 渲染进程拿不到旧 key：initialConfig 只有 hasKey；留空 = 保留主进程中的旧 key
@@ -87,14 +91,7 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
         isCustom: submitConfig.isCustom,
         hasKey: !!submitConfig.apiKey,
       };
-      if (initialConfig) {
-        // 重新配置：跳过环境初始化，直接完成
-        onComplete(view);
-      } else {
-        // 首次配置：进入环境初始化（选择工作目录）
-        setSavedConfig(view);
-        setStep('env');
-      }
+      onComplete(view);
     } else {
       setSaveStatus('fail');
       setSaveError(result.error ?? '保存失败');
@@ -106,22 +103,14 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
   return (
     <div className="onboarding">
       {step === 'welcome' ? (
-        <WelcomePage onStart={() => setStep('pick')} />
+        <WelcomePage onStart={() => setStep('pick')} onSkip={handleSkip} />
       ) : step === 'pick' ? (
         <PickPage
           presets={presets}
           selectedId={selectedId}
           onPick={setSelectedId}
-          onNext={() => setStep('workdir')}
-          onSkip={() => setStep('workdir')}
-        />
-      ) : step === 'env' && savedConfig ? (
-        <EnvPage
-          projects={projects ?? []}
-          selectedId={envProjectId}
-          onSelect={setEnvProjectId}
-          onComplete={() => onComplete(savedConfig, envProjectId ?? undefined)}
-          onSkip={() => onComplete(savedConfig)}
+          onNext={() => setStep('connection')}
+          onSkip={handleSkip}
         />
       ) : (
         <ConnectionPage
@@ -136,6 +125,7 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
           saveStatus={saveStatus}
           saveError={saveError}
           onComplete={handleComplete}
+          onSkip={handleSkip}
           onBack={() => setStep('pick')}
         />
       )}
@@ -213,6 +203,7 @@ function ConnectionPage({
   saveStatus,
   saveError,
   onComplete,
+  onSkip,
   onBack,
 }: {
   apiKey: string;
@@ -226,6 +217,7 @@ function ConnectionPage({
   saveStatus: string;
   saveError: string;
   onComplete: () => void;
+  onSkip: () => void;
   onBack: () => void;
 }) {
   const isReconfig = !!initialConfig;
@@ -301,8 +293,8 @@ function ConnectionPage({
       </div>
 
       <div className="onboarding-footer">
-        <button className="btn btn-secondary" onClick={onComplete} type="button">
-          暂时跳过
+        <button className="btn btn-secondary" onClick={onSkip} type="button">
+          跳过
         </button>
         <button
           className="btn btn-primary"
@@ -319,7 +311,7 @@ function ConnectionPage({
 
 // ---- Page 0: Welcome ----
 
-function WelcomePage({ onStart }: { onStart: () => void }) {
+function WelcomePage({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
   return (
     <div className="onboarding-page">
       <div className="onboarding-body onboarding-body--centered">
@@ -333,68 +325,11 @@ function WelcomePage({ onStart }: { onStart: () => void }) {
       </div>
 
       <div className="onboarding-footer">
+        <button className="btn btn-secondary" onClick={onSkip} type="button">
+          先逛逛
+        </button>
         <button className="btn btn-primary" onClick={onStart} type="button">
           开始配置
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---- Page 3: Environment init (choose workdir) ----
-
-function EnvPage({
-  projects,
-  selectedId,
-  onSelect,
-  onComplete,
-  onSkip,
-}: {
-  projects: ProjectSummary[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  onComplete: () => void;
-  onSkip: () => void;
-}) {
-  return (
-    <div className="onboarding-page">
-      <div className="onboarding-body">
-        <h1 className="onboarding-title">选择工作目录</h1>
-        <p className="onboarding-subtitle">
-          选择一个已有项目作为当前工作区；也可以稍后在首页创建。
-        </p>
-
-        {projects.length === 0 ? (
-          <p className="env-empty">还没有项目。进入程序后可在首页创建项目。</p>
-        ) : (
-          <div className="env-project-list">
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`env-project-row ${p.id === selectedId ? 'selected' : ''}`}
-                onClick={() => onSelect(p.id)}
-              >
-                <span className="env-project-row__icon"><Icon name="folder" size={15} /></span>
-                <span className="env-project-row__body">
-                  <strong>{p.name}</strong>
-                  <small>{p.sessionCount} 条工作记录</small>
-                </span>
-                {p.id === selectedId && (
-                  <span className="env-project-row__check"><Icon name="check" size={13} /></span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="onboarding-footer">
-        <button className="btn btn-secondary" onClick={onSkip} type="button">
-          跳过
-        </button>
-        <button className="btn btn-primary" onClick={onComplete} type="button">
-          完成
         </button>
       </div>
     </div>

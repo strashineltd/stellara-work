@@ -14,7 +14,7 @@ type AppState =
   | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; projects: ProjectSummary[]; initialConfig?: ConfiguredModel | null }
   | {
       kind: 'ready';
-      config: ConfiguredModel;
+      config: ConfiguredModel | null;
       info: AppInfo;
       projects: ProjectSummary[];
       sessions: SessionSummary[];
@@ -204,23 +204,20 @@ export default function App() {
         presets={state.presets}
         projects={state.projects}
         initialConfig={state.initialConfig}
-        onComplete={(config, projectId) => {
-          // 模型配置与项目分离：首次完成后进入空工作台或已选项目，由用户继续创建。
+        onComplete={(config) => {
+          // 模型配置与项目分离：完成后进入空工作台（config 可为 null = 跳过），由用户继续创建。
           Promise.all([
             window.electronAPI.sessions.list(),
             window.electronAPI.projects.list(),
           ])
             .then(([sessions, projects]) => {
-              const projectSession = projectId
-                ? sessions.find((s) => s.projectId === projectId)
-                : undefined;
               setState({
                 kind: 'ready',
                 config,
                 info: state.info,
                 projects,
                 sessions,
-                activeSessionId: projectSession?.id ?? sessions[0]?.id ?? null,
+                activeSessionId: sessions[0]?.id ?? null,
                 sidebarOpen: true,
                 workspaceOpen: false,
               });

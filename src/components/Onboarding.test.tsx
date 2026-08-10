@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { Onboarding } from './Onboarding';
-import type { ModelPreset, ConfiguredModel, ProjectSummary } from '../../shared/ipc';
+import type { ModelPreset, ConfiguredModel } from '../../shared/ipc';
 
 const PRESETS: ModelPreset[] = [
   { id: 'glm-5.2', label: 'GLM-5.2 (智谱)', baseUrl: 'https://x', model: 'g', isCustom: false },
@@ -63,10 +63,9 @@ function fireClick(el: Element | null) {
 
 /** 首次配置：从欢迎页点「开始配置」进入选模型页 */
 function renderFirstTime(
-  onComplete: (config: ConfiguredModel, projectId?: string) => void = vi.fn(),
-  projects: ProjectSummary[] = [],
+  onComplete: (config: ConfiguredModel | null) => void = vi.fn(),
 ) {
-  const result = render(<Onboarding presets={PRESETS} initialConfig={null} projects={projects} onComplete={onComplete} />);
+  const result = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={onComplete} />);
   fireClick(result.getByText(/开始配置/));
   return result;
 }
@@ -218,72 +217,38 @@ describe('Onboarding', () => {
     expect(getByText(/建立你的工作环境/i)).toBeTruthy();
   });
 
-  it('skips from page 1 directly to the connection page', () => {
+  it('skips from page 1 and completes with null', () => {
     const onComplete = vi.fn();
-    // Need to mock configure to succeed
-    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
     const { getByText } = renderFirstTime(onComplete);
-    // Click skip on page 1 - should go to connection page
+    // Click skip on page 1 - should complete immediately with null (no connection page)
     const skipBtn = getByText(/skip|跳过/i);
     fireClick(skipBtn);
-    // Should now be on the connection page
-    expect(getByText(/complete|完成配置/i)).toBeTruthy();
-  });
-
-  // --- Page 3: Environment init ---
-
-  it('reaches the workdir step after first-time configure and completes with the chosen project', async () => {
-    const onComplete = vi.fn();
-    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
-    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
-    const projects: ProjectSummary[] = [
-      { id: 'p1', name: '桌面端产品', updatedAt: Date.now(), sessionCount: 2 },
-    ];
-    const { getByText } = renderFirstTime(onComplete, projects);
-    // pick → connection
-    fireClick(getByText(/next|下一步/i));
-    // 填 key 后完成配置
-    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
-    typeInto(keyInput, 'sk-test');
-    fireClick(getByText(/完成配置/i));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
-    // 进入环境初始化页
-    expect(getByText(/选择工作目录/)).toBeTruthy();
-    expect(getByText(/桌面端产品/)).toBeTruthy();
-    // 选中项目并完成
-    fireClick(getByText(/桌面端产品/));
-    fireClick(getByText(/完成/));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
     expect(onComplete).toHaveBeenCalledOnce();
-    expect(onComplete.mock.calls[0][1]).toBe('p1');
+    expect(onComplete.mock.calls[0][0]).toBeNull();
   });
 
-  it('skips the workdir step when the first-time flow completes without a project', async () => {
+  // --- Skippable flow: welcome / pick / connection ---
+
+  it('skips onboarding from the welcome page via 先逛逛 and completes with null', () => {
     const onComplete = vi.fn();
-    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
-    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
-    const { getByText } = renderFirstTime(onComplete);
+    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={onComplete} />);
+    fireClick(getByText(/先逛逛/));
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete.mock.calls[0][0]).toBeNull();
+  });
+
+  it('skips from the connection page without an api key and completes with null', () => {
+    const onComplete = vi.fn();
+    const { getByText, queryByText } = renderFirstTime(onComplete);
     fireClick(getByText(/next|下一步/i));
-    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
-    typeInto(keyInput, 'sk-test');
-    fireClick(getByText(/完成配置/i));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
-    expect(getByText(/选择工作目录/)).toBeTruthy();
     fireClick(getByText(/跳过/));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
     expect(onComplete).toHaveBeenCalledOnce();
-    expect(onComplete.mock.calls[0][1]).toBeUndefined();
+    expect(onComplete.mock.calls[0][0]).toBeNull();
+    // 跳过不触发密钥校验
+    expect(queryByText(/请输入 API 密钥/)).toBeNull();
   });
 
-  it('shows a hint on the workdir step when there are no projects', async () => {
+  it('completes with a ConfiguredModel when a key is entered and configure succeeds', async () => {
     const onComplete = vi.fn();
     (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
     (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: true });
@@ -291,11 +256,26 @@ describe('Onboarding', () => {
     fireClick(getByText(/next|下一步/i));
     const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
     typeInto(keyInput, 'sk-test');
-    fireClick(getByText(/完成配置/i));
+    fireClick(getByText(/完成配置/));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
     });
-    expect(getByText(/还没有项目/)).toBeTruthy();
+    // 首次配置完成直接结束（不再进入环境初始化步骤）
+    expect(getByText(/选择工作目录/)).toBeNull();
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete.mock.calls[0][0]).toMatchObject({ id: 'deepseek-v4-pro', hasKey: true });
+  });
+
+  it('still validates when 完成配置 is clicked without an api key (complete is not skip)', async () => {
+    const onComplete = vi.fn();
+    const { getByText } = renderFirstTime(onComplete);
+    fireClick(getByText(/next|下一步/i));
+    fireClick(getByText(/完成配置/));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(getByText(/请输入 API 密钥/)).toBeTruthy();
+    expect(onComplete).not.toHaveBeenCalled();
   });
 
   it('does not expose the legacy model workdir during reconfiguration', () => {
