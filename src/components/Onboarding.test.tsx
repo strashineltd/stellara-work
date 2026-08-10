@@ -51,6 +51,15 @@ function render(ui: React.ReactElement) {
     },
     querySelector: (sel: string) => container.querySelector(sel),
     querySelectorAll: (sel: string) => container.querySelectorAll(sel),
+    /** 只匹配真实按钮（正文中可能含相同关键词，如副标题的"先跳过"） */
+    getButton: (text: string | RegExp) => {
+      const buttons = container.querySelectorAll('button');
+      for (const b of Array.from(buttons)) {
+        const t = (b.textContent ?? '').trim();
+        if (typeof text === 'string' ? t.includes(text) : text.test(t)) return b;
+      }
+      return null;
+    },
   };
 }
 
@@ -165,8 +174,8 @@ describe('Onboarding', () => {
   });
 
   it('has a skip button on page 1', () => {
-    const { getByText } = renderFirstTime();
-    expect(getByText(/skip|跳过/i)).toBeTruthy();
+    const result = renderFirstTime();
+    expect(result.getButton(/skip|跳过/i)).toBeTruthy();
   });
 
   it('has a next button on page 1', () => {
@@ -178,7 +187,7 @@ describe('Onboarding', () => {
     const { getByText } = renderFirstTime();
     const nextBtn = getByText(/next|下一步/i);
     fireClick(nextBtn);
-    expect(getByText(/配置模型连接/i)).toBeTruthy();
+    expect(getByText(/配置密钥/i)).toBeTruthy();
   });
 
   // --- Page 2: Connection details ---
@@ -186,7 +195,7 @@ describe('Onboarding', () => {
   it('shows connection details when initialConfig is provided', () => {
     const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
     const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
-    expect(getByText(/配置模型连接/i)).toBeTruthy();
+    expect(getByText(/配置密钥/i)).toBeTruthy();
   });
 
   it('has a back button on page 2', () => {
@@ -197,8 +206,8 @@ describe('Onboarding', () => {
 
   it('has a skip button on page 2', () => {
     const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
-    const { getByText } = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
-    expect(getByText(/skip|跳过/i)).toBeTruthy();
+    const result = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={vi.fn()} />);
+    expect(result.getButton(/skip|跳过/i)).toBeTruthy();
   });
 
   it('has a complete button on page 2', () => {
@@ -211,17 +220,17 @@ describe('Onboarding', () => {
     const { getByText } = renderFirstTime();
     // Go to page 2 first
     fireClick(getByText(/next|下一步/i));
-    expect(getByText(/配置模型连接/i)).toBeTruthy();
+    expect(getByText(/配置密钥/i)).toBeTruthy();
     // Go back
     fireClick(getByText(/back|返回|上一步/i));
-    expect(getByText(/建立你的工作环境/i)).toBeTruthy();
+    expect(getByText(/选择模型/i)).toBeTruthy();
   });
 
   it('skips from page 1 and completes with null', () => {
     const onComplete = vi.fn();
-    const { getByText } = renderFirstTime(onComplete);
+    const result = renderFirstTime(onComplete);
     // Click skip on page 1 - should complete immediately with null (no connection page)
-    const skipBtn = getByText(/skip|跳过/i);
+    const skipBtn = result.getButton(/skip|跳过/i);
     fireClick(skipBtn);
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete.mock.calls[0][0]).toBeNull();
@@ -239,13 +248,13 @@ describe('Onboarding', () => {
 
   it('skips from the connection page without an api key and completes with null', () => {
     const onComplete = vi.fn();
-    const { getByText, queryByText } = renderFirstTime(onComplete);
-    fireClick(getByText(/next|下一步/i));
-    fireClick(getByText(/跳过/));
+    const result = renderFirstTime(onComplete);
+    fireClick(result.getByText(/next|下一步/i));
+    fireClick(result.getButton(/跳过/));
     expect(onComplete).toHaveBeenCalledOnce();
     expect(onComplete.mock.calls[0][0]).toBeNull();
     // 跳过不触发密钥校验
-    expect(queryByText(/请输入 API 密钥/)).toBeNull();
+    expect(result.queryByText(/请输入 API 密钥/)).toBeNull();
   });
 
   it('completes with a ConfiguredModel when a key is entered and configure succeeds', async () => {

@@ -98,8 +98,6 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
     }
   }
 
-  const isCustom = selectedId === 'custom';
-
   return (
     <div className="onboarding">
       {step === 'welcome' ? (
@@ -120,7 +118,6 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
           onBaseUrlChange={setBaseUrl}
           model={model}
           onModelChange={setModel}
-          isCustom={isCustom}
           initialConfig={initialConfig}
           saveStatus={saveStatus}
           saveError={saveError}
@@ -129,6 +126,70 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
           onBack={() => setStep('pick')}
         />
       )}
+    </div>
+  );
+}
+
+// ---- Page 0: Welcome ----
+
+function WelcomePage({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
+  return (
+    <div className="ob-page">
+      <div className="ob-card">
+        <div className="ob-brand">
+          <div className="ob-logo" aria-hidden="true">S</div>
+          <p className="ob-kicker">STELLARA WORK</p>
+          <h1 className="ob-title">本地优先的 AI 任务工作台</h1>
+          <p className="ob-sub">
+            把任务交给 Agent，它会在你的本地工作区执行并记录结果。
+          </p>
+        </div>
+
+        <div className="value-points">
+          <div className="value-point">
+            <span className="ic" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7}>
+                <path d="M8 1.8 13 4v3.7c0 3-1.9 5.3-5 6.5-3.1-1.2-5-3.5-5-6.5V4l5-2.2Z" />
+              </svg>
+            </span>
+            <div>
+              <div className="t">数据本地</div>
+              <div className="d">密钥、会话与配置只保存在本机，不上传任何数据。</div>
+            </div>
+          </div>
+          <div className="value-point">
+            <span className="ic" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7}>
+                <path d="M3 8.5 8 3l5 5.5M4.5 7.5V13h7V7.5" />
+              </svg>
+            </span>
+            <div>
+              <div className="t">模型自由</div>
+              <div className="d">支持 GLM·DeepSeek·Kimi·MiniMax 与任意 OpenAI 兼容模型。</div>
+            </div>
+          </div>
+          <div className="value-point">
+            <span className="ic" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.7}>
+                <path d="M1.8 2.5h12.4v11H1.8zM4.5 6l2 2-2 2M8.5 10h3" />
+              </svg>
+            </span>
+            <div>
+              <div className="t">本地执行</div>
+              <div className="d">Agent 直接在你的工作区读写文件、运行命令，全程可见可控。</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="ob-actions center">
+          <button className="btn btn-ghost" onClick={onSkip} type="button">
+            先逛逛
+          </button>
+          <button className="btn btn-primary" onClick={onStart} type="button">
+            开始配置
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -149,12 +210,16 @@ function PickPage({
   onSkip: () => void;
 }) {
   return (
-    <div className="onboarding-page">
-      <div className="onboarding-body onboarding-body--centered">
-        <div className="onboarding-brand">
-          <p className="onboarding-brand-kicker">Stellara Work</p>
-          <h1 className="onboarding-brand-title">建立你的工作环境</h1>
-          <p className="onboarding-brand-subtitle">先选择模型连接，之后可随时在设置中调整。</p>
+    <div className="ob-page">
+      <div className="ob-card">
+        <div className="ob-brand ob-brand--tight">
+          <div className="ob-steps" aria-hidden="true">
+            <span className="ob-step on" />
+            <span className="ob-step" />
+          </div>
+          <p className="ob-kicker">第 1 步 / 共 2 步</p>
+          <h1 className="ob-title">选择模型</h1>
+          <p className="ob-sub">选择后可在设置中随时更换；也可以先跳过。</p>
         </div>
 
         <div className="model-grid">
@@ -175,15 +240,15 @@ function PickPage({
             </button>
           ))}
         </div>
-      </div>
 
-      <div className="onboarding-footer">
-        <button className="btn btn-secondary" onClick={onSkip} type="button">
-          跳过
-        </button>
-        <button className="btn btn-primary" onClick={onNext} type="button">
-          下一步
-        </button>
+        <div className="ob-actions">
+          <button className="btn btn-ghost" onClick={onSkip} type="button">
+            跳过
+          </button>
+          <button className="btn btn-primary" onClick={onNext} type="button">
+            下一步
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -198,7 +263,6 @@ function ConnectionPage({
   onBaseUrlChange,
   model,
   onModelChange,
-  isCustom,
   initialConfig,
   saveStatus,
   saveError,
@@ -212,7 +276,6 @@ function ConnectionPage({
   onBaseUrlChange: (v: string) => void;
   model: string;
   onModelChange: (v: string) => void;
-  isCustom: boolean;
   initialConfig?: ConfiguredModel | null;
   saveStatus: string;
   saveError: string;
@@ -223,24 +286,58 @@ function ConnectionPage({
   const isReconfig = !!initialConfig;
 
   return (
-    <div className="onboarding-page">
-      <div className="onboarding-body">
-        <button className="btn btn-ghost onboarding-back" onClick={onBack} type="button">
+    <div className="ob-page">
+      <div className="ob-card">
+        <button className="btn btn-ghost ob-back" onClick={onBack} type="button">
           返回
         </button>
 
-        <h1 className="onboarding-title">配置模型连接</h1>
-        <p className="onboarding-subtitle">这里只保存模型连接。项目和本地文件将在进入程序后由你分别设置。</p>
+        <div className="ob-brand ob-brand--tight">
+          <div className="ob-steps" aria-hidden="true">
+            <span className="ob-step on" />
+            <span className="ob-step on" />
+          </div>
+          <p className="ob-kicker">第 2 步 / 共 2 步</p>
+          <h1 className="ob-title">配置密钥</h1>
+          <p className="ob-sub">密钥只保存在本机。也可以先跳过，稍后在设置中配置。</p>
+        </div>
+
+        {/* Base URL / Model */}
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="ob-base-url">Base URL</label>
+            <input
+              id="ob-base-url"
+              className="input"
+              type="text"
+              placeholder="任意 OpenAI 兼容端点"
+              value={baseUrl}
+              onChange={(e) => onBaseUrlChange(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="ob-model">Model</label>
+            <input
+              id="ob-model"
+              className="input"
+              type="text"
+              placeholder="模型名称（如 my-custom-model）"
+              value={model}
+              onChange={(e) => onModelChange(e.target.value)}
+            />
+          </div>
+        </div>
 
         {/* API key */}
-        <div className="onboarding-field">
-          <label className="onboarding-label">API 密钥</label>
+        <div className="field">
+          <label htmlFor="ob-api-key">API 密钥</label>
           {isReconfig && initialConfig?.hasKey && (
             <p className="field-hint">
               当前配置: <code>{initialConfig?.id}</code>。已配置密钥，留空保持不变。
             </p>
           )}
           <input
+            id="ob-api-key"
             className="input"
             type="password"
             placeholder={isReconfig ? '留空保留旧密钥' : 'sk-xxx 或提供商 API 密钥'}
@@ -248,29 +345,8 @@ function ConnectionPage({
             onChange={(e) => onApiKeyChange(e.target.value)}
             autoComplete="off"
           />
+          <span className="field-hint">密钥经加密后仅存本机，主进程之外不可见。</span>
         </div>
-
-        {/* Custom model fields */}
-        {isCustom && (
-          <div className="onboarding-field">
-            <label className="onboarding-label">自定义端点</label>
-            <input
-              className="input"
-              type="text"
-              placeholder="Base URL（任意 OpenAI 兼容端点）"
-              value={baseUrl}
-              onChange={(e) => onBaseUrlChange(e.target.value)}
-            />
-            <input
-              className="input"
-              type="text"
-              placeholder="模型名称（如 my-custom-model）"
-              value={model}
-              onChange={(e) => onModelChange(e.target.value)}
-              style={{ marginTop: 8 }}
-            />
-          </div>
-        )}
 
         {/* Status */}
         {saveStatus === 'testing' && (
@@ -280,7 +356,7 @@ function ConnectionPage({
           <div className="status-busy" role="status">正在保存配置…</div>
         )}
         {saveStatus === 'ok' && (
-          <div className="status-ok">配置已保存</div>
+          <div className="status-ok">连接成功 · 配置已保存</div>
         )}
         {saveStatus === 'fail' && (
           <div className="status-fail">
@@ -290,47 +366,20 @@ function ConnectionPage({
             </div>
           </div>
         )}
-      </div>
 
-      <div className="onboarding-footer">
-        <button className="btn btn-secondary" onClick={onSkip} type="button">
-          跳过
-        </button>
-        <button
-          className="btn btn-primary"
-          onClick={onComplete}
-          disabled={saveStatus === 'saving' || saveStatus === 'testing'}
-          type="button"
-        >
-          {saveStatus === 'testing' ? '测试中…' : saveStatus === 'saving' ? '保存中…' : '完成配置'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ---- Page 0: Welcome ----
-
-function WelcomePage({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
-  return (
-    <div className="onboarding-page">
-      <div className="onboarding-body onboarding-body--centered">
-        <div className="onboarding-brand">
-          <p className="onboarding-brand-kicker">Stellara Work</p>
-          <h1 className="onboarding-brand-title">本地优先的 AI 任务工作台</h1>
-          <p className="onboarding-brand-subtitle">
-            把任务交给 Agent，它会在你的本地工作区执行并记录结果。
-          </p>
+        <div className="ob-actions">
+          <button className="btn btn-ghost" onClick={onSkip} type="button">
+            跳过
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={onComplete}
+            disabled={saveStatus === 'saving' || saveStatus === 'testing'}
+            type="button"
+          >
+            {saveStatus === 'testing' ? '测试中…' : saveStatus === 'saving' ? '保存中…' : '完成配置'}
+          </button>
         </div>
-      </div>
-
-      <div className="onboarding-footer">
-        <button className="btn btn-secondary" onClick={onSkip} type="button">
-          先逛逛
-        </button>
-        <button className="btn btn-primary" onClick={onStart} type="button">
-          开始配置
-        </button>
       </div>
     </div>
   );

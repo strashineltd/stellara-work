@@ -482,91 +482,184 @@ kbd {
   background: var(--color-bg-app);
 }
 
-.onboarding-page {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: min(860px, 100%);
-  min-height: min(620px, calc(100vh - 64px));
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-content);
-  box-shadow: var(--shadow-lg);
-  animation: surface-enter var(--motion-slow) var(--ease-out) both;
-}
-
-.onboarding-body {
-  width: min(620px, 100%);
-  margin: 0 auto;
-  padding: clamp(40px, 7vw, 76px) clamp(28px, 6vw, 64px);
-  overflow: auto;
-}
-
-.onboarding-body--centered {
+/* 引导卡片（对照 onboarding-design-preview.html 的 .ob-* 结构） */
+.ob-page {
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  padding: var(--space-6);
 }
 
-.onboarding-brand {
-  margin-bottom: var(--space-7);
+.ob-card {
+  width: min(100%, 560px);
+  padding: 36px 40px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-content);
+  box-shadow: 0 10px 30px rgba(30, 45, 75, 0.06);
 }
 
-.onboarding-brand-kicker {
-  margin: 0 0 var(--space-3);
-  color: var(--color-accent);
-  font-size: var(--fs-xs);
-  font-weight: 650;
+.ob-brand {
+  margin-bottom: 26px;
+  text-align: center;
 }
 
-.onboarding-brand-icon {
-  display: inline-grid;
+.ob-brand--tight {
+  margin-bottom: 20px;
+}
+
+.ob-logo {
+  display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  margin-bottom: var(--space-4);
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
   color: var(--color-on-accent);
-  border-radius: var(--radius-sm);
+  border-radius: 15px;
   background: var(--color-accent);
-  font-size: var(--fs-sm);
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 800;
 }
 
-.onboarding-brand-title,
-.onboarding-title {
+.ob-kicker {
+  margin: 0 0 6px;
+  color: var(--color-text-faint);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.ob-title {
   margin: 0;
   color: var(--color-text-strong);
-  font-size: var(--fs-2xl);
-  font-weight: 650;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
-.onboarding-brand-subtitle,
-.onboarding-subtitle {
-  max-width: 520px;
-  margin: var(--space-2) 0 0;
+.ob-sub {
+  margin: 8px 0 0;
   color: var(--color-text-soft);
-  font-size: var(--fs-md);
+  font-size: 12.5px;
+  line-height: 1.7;
 }
 
-.onboarding-title {
-  margin-top: var(--space-5);
+/* 步骤指示点 */
+.ob-steps {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 
-.onboarding-subtitle {
-  margin-bottom: var(--space-6);
+.ob-step {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border-dark);
 }
 
-.onboarding-back {
+.ob-step.on {
+  background: var(--color-accent);
+}
+
+/* 价值点卡片 */
+.value-points {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.value-point {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-content);
+}
+
+.value-point .ic {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  color: var(--color-accent);
+  border-radius: 8px;
+  background: var(--color-accent-soft);
+}
+
+.value-point .ic svg {
+  width: 15px;
+  height: 15px;
+}
+
+.value-point .t {
+  color: var(--color-text);
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+.value-point .d {
+  margin-top: 2px;
+  color: var(--color-text-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* 卡片内按钮行 */
+.ob-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: 24px;
+}
+
+.ob-actions.center {
+  justify-content: center;
+  margin-top: 0;
+}
+
+.ob-actions .btn-ghost {
+  border-color: var(--color-border-strong);
+}
+
+.ob-back {
   align-self: flex-start;
   min-height: 30px;
   padding-inline: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-3);
+}
+
+/* 引导页内复用 .model-card（settings 面板仍用原样式） */
+.onboarding .model-card {
+  min-height: auto;
+  padding: var(--space-card-h);
+}
+
+.onboarding .model-card-name {
+  font-size: 12.5px;
+}
+
+.onboarding .model-card-base {
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+.onboarding .model-card.selected {
+  box-shadow: none;
 }
 
 .model-card {
@@ -612,17 +705,6 @@ kbd {
   white-space: nowrap;
 }
 
-.onboarding-field {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-5);
-}
-
-.onboarding-label {
-  color: var(--color-text);
-  font-weight: 620;
-}
-
 .dir-picker {
   display: flex;
   align-items: center;
@@ -647,13 +729,23 @@ kbd {
   font-size: var(--fs-sm);
 }
 
-.onboarding-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-soft);
+/* 引导页字段（Base URL / Model 双列 + API key） */
+.field {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+
+.field label {
+  color: var(--color-text-soft);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 /* 环境初始化：选择工作目录 */
@@ -3980,12 +4072,12 @@ html[data-platform='darwin'] .sidebar-toggle {
     padding: var(--space-3);
   }
 
-  .onboarding-page {
-    min-height: calc(100vh - 24px);
+  .ob-card {
+    padding: var(--space-6) var(--space-5);
   }
 
-  .onboarding-body {
-    padding: var(--space-6) var(--space-4);
+  .field-row {
+    grid-template-columns: 1fr;
   }
 
   .model-grid {
