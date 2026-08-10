@@ -7,8 +7,9 @@ import { SettingsSkillsPanel } from './SettingsSkillsPanel';
 const WORKDIR = '/Users/lhy/Stellara Work';
 
 const SKILLS: SkillDef[] = [
-  { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…' },
-  { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…' },
+  { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md' },
+  { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…', format: 'md', enabled: false },
+  { name: 'legacy-notes', description: '旧格式技能，仅可删除', prompt: 'JSON 格式内容', format: 'json' },
 ];
 
 const CONFIGURED: ConfiguredModel = {
@@ -26,11 +27,20 @@ function installApi(configured: ConfiguredModel | null) {
     list: vi.fn().mockResolvedValue({ presets: [], configured }),
     skillsList: vi.fn().mockResolvedValue({ items: SKILLS, errors: [] }),
     openPath: vi.fn().mockResolvedValue(true),
+    skillsCreate: vi.fn().mockResolvedValue({ file: 'new-skill.md' }),
+    skillsUpdate: vi.fn().mockResolvedValue(undefined),
+    skillsDelete: vi.fn().mockResolvedValue(undefined),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
       models: { list: mocks.list },
-      skills: { list: mocks.skillsList, listDetailed: mocks.skillsList },
+      skills: {
+        list: mocks.skillsList,
+        listDetailed: mocks.skillsList,
+        create: mocks.skillsCreate,
+        update: mocks.skillsUpdate,
+        delete: mocks.skillsDelete,
+      },
       fs: { openPath: mocks.openPath },
     } as unknown as ElectronAPI,
     writable: true,
@@ -63,6 +73,19 @@ async function fireClick(element: Element | null | undefined) {
   });
 }
 
+async function fireInput(element: Element | null | undefined, value: string) {
+  if (!element) throw new Error('Element not found for input');
+  await act(async () => {
+    const proto =
+      element instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    setter.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 function byText(root: Element, text: string): Element | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node: Node | null;
@@ -87,11 +110,11 @@ describe('SettingsSkillsPanel', () => {
     expect(mocks.skillsList).toHaveBeenCalledWith(WORKDIR);
 
     const rows = container.querySelectorAll('.settings-skill-row');
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(3);
     expect(byText(container, 'code-review')).toBeTruthy();
     expect(byText(container, '对当前变更做全面代码审查，输出发现清单')).toBeTruthy();
     expect(byText(container, 'macos-pack')).toBeTruthy();
-    expect(container.querySelector('.settings-section__title')?.textContent).toContain('2');
+    expect(container.querySelector('.settings-section__title')?.textContent).toContain('3');
     expect(container.querySelector('.settings-skill-row .settings-skill-row__icon')).toBeTruthy();
   });
 
@@ -128,5 +151,132 @@ describe('SettingsSkillsPanel', () => {
 
     expect(byText(container, '请先配置模型并选择项目')).toBeTruthy();
     expect(mocks.skillsList).not.toHaveBeenCalled();
+  });
+
+  it('creates a skill via the form: calls skills.create with name/description/prompt, closes the form and refreshes the list', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    await fireClick(container.querySelector('.settings-skill-create'));
+    expect(container.querySelector('.settings-skill-form')).toBeTruthy();
+
+    await fireInput(container.querySelector('.settings-skill-field-name input'), 'my-skill');
+    await fireInput(container.querySelector('.settings-skill-field-desc input'), '我的技能描述');
+    await fireInput(container.querySelector('.settings-skill-field-prompt textarea'), '执行指令');
+    await fireClick(container.querySelector('.settings-skill-save'));
+
+    expect(mocks.skillsCreate).toHaveBeenCalledWith(WORKDIR, {
+      name: 'my-skill',
+      description: '我的技能描述',
+      prompt: '执行指令',
+    });
+    expect(container.querySelector('.settings-skill-form')).toBeNull();
+    expect(mocks.skillsList).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not submit the form when name/description/prompt are empty', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    await fireClick(container.querySelector('.settings-skill-create'));
+    await fireClick(container.querySelector('.settings-skill-save'));
+
+    expect(mocks.skillsCreate).not.toHaveBeenCalled();
+    expect(byText(container, '不能为空')).toBeTruthy();
+
+    await fireInput(container.querySelector('.settings-skill-field-name input'), 'only-name');
+    await fireClick(container.querySelector('.settings-skill-save'));
+
+    expect(mocks.skillsCreate).not.toHaveBeenCalled();
+  });
+
+  it('shows the create error (e.g. file exists) inside the form', async () => {
+    mocks.skillsCreate.mockRejectedValueOnce(new Error('技能已存在：my-skill.md'));
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    await fireClick(container.querySelector('.settings-skill-create'));
+    await fireInput(container.querySelector('.settings-skill-field-name input'), 'my-skill');
+    await fireInput(container.querySelector('.settings-skill-field-desc input'), '描述');
+    await fireInput(container.querySelector('.settings-skill-field-prompt textarea'), '内容');
+    await fireClick(container.querySelector('.settings-skill-save'));
+
+    expect(mocks.skillsCreate).toHaveBeenCalledTimes(1);
+    expect(byText(container, '技能已存在：my-skill.md')).toBeTruthy();
+    expect(container.querySelector('.settings-skill-form')).toBeTruthy();
+  });
+
+  it('prefills the form when editing and saves via skills.update', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    await fireClick(
+      container.querySelector('.settings-skill-row[data-skill="code-review"] .settings-skill-edit'),
+    );
+
+    expect(container.querySelector('.settings-skill-form')).toBeTruthy();
+    expect(byText(container, '编辑技能')).toBeTruthy();
+    const nameInput = container.querySelector('.settings-skill-field-name input') as HTMLInputElement;
+    const descInput = container.querySelector('.settings-skill-field-desc input') as HTMLInputElement;
+    const promptArea = container.querySelector('.settings-skill-field-prompt textarea') as HTMLTextAreaElement;
+    expect(nameInput.value).toBe('code-review');
+    expect(descInput.value).toBe('对当前变更做全面代码审查，输出发现清单');
+    expect(promptArea.value).toBe('请先读取当前 diff，然后逐文件审查…');
+
+    await fireInput(nameInput, 'code-review-v2');
+    await fireClick(container.querySelector('.settings-skill-save'));
+
+    expect(mocks.skillsUpdate).toHaveBeenCalledWith(WORKDIR, 'code-review.md', {
+      name: 'code-review-v2',
+      description: '对当前变更做全面代码审查，输出发现清单',
+      prompt: '请先读取当前 diff，然后逐文件审查…',
+    });
+    expect(container.querySelector('.settings-skill-form')).toBeNull();
+  });
+
+  it('toggles the enabled switch via skills.update({ enabled }) and grays the disabled row', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    const row = container.querySelector('.settings-skill-row[data-skill="code-review"]');
+    const toggle = row?.querySelector('.settings-switch');
+    expect(toggle?.getAttribute('role')).toBe('switch');
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(row?.classList.contains('settings-skill-row--disabled')).toBe(false);
+
+    await fireClick(toggle);
+
+    expect(mocks.skillsUpdate).toHaveBeenCalledWith(WORKDIR, 'code-review.md', { enabled: false });
+    expect(toggle?.getAttribute('aria-checked')).toBe('false');
+    expect(row?.classList.contains('settings-skill-row--disabled')).toBe(true);
+  });
+
+  it('renders a disabled skill with the gray class and the switch off', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    const row = container.querySelector('.settings-skill-row[data-skill="macos-pack"]');
+    expect(row?.classList.contains('settings-skill-row--disabled')).toBe(true);
+    expect(row?.querySelector('.settings-switch')?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('deletes a skill only after confirmation', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    await fireClick(
+      container.querySelector('.settings-skill-row[data-skill="code-review"] .settings-skill-delete'),
+    );
+    expect(mocks.skillsDelete).not.toHaveBeenCalled();
+    expect(byText(container, '确认删除')).toBeTruthy();
+
+    await fireClick(byText(container, '确认删除'));
+
+    expect(mocks.skillsDelete).toHaveBeenCalledWith(WORKDIR, 'code-review.md');
+    expect(container.querySelector('.settings-skill-row[data-skill="code-review"]')).toBeNull();
+  });
+
+  it('renders json skills without an edit button or toggle (delete only)', async () => {
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    const row = container.querySelector('.settings-skill-row[data-skill="legacy-notes"]');
+    expect(row?.querySelector('.settings-skill-edit')).toBeNull();
+    expect(row?.querySelector('.settings-switch')).toBeNull();
+    expect(row?.querySelector('.settings-skill-expand')).toBeTruthy();
+    expect(row?.querySelector('.settings-skill-delete')).toBeTruthy();
+    expect(row?.querySelector('.settings-skill-badge--json')).toBeTruthy();
   });
 });

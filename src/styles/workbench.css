@@ -5332,13 +5332,25 @@ html[data-platform='darwin'] .settings-window__titlebar {
   white-space: pre-wrap;
 }
 
+/* 技能区块工具行（搜索框 + 复制模板 / 新建技能按钮） */
+.settings-skill-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.settings-skill-toolbar .settings-skill-search {
+  flex: 1;
+  margin-bottom: 0;
+}
+
 /* 技能搜索框 */
 .settings-skill-search {
   display: flex;
   align-items: center;
   gap: 7px;
   height: 34px;
-  margin-bottom: 8px;
   padding: 0 10px;
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
@@ -5386,6 +5398,118 @@ html[data-platform='darwin'] .settings-window__titlebar {
 .settings-skill-badge--json {
   color: var(--color-accent);
   background: var(--color-accent-soft);
+}
+
+/* 技能卡片行：描述单行截断（对照预览页 .skill-desc） */
+.settings-skill-desc {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 禁用技能整卡灰显（对照预览页 opacity .55） */
+.settings-skill-row--disabled {
+  opacity: 0.55;
+}
+
+/* 技能卡片行操作区（开关 / 展开 / 编辑 / 删除） */
+.settings-skill-ops {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 技能文件路径（展开区） */
+.settings-skill-path {
+  margin-top: 6px;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* 启用开关（对照预览页 .switch，MCP 区块 .settings-mcp-switch 同款） */
+.settings-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 19px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  outline: none;
+  background: var(--color-bg-input);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.settings-switch:focus-visible {
+  border-color: var(--color-accent);
+}
+
+.settings-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-text-faint);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.settings-switch.on {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.settings-switch.on::after {
+  transform: translateX(15px);
+  background: var(--color-accent);
+}
+
+/* 新建/编辑技能折叠表单（复用 .settings-add-form / .form-row） */
+.settings-skill-form__title {
+  padding: 12px 14px 0;
+  color: var(--color-text-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.settings-skill-form .form-row textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  outline: none;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.settings-skill-form .form-row textarea:focus {
+  border-color: var(--color-accent);
+}
+
+.settings-skill-form .form-hint {
+  margin-top: 3px;
+  color: var(--color-text-faint);
+  font-size: 10.5px;
+}
+
+.settings-skill-form__error {
+  margin: 0 14px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-danger-tint);
+  border-radius: 8px;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 11.5px;
 }
 
 /* 技能格式错误警告（无效技能文件标注） */
