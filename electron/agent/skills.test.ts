@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { loadSkills, loadSkillsWithErrors, formatSkillsForPrompt } from './skills';
+import {
+  loadSkills,
+  loadSkillsWithErrors,
+  formatSkillsForPrompt,
+  buildSkillMarkdown,
+  mergeSkillFrontmatter,
+  sanitizeSkillName,
+} from './skills';
 
 let tmpDir: string;
 
@@ -196,5 +203,84 @@ describe('loadSkills markdown format', () => {
   it('keeps legacy .json skills working', async () => {
     await writeSkill('skills/old.json', JSON.stringify({ name: 'old', description: '旧格式', prompt: 'p' }));
     expect(await loadSkills(tmpDir)).toHaveLength(1);
+  });
+});
+
+describe('enabled flag', () => {
+  it('md frontmatter enabled: false → enabled: false；缺省 true', async () => {
+    await writeSkill('skills/off.md', '---\nname: off\ndescription: 关闭\nenabled: false\n---\n正文');
+    await writeSkill('skills/on.md', '---\nname: on\ndescription: 开启\n---\n正文');
+    const res = await loadSkillsWithErrors(tmpDir);
+    const off = res.skills.find((s) => s.name === 'off')!;
+    expect(off.enabled).toBe(false);
+    const on = res.skills.find((s) => s.name === 'on')!;
+    expect(on.enabled).toBeUndefined();
+  });
+
+  it('loadSkills 过滤 disabled；WithErrors 含 disabled', async () => {
+    await writeSkill('skills/off.md', '---\nname: off\ndescription: 关闭\nenabled: false\n---\n正文');
+    await writeSkill('skills/on.md', '---\nname: on\ndescription: 开启\n---\n正文');
+    expect((await loadSkills(tmpDir)).map((s) => s.name).sort()).toEqual(['on']);
+    expect((await loadSkillsWithErrors(tmpDir)).skills.map((s) => s.name).sort()).toEqual(['off', 'on']);
+  });
+
+  it('json 恒启用（无 enabled 字段）', async () => {
+    await writeSkill('skills/old.json', JSON.stringify({ name: 'old', description: 'x', prompt: 'y' }));
+    const res = await loadSkillsWithErrors(tmpDir);
+    expect(res.skills[0]!.enabled).toBeUndefined();
+  });
+});
+
+describe('buildSkillMarkdown', () => {
+  it('生成 frontmatter + 正文（enabled: false 时含行，true/缺省省略）', () => {
+    const md = buildSkillMarkdown({ name: 'code-review', description: '审查代码', prompt: '你是审查专家。' });
+    expect(md).toBe('---\nname: code-review\ndescription: 审查代码\n---\n\n你是审查专家。');
+    const mdOff = buildSkillMarkdown({
+      name: 'code-review',
+      description: '审查代码',
+      prompt: '正文',
+      enabled: false,
+    });
+    expect(mdOff).toContain('enabled: false');
+    const mdOn = buildSkillMarkdown({ name: 'x', description: 'd', prompt: 'p', enabled: true });
+    expect(mdOn).not.toContain('enabled');
+  });
+});
+
+describe('mergeSkillFrontmatter', () => {
+  it('patch description/prompt 保留 name 与未知字段', () => {
+    const merged = mergeSkillFrontmatter(
+      '---\nname: review\ndescription: 旧描述\ntags: [a, b]\n---\n\n正文第一段',
+      { description: '新描述', prompt: '新正文' },
+    );
+    expect(merged).toContain('name: review');
+    expect(merged).toContain('tags: [a, b]');
+    expect(merged).toContain('description: 新描述');
+    expect(merged).not.toContain('旧描述');
+    expect(merged).toContain('新正文');
+    expect(merged).not.toContain('正文第一段');
+  });
+
+  it('patch enabled:false 插入行；enabled:true 不插入', () => {
+    const original = '---\nname: review\ndescription: d\n---\n\n正文';
+    expect(mergeSkillFrontmatter(original, { enabled: false })).toContain('enabled: false');
+    expect(mergeSkillFrontmatter(original, { enabled: true })).not.toContain('enabled');
+  });
+
+  it('无 frontmatter 时按 build 生成', () => {
+    const merged = mergeSkillFrontmatter('# 标题\n\n正文', { name: 'x', description: 'd', prompt: 'p' });
+    expect(merged).toBe('---\nname: x\ndescription: d\n---\n\np');
+  });
+});
+
+describe('sanitizeSkillName', () => {
+  it('替换非法字符 [\\/:*?"<>|]', () => {
+    expect(sanitizeSkillName('a/b:c*.md')).toBe('a-b-c-.md');
+  });
+
+  it('trim；空返回空串', () => {
+    expect(sanitizeSkillName('  a  ')).toBe('a');
+    expect(sanitizeSkillName('')).toBe('');
+    expect(sanitizeSkillName('   ')).toBe('');
   });
 });

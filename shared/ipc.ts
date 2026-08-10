@@ -471,6 +471,8 @@ export interface SkillDef {
   description: string;
   prompt: string;
   format?: 'md' | 'json';
+  /** 缺省 true；md frontmatter `enabled: false` 时为 false（json 恒 true） */
+  enabled?: boolean;
 }
 
 /** 无效技能文件的格式错误（界面标注「格式错误」用） */

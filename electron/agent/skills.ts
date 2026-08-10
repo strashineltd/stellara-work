@@ -20,7 +20,7 @@ type ParseResult = { skill: SkillDef } | { reason: string };
 
 /**
  * 解析 Claude 风格 markdown 技能文件。
- * 提取 frontmatter 中的 name / description（可选 fallbackName），正文作为 prompt。
+ * 提取 frontmatter 中的 name / description（可选 fallbackName）/ enabled，正文作为 prompt。
  * 失败时返回区分字段的错误 reason（缺 name / 缺 description / 缺 prompt / 格式解析失败）。
  */
 function parseSkillMarkdownDetailed(text: string, fallbackName: string): ParseResult {
@@ -29,13 +29,16 @@ function parseSkillMarkdownDetailed(text: string, fallbackName: string): ParseRe
   const block = m[1];
   const nameMatch = /^name:\s*(.+)$/m.exec(block);
   const descMatch = /^description:\s*(.+)$/m.exec(block);
+  const enabledMatch = /^enabled:\s*(\S+)$/m.exec(block);
   const name = (nameMatch ? nameMatch[1].trim() : '') || fallbackName.trim();
   if (!name) return { reason: '缺少 name' };
   const description = descMatch ? descMatch[1].trim() : '';
   if (!description) return { reason: '缺少 description' };
   const prompt = text.slice(m[0].length).trim();
   if (!prompt) return { reason: '缺少 prompt' };
-  return { skill: { name, description, prompt, format: 'md' } };
+  const skill: SkillDef = { name, description, prompt, format: 'md' };
+  if (enabledMatch && enabledMatch[1].toLowerCase() === 'false') skill.enabled = false;
+  return { skill };
 }
 
 /** 兼容旧 API：解析失败返回 null */
@@ -139,5 +142,86 @@ export async function loadSkillsWithErrors(
 
 export async function loadSkills(workDir: string): Promise<SkillDef[]> {
   const { skills } = await loadSkillsWithErrors(workDir);
-  return skills;
+  return skills.filter((s) => s.enabled !== false);
+}
+
+/**
+ * 生成技能 markdown 文件内容（frontmatter + 正文）。
+ * enabled 缺省为 true，仅当显式 false 时写入 `enabled: false` 行。
+ */
+export function buildSkillMarkdown(skill: {
+  name: string;
+  description: string;
+  prompt: string;
+  enabled?: boolean;
+}): string {
+  const lines = ['---', `name: ${skill.name}`, `description: ${skill.description}`];
+  if (skill.enabled === false) lines.push('enabled: false');
+  lines.push('---');
+  const prompt = skill.prompt.trim();
+  return prompt ? `${lines.join('\n')}\n\n${prompt}` : lines.join('\n');
+}
+
+/** 技能文件字段补丁（用于编辑回填） */
+export interface SkillPatch {
+  name?: string;
+  description?: string;
+  prompt?: string;
+  enabled?: boolean;
+}
+
+/**
+ * 合并技能文件内容：解析原 frontmatter（保留未知字段如 tags 等）+ patch 字段更新 + 正文不变。
+ * 无 frontmatter 时按 buildSkillMarkdown 生成。
+ */
+export function mergeSkillFrontmatter(original: string, patch: SkillPatch): string {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(original);
+  if (!m) {
+    return buildSkillMarkdown({
+      name: patch.name ?? '',
+      description: patch.description ?? '',
+      prompt: patch.prompt ?? original.trim(),
+      enabled: patch.enabled,
+    });
+  }
+  const body = (patch.prompt !== undefined ? patch.prompt : original.slice(m[0].length)).trim();
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of m[1].split('\n')) {
+    const fm = /^([^:\n]+):/.exec(raw);
+    if (!fm) continue;
+    const key = fm[1].trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (key === 'name' && patch.name !== undefined) {
+      lines.push(`name: ${patch.name}`);
+      continue;
+    }
+    if (key === 'description' && patch.description !== undefined) {
+      lines.push(`description: ${patch.description}`);
+      continue;
+    }
+    if (key === 'enabled') {
+      if (patch.enabled === undefined) lines.push(raw);
+      else if (patch.enabled === false) lines.push('enabled: false');
+      continue;
+    }
+    lines.push(raw);
+  }
+  if (patch.name !== undefined && !seen.has('name')) {
+    lines.push(`name: ${patch.name}`);
+    seen.add('name');
+  }
+  if (patch.description !== undefined && !seen.has('description')) {
+    lines.push(`description: ${patch.description}`);
+    seen.add('description');
+  }
+  if (patch.enabled === false && !seen.has('enabled')) lines.push('enabled: false');
+  const frontmatter = `---\n${lines.join('\n')}\n---`;
+  return body ? `${frontmatter}\n\n${body}` : frontmatter;
+}
+
+/** 将技能名称中的文件系统非法字符替换为 '-'，并 trim；空返回空串 */
+export function sanitizeSkillName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '-').trim();
 }
