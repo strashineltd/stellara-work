@@ -246,6 +246,15 @@ describe('Onboarding', () => {
     expect(onComplete.mock.calls[0][0]).toBeNull();
   });
 
+  it('reconfigure: skip on connection page keeps the existing config (not null)', () => {
+    const onComplete = vi.fn();
+    const init: ConfiguredModel = { id: 'deepseek-v4-pro', label: 'DS', baseUrl: 'x', model: 'd', isCustom: false, hasKey: true, contextWindow: 256000, workDir: '/existing' };
+    const result = render(<Onboarding presets={PRESETS} initialConfig={init} onComplete={onComplete} />);
+    fireClick(result.getButton(/跳过/));
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete.mock.calls[0][0]).toEqual(init);
+  });
+
   it('skips from the connection page without an api key and completes with null', () => {
     const onComplete = vi.fn();
     const result = renderFirstTime(onComplete);

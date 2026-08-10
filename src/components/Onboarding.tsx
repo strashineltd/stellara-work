@@ -35,9 +35,9 @@ export function Onboarding({ presets, initialConfig, projects, onComplete }: Onb
     }
   }, [selectedId, presets]);
 
-  /** 跳过：不校验 key，直接完成 */
+  /** 跳过：不校验 key，直接完成；重配置（已有配置）时跳过 = 保留原配置 */
   function handleSkip() {
-    onComplete(null);
+    onComplete(initialConfig ?? null);
   }
 
   async function handleComplete() {
