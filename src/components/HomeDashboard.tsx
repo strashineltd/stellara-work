@@ -1,18 +1,25 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
 import { basename, formatRelativeTime } from '../lib/chat-utils';
 import { Icon } from './Icon';
 
 export type DashboardSection = 'home' | 'projects';
 
+/** 稍后提醒的时长：5 分钟 */
+const BANNER_SNOOZE_MS = 300_000;
+
 interface HomeDashboardProps {
   section: DashboardSection;
-  config: ConfiguredModel;
+  config: ConfiguredModel | null;
   workDir?: string;
   projectName?: string;
   projects: ProjectSummary[];
   sessions: SessionSummary[];
   input: string;
   busy: boolean;
+  /** 尚未配置模型（无可用 agent）时显示横幅 */
+  modelMissing?: boolean;
+  onOpenSettings?: () => void;
   onInputChange: (value: string) => void;
   onSend: () => void;
   onSelectSession: (id: string) => void;
@@ -37,8 +44,39 @@ export function HomeDashboard(props: HomeDashboardProps) {
   const recentSessions = props.sessions.slice(0, 3);
   const visibleProjects = props.projects.slice(0, props.section === 'projects' ? 12 : 3);
   const maxSessionCount = Math.max(1, ...visibleProjects.map((p) => p.sessionCount));
-  const effectiveWorkDir = props.workDir ?? props.config.workDir;
+  const effectiveWorkDir = props.workDir ?? props.config?.workDir;
   const workDirName = effectiveWorkDir ? basename(effectiveWorkDir) : '尚未选择项目';
+
+  // ---- 无模型横幅 + 稍后提醒 ----
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const snoozeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // modelMissing 变 false（模型已配置）或组件卸载时，清掉稍后提醒定时器
+  useEffect(() => {
+    if (!props.modelMissing) {
+      if (snoozeTimer.current) {
+        clearTimeout(snoozeTimer.current);
+        snoozeTimer.current = null;
+      }
+      setBannerDismissed(false);
+      return;
+    }
+    return () => {
+      if (snoozeTimer.current) {
+        clearTimeout(snoozeTimer.current);
+        snoozeTimer.current = null;
+      }
+    };
+  }, [props.modelMissing]);
+
+  function handleSnoozeBanner() {
+    setBannerDismissed(true);
+    if (snoozeTimer.current) clearTimeout(snoozeTimer.current);
+    snoozeTimer.current = setTimeout(() => {
+      snoozeTimer.current = null;
+      setBannerDismissed(false);
+    }, BANNER_SNOOZE_MS);
+  }
 
   if (props.section === 'projects') {
     return (
@@ -90,6 +128,29 @@ export function HomeDashboard(props: HomeDashboardProps) {
 
   return (
     <main className="dashboard dashboard--home" aria-labelledby="home-dashboard-title">
+      {props.modelMissing && !bannerDismissed && (
+        <div className="no-model-banner" role="alert">
+          <Icon name="alert" size={15} />
+          <span>尚未配置模型，Agent 暂时无法执行任务。</span>
+          <span className="no-model-banner__actions">
+            <button
+              className="no-model-banner__btn no-model-banner__btn--settings"
+              type="button"
+              onClick={props.onOpenSettings}
+            >
+              去设置
+            </button>
+            <button
+              className="no-model-banner__btn"
+              type="button"
+              onClick={handleSnoozeBanner}
+            >
+              稍后提醒
+            </button>
+          </span>
+        </div>
+      )}
+
       <section className="task-deck">
         <div className="task-deck-intro">
           <h1 id="home-dashboard-title">把任务交给 Agent</h1>

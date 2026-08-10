@@ -4,7 +4,7 @@ import { basename } from '../../lib/chat-utils';
 import { Icon } from '../Icon';
 
 interface HeaderProps {
-  config: ConfiguredModel;
+  config: ConfiguredModel | null;
   sidebarOpen: boolean;
   workspaceOpen: boolean;
   modelList: ModelListItem[];
@@ -31,9 +31,10 @@ interface HeaderProps {
  * 顶部 bar：sidebar toggle / 工作目录 / model 切换 / workspace toggle / file tree / 菜单
  */
 export function Header(props: HeaderProps) {
+  const config = props.config;
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const effectiveWorkDir = props.workDir ?? props.config.workDir;
+  const effectiveWorkDir = props.workDir ?? config?.workDir;
 
   // 点外部关闭 model 下拉
   useEffect(() => {
@@ -92,52 +93,64 @@ export function Header(props: HeaderProps) {
             {props.projectName ?? (effectiveWorkDir ? basename(effectiveWorkDir) : '选择项目…')}
           </span>
         </button>
-        <span className="model-switcher">
-          <button
-            className={`main-model ${modelMenuOpen ? 'open' : ''}`}
-            onClick={() => setModelMenuOpen((v) => !v)}
-            type="button"
-            title={`${props.config.label} · ${props.config.model}（点击切换）`}
-            disabled={props.switchingModel}
-            aria-expanded={modelMenuOpen}
-            aria-haspopup="listbox"
-          >
-            <span className="main-model-label">{props.config.label}</span>
-            <Icon className="main-model-caret" name="chevron-down" size={13} />
-          </button>
-          {modelMenuOpen && (
-            <div className="model-switcher-menu" role="listbox">
-              {props.modelList.length === 0 && <div className="empty-hint" role="status">还没有模型</div>}
-              {props.modelList.map((m) => (
-                <button
-                  key={m.id}
-                  className={`model-switcher-item ${m.id === props.config.id ? 'active' : ''} ${!m.hasKey ? 'no-key' : ''}`}
-                  onClick={() => void props.onSwitchModel(m.id)}
-                  type="button"
-                  title={!m.hasKey ? '该 model 未配 API key' : m.model}
-                  disabled={props.switchingModel}
-                  role="option"
-                  aria-selected={m.id === props.config.id}
-                >
-                  <span className="model-switcher-item-name">{m.label}</span>
-                  <span className="model-switcher-item-meta">
-                    {m.id === props.config.id && <span className="badge">活跃</span>}
-                    {!m.hasKey && <span className="badge-warn">无 key</span>}
-                  </span>
-                </button>
-              ))}
-              <div className="model-switcher-footer">
-                <button
-                  className="model-switcher-add"
-                  onClick={() => { setModelMenuOpen(false); props.onOpenSettings(); }}
-                  type="button"
-                >
-                  添加 / 管理模型
-                </button>
+        {config ? (
+          <span className="model-switcher">
+            <button
+              className={`main-model ${modelMenuOpen ? 'open' : ''}`}
+              onClick={() => setModelMenuOpen((v) => !v)}
+              type="button"
+              title={`${config.label} · ${config.model}（点击切换）`}
+              disabled={props.switchingModel}
+              aria-expanded={modelMenuOpen}
+              aria-haspopup="listbox"
+            >
+              <span className="main-model-label">{config.label}</span>
+              <Icon className="main-model-caret" name="chevron-down" size={13} />
+            </button>
+            {modelMenuOpen && (
+              <div className="model-switcher-menu" role="listbox">
+                {props.modelList.length === 0 && <div className="empty-hint" role="status">还没有模型</div>}
+                {props.modelList.map((m) => (
+                  <button
+                    key={m.id}
+                    className={`model-switcher-item ${m.id === config.id ? 'active' : ''} ${!m.hasKey ? 'no-key' : ''}`}
+                    onClick={() => void props.onSwitchModel(m.id)}
+                    type="button"
+                    title={!m.hasKey ? '该 model 未配 API key' : m.model}
+                    disabled={props.switchingModel}
+                    role="option"
+                    aria-selected={m.id === config.id}
+                  >
+                    <span className="model-switcher-item-name">{m.label}</span>
+                    <span className="model-switcher-item-meta">
+                      {m.id === config.id && <span className="badge">活跃</span>}
+                      {!m.hasKey && <span className="badge-warn">无 key</span>}
+                    </span>
+                  </button>
+                ))}
+                <div className="model-switcher-footer">
+                  <button
+                    className="model-switcher-add"
+                    onClick={() => { setModelMenuOpen(false); props.onOpenSettings(); }}
+                    type="button"
+                  >
+                    添加 / 管理模型
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-        </span>
+            )}
+          </span>
+        ) : (
+          <button
+            className="model-pill model-pill--missing"
+            onClick={() => props.onOpenSettings()}
+            type="button"
+            title="尚未配置模型，点击前往设置"
+          >
+            <Icon name="alert" size={13} />
+            <span>未配置模型</span>
+          </button>
+        )}
       </div>
 
       <div className="main-header-right">

@@ -62,11 +62,6 @@ export function MainView(props: MainViewProps) {
   } = props;
   void _info;
 
-  // 未配置模型时的占位配置：Header/HomeDashboard 显示"未配置模型"，不参与会话创建
-  const effectiveConfig: ConfiguredModel = config ?? {
-    id: 'custom', label: '未配置模型', baseUrl: '', model: '', isCustom: true, hasKey: false,
-  };
-
   const tabBarTabs = useMemo<TabBarTab[]>(() =>
     sessions.map((s) => ({
       id: s.id,
@@ -90,7 +85,7 @@ export function MainView(props: MainViewProps) {
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   // 仅当会话引用的模型已从配置中删除时才提示（切换活跃模型不算）
-  const modelMissing = !!activeSession && !modelList.some((m) => m.id === activeSession.modelId);
+  const sessionModelMissing = !!activeSession && !modelList.some((m) => m.id === activeSession.modelId);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
@@ -296,6 +291,7 @@ export function MainView(props: MainViewProps) {
     if (!input.trim() || busy) return;
     if (!config) {
       setEntries((prev) => [...prev, { kind: 'error', message: '请先配置模型后再发送任务。' }]);
+      onOpenSettings();
       return;
     }
     setMemoryContext([]);
@@ -524,7 +520,7 @@ export function MainView(props: MainViewProps) {
     <div className="main-view">
       {activeSection === 'tasks' && <a className="skip-link" href="#task-stream">跳到工作记录</a>}
       <Header
-        config={effectiveConfig}
+        config={config}
         sidebarOpen={sidebarOpen}
         workspaceOpen={props.workspaceOpen}
         modelList={modelList}
@@ -614,7 +610,7 @@ export function MainView(props: MainViewProps) {
                 streamId={streamId}
                 chatRef={chatRef}
                 lastUserForRetry={lastUserForRetry}
-                modelMissing={modelMissing}
+                modelMissing={sessionModelMissing}
                 workDir={activeWorkDir}
                 onOpenSettings={() => onOpenSettings()}
                 onRetry={handleRetry}
@@ -665,7 +661,9 @@ export function MainView(props: MainViewProps) {
           ) : (
             <HomeDashboard
               section={activeSection}
-              config={effectiveConfig}
+              config={config}
+              modelMissing={!config}
+              onOpenSettings={() => onOpenSettings()}
               workDir={activeWorkDir}
               projectName={activeProject?.name}
               projects={projects}
@@ -674,6 +672,11 @@ export function MainView(props: MainViewProps) {
               busy={busy}
               onInputChange={setInput}
               onSend={() => {
+                if (!config) {
+                  setActiveSection('tasks');
+                  void handleSend();
+                  return;
+                }
                 if (!activeSessionId) {
                   void handleNewSession();
                   return;
@@ -697,7 +700,7 @@ export function MainView(props: MainViewProps) {
             touchedFiles={touchedFiles}
             memoryContext={memoryContext}
             contextStats={contextStats}
-            contextWindow={effectiveConfig.contextWindow}
+            contextWindow={config?.contextWindow}
           />
         )}
       </div>
@@ -739,7 +742,7 @@ export function MainView(props: MainViewProps) {
           sessions={sessions}
           modelList={modelList}
           activeSessionId={activeSessionId}
-          activeModelId={effectiveConfig.id}
+          activeModelId={config?.id ?? null}
           theme={props.theme ?? 'light'}
           onSelectSession={handleSelectSession}
           onNewSession={() => void handleNewSession()}

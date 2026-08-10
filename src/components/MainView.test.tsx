@@ -526,3 +526,59 @@ describe('MainView context stats', () => {
     expect(container.textContent).toContain('暂无任务数据');
   });
 });
+
+describe('MainView without a configured model', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  it('renders with a null config and shows the home no-model banner', async () => {
+    const { querySelector, querySelectorAll, container } = await renderMainView({ config: null, activeSessionId: null });
+    const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      (el) => el.textContent && el.textContent.includes('首页'),
+    );
+    fireClick(homeNav);
+    expect(querySelector('.dashboard--home')).not.toBeNull();
+    expect(container.textContent).toContain('尚未配置模型，Agent 暂时无法执行任务');
+  });
+
+  it('prompts to configure a model when sending from home without a config', async () => {
+    const onOpenSettings = vi.fn();
+    const { querySelector, querySelectorAll, container } = await renderMainView({
+      config: null,
+      activeSessionId: null,
+      onOpenSettings,
+    });
+    const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      (el) => el.textContent && el.textContent.includes('首页'),
+    );
+    fireClick(homeNav);
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '写个任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    });
+    await act(async () => {});
+    expect(container.textContent).toContain('请先配置模型');
+    expect(onOpenSettings).toHaveBeenCalled();
+  });
+});

@@ -114,4 +114,58 @@ describe('HomeDashboard', () => {
     fireClick(getByText('新建项目'));
     expect(onCreateProject).toHaveBeenCalledOnce();
   });
+
+  it('shows the no-model banner with settings and snooze actions', () => {
+    const onOpenSettings = vi.fn();
+    const { container, getByText } = render(
+      <HomeDashboard section="home" {...BASE_PROPS} modelMissing onOpenSettings={onOpenSettings} />,
+    );
+    expect(container.textContent).toContain('尚未配置模型，Agent 暂时无法执行任务');
+    expect(getByText('去设置')).toBeTruthy();
+    expect(getByText('稍后提醒')).toBeTruthy();
+    fireClick(getByText('去设置'));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it('snoozes the no-model banner and brings it back after 5 minutes', () => {
+    vi.useFakeTimers();
+    try {
+      const { container, getByText } = render(
+        <HomeDashboard section="home" {...BASE_PROPS} modelMissing />,
+      );
+      expect(container.textContent).toContain('尚未配置模型');
+      fireClick(getByText('稍后提醒'));
+      expect(container.textContent).not.toContain('尚未配置模型');
+      act(() => {
+        vi.advanceTimersByTime(300_000);
+      });
+      expect(container.textContent).toContain('尚未配置模型');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the snooze timer when unmounting', () => {
+    vi.useFakeTimers();
+    try {
+      const setSpy = vi.spyOn(globalThis, 'setTimeout');
+      const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+      const { getByText, unmount } = render(
+        <HomeDashboard section="home" {...BASE_PROPS} modelMissing />,
+      );
+      fireClick(getByText('稍后提醒'));
+      const snoozeIdx = setSpy.mock.calls.findIndex((call) => call[1] === 300_000);
+      expect(snoozeIdx).toBeGreaterThanOrEqual(0);
+      const timerId = setSpy.mock.results[snoozeIdx].value;
+      unmount();
+      expect(clearSpy).toHaveBeenCalledWith(timerId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the banner when modelMissing is false', () => {
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} modelMissing={false} />);
+    expect(container.textContent).not.toContain('尚未配置模型');
+  });
 });

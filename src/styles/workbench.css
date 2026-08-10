@@ -322,6 +322,34 @@ kbd {
   background: var(--color-warning-bg);
 }
 
+/* Header 模型徽章：配置缺失时替代模型选择器 */
+.model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-soft);
+  background: var(--color-bg-soft);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.model-pill--missing {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+  background: var(--color-warning-bg);
+  cursor: pointer;
+}
+
+.model-pill--missing:hover {
+  background: var(--color-warning);
+  color: var(--color-bg-content);
+}
+
 .status-busy,
 .status-ok,
 .status-fail,
@@ -2011,6 +2039,55 @@ html[data-platform='darwin'] .sidebar-toggle {
   color: var(--color-warning);
   border-color: var(--color-warning);
   background: var(--color-warning-bg);
+}
+
+/* 主界面无模型横幅（home 页顶部） */
+.no-model-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: min(100%, 760px);
+  margin: 0 auto var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+
+.no-model-banner__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.no-model-banner__btn {
+  height: 28px;
+  padding: 0 13px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.no-model-banner__btn:hover {
+  background: var(--color-warning);
+  color: var(--color-bg-content);
+}
+
+.no-model-banner__btn--settings {
+  background: var(--color-warning);
+  color: var(--color-bg-content);
+}
+
+.no-model-banner__btn--settings:hover {
+  background: var(--color-warning);
 }
 
 .summary-banner {

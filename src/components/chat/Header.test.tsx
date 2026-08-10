@@ -224,4 +224,38 @@ describe('Header', () => {
     fireClick(button);
     expect(onToggleWorkspace).toHaveBeenCalledOnce();
   });
+
+  it('shows a "未配置模型" warning badge and opens settings when config is null', () => {
+    const onOpenSettings = vi.fn();
+    const { querySelector, getByText, container } = render(
+      <Header
+        config={null}
+        sidebarOpen={true}
+        workspaceOpen={false}
+        modelList={MODEL_LIST}
+        switchingModel={false}
+        busy={false}
+        hasEntries={true}
+        onToggleSidebar={vi.fn()}
+        onToggleWorkspace={vi.fn()}
+        onChangeWorkDir={vi.fn()}
+        onOpenFileTree={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onReconfigure={vi.fn()}
+        onNewSession={vi.fn()}
+        onNewTask={vi.fn()}
+        onSwitchModel={vi.fn()}
+      />,
+    );
+    const badge = querySelector('.model-pill--missing');
+    expect(badge).toBeTruthy();
+    expect(getByText('未配置模型')).toBeTruthy();
+    // 无模型时不渲染模型切换下拉
+    expect(querySelector('.model-switcher-menu')).toBeNull();
+    expect(querySelector('.main-model')).toBeNull();
+    fireClick(badge);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(onOpenSettings).toHaveBeenCalledWith();
+    expect(container.innerHTML).not.toContain('aria-haspopup="listbox"');
+  });
 });
