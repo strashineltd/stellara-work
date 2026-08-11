@@ -27,22 +27,20 @@ const TAB_ICONS: Record<SettingsTab, IconName> = {
 };
 
 /**
- * 独立设置窗口外壳：顶栏（darwin 红绿灯由系统绘制，左侧留白）+ 左导航 + 面板容器。
+ * 内置设置面板：modal-backdrop（点击外部关闭）+ modal 容器（点击内部 stopPropagation）+ 左导航 + 面板。
  * 各 panel 挂载时自行加载数据；模型变更后由主进程广播 settings-changed，
- * 本窗口监听并递增 refreshKey，让已挂载的 panel 重新拉取数据。
+ * 本面板监听并递增 refreshKey，让已挂载的 panel 重新拉取数据。
  */
-export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string }) {
+export function SettingsPanel({ initialTab = 'models', onClose }: { initialTab?: SettingsTab; onClose: () => void }) {
   const [tab, setTab] = useState<SettingsTab>(
     SETTINGS_TABS.some((t) => t.id === initialTab) ? (initialTab as SettingsTab) : 'models',
   );
-  const [version, setVersion] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [theme, setTheme] = useState<ThemeName>('light');
 
   useEffect(() => {
     void window.electronAPI.app.getInfo().then((info) => {
       document.documentElement.dataset.platform = info.platform;
-      setVersion(info.version);
     });
   }, []);
 
@@ -72,7 +70,7 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
   useEffect(() => {
     return window.electronAPI.app.onSettingsChanged(() => {
       setRefreshKey((k) => k + 1);
-      // 主题可能被主窗口或本窗口内其他 panel 修改：广播时重新读取，保证深浅色实时同步
+      // 主题可能被主窗口或面板内其他 panel 修改：广播时重新读取，保证深浅色实时同步
       void window.electronAPI.settings.get().then((st) => {
         if (st.theme) setTheme(st.theme);
       });
@@ -80,13 +78,14 @@ export function SettingsWindow({ initialTab = 'models' }: { initialTab?: string 
   }, []);
 
   return (
-    <div className="settings-window">
-      <div className="settings-window__titlebar">
-        <span className="settings-window__title">设置</span>
-        <span className="settings-window__spacer" />
-        <span className="settings-window__version">Stellara Work {version}</span>
-      </div>
-      <div className="settings-window__body">
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="设置"
+        onClick={(e) => e.stopPropagation()}
+      >
         <nav className="settings-nav" role="tablist" aria-label="设置分类" aria-orientation="vertical">
           {SETTINGS_TABS.map((item) => (
             <button

@@ -5,7 +5,7 @@ import { Icon } from '../Icon';
 import { ModelCard } from '../ModelCard';
 
 interface SettingsModelsPanelProps {
-  /** 任何模型变更成功后回调（SettingsWindow 用于跨窗口同步） */
+  /** 任何模型变更成功后回调（SettingsPanel 用于同窗口刷新同步） */
   onChanged: () => void;
   /** 外部数据变更信号（其他窗口广播 settings-changed 时递增） */
   refreshKey?: number;

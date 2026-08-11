@@ -14,17 +14,6 @@ async function bootstrap() {
   const root = document.getElementById('root');
   if (!root) throw new Error('Root element not found');
 
-  // 独立设置窗口（?window=settings）：壳 + 左导航 + 面板，与主窗口渲染树完全分开
-  if (new URLSearchParams(window.location.search).get('window') === 'settings') {
-    const { SettingsWindow } = await import('./components/SettingsWindow');
-    createRoot(root).render(
-      <StrictMode>
-        <SettingsWindow initialTab={new URLSearchParams(window.location.search).get('tab') ?? 'models'} />
-      </StrictMode>,
-    );
-    return;
-  }
-
   createRoot(root).render(
     <StrictMode>
       <App />

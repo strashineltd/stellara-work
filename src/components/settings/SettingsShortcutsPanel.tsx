@@ -3,7 +3,7 @@ import { DEFAULT_SHORTCUTS, SHORTCUT_DEFS, eventToBinding, formatBinding, type S
 import { Icon } from '../Icon';
 
 interface SettingsShortcutsPanelProps {
-  /** 设置变更后通知 SettingsWindow（跨窗口同步） */
+  /** 设置变更后通知 SettingsPanel（同窗口刷新同步） */
   onChanged?: () => void;
   /** 外部数据变更信号（其他窗口广播 settings-changed 时递增） */
   refreshKey?: number;

@@ -56,15 +56,13 @@ describe('grounded design system', () => {
     expect(mainView).toMatch(/box-shadow:\s*none\s*;/);
   });
 
-  it('uses an immersive native title bar without covering header controls', () => {
+  it('uses a frameless title bar without system window controls', () => {
     const windowOptions = electronMain.match(/new BrowserWindow\(\{([\s\S]*?)webPreferences:/)?.[1] ?? '';
     const header = workbench.match(/\.main-header\s*\{([^}]*)\}/)?.[1] ?? '';
 
-    expect(windowOptions).toMatch(/titleBarStyle:\s*isMac \? 'hiddenInset' : 'hidden'/);
-    expect(windowOptions).toMatch(/titleBarOverlay:\s*\{/);
-    expect(windowOptions).toMatch(/color:\s*'rgba\(0,\s*0,\s*0,\s*0\)'/);
-    expect(windowOptions).toMatch(/symbolColor:\s*'#65758B'/);
-    expect(windowOptions).toMatch(/height:\s*72/);
+    expect(windowOptions).toMatch(/titleBarStyle:\s*'hidden'/);
+    expect(windowOptions).not.toMatch(/titleBarOverlay/);
+    expect(windowOptions).not.toMatch(/trafficLightPosition/);
     expect(header).toMatch(/env\(titlebar-area-width/);
     expect(header).toMatch(/-webkit-app-region:\s*drag/);
     expect(workbench).toMatch(/\.main-header button,[\s\S]*?-webkit-app-region:\s*no-drag/);

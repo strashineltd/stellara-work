@@ -5012,54 +5012,15 @@ html[data-platform='darwin'] .sidebar-toggle {
 }
 
 /* --------------------------------------------------------------------------
-   Settings window（独立设置窗口，对照 settings-design-preview.html）
+   Settings panel（内置覆盖面板：modal-backdrop + modal settings-modal + 左导航 + 面板）
    -------------------------------------------------------------------------- */
 
-.settings-window {
-  display: grid;
-  grid-template-rows: 46px minmax(0, 1fr);
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg-content);
-  color: var(--color-text);
-  font-family: var(--font-sans);
-  font-size: var(--fs-base);
-}
-
-.settings-window__titlebar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-content);
-  -webkit-app-region: drag;
-}
-
-html[data-platform='darwin'] .settings-window__titlebar {
-  padding-left: 78px;
-}
-
-.settings-window__title {
-  color: var(--color-text-soft);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-}
-
-.settings-window__spacer {
-  flex: 1;
-}
-
-.settings-window__version {
-  color: var(--color-text-faint);
-  font-size: var(--fs-xs);
-}
-
-.settings-window__body {
+.settings-modal {
   display: grid;
   grid-template-columns: 168px minmax(0, 1fr);
-  min-height: 0;
+  width: min(960px, calc(100vw - 64px));
+  height: min(680px, calc(100vh - 64px));
+  overflow: hidden;
 }
 
 .settings-nav {
@@ -5139,7 +5100,7 @@ html[data-platform='darwin'] .settings-window__titlebar {
   font-size: 11.5px;
 }
 
-.settings-window .error-banner {
+.settings-modal .error-banner {
   margin-bottom: var(--space-4);
 }
 

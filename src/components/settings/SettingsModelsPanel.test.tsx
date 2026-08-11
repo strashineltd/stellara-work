@@ -62,7 +62,6 @@ function installApi(models: ModelListItem[] = MODELS) {
     value: {
       app: {
         getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
-        openSettingsWindow: vi.fn().mockResolvedValue(undefined),
         onSettingsChanged: vi.fn().mockReturnValue(() => {}),
       },
       models: mocks,

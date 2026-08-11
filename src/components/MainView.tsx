@@ -21,6 +21,7 @@ import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
 import { CommandPalette } from './CommandPalette';
+import { type SettingsTab } from './SettingsPanel';
 import { useShortcuts } from '../hooks/useShortcuts';
 
 interface MainViewProps {
@@ -38,7 +39,7 @@ interface MainViewProps {
   theme?: import('../../shared/ipc').ThemeName;
   onToggleSidebar: () => void;
   onReconfigure: () => void;
-  onOpenSettings: (tab?: string) => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   onProjectCreated: (project: import('../../shared/ipc').Project) => void;
   onProjectDeleted: (id: string) => void;
   onProjectRenamed: (id: string, name: string) => void;

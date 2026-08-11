@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ModelListItem, SessionSummary, ThemeName } from '../../shared/ipc';
 import { Icon, type IconName } from './Icon';
+import type { SettingsTab } from './SettingsPanel';
 
 export interface CommandItem {
   id: string;
@@ -26,7 +27,7 @@ interface CommandPaletteProps {
   onDeleteSession: (id: string) => void;
   onSetActiveModel: (id: string) => void;
   onSetTheme: (t: ThemeName) => void;
-  onOpenSettings: (tab?: string) => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
   onOpenFileTree: () => void;
   onToggleSidebar: () => void;
   onToggleWorkspace: () => void;

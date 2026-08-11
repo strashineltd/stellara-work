@@ -3,7 +3,7 @@ import type { SessionSummary } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 
 interface SettingsSessionsPanelProps {
-  /** 数据变更后通知 SettingsWindow（跨窗口同步） */
+  /** 数据变更后通知 SettingsPanel（同窗口刷新同步） */
   onChanged?: () => void;
   /** 外部数据变更信号（其他窗口广播 settings-changed 时递增） */
   refreshKey?: number;

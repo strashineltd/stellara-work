@@ -6,6 +6,7 @@ import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
 import { Onboarding } from './components/Onboarding';
 import { MainView } from './components/MainView';
+import { SettingsPanel, type SettingsTab } from './components/SettingsPanel';
 import { resolveTheme } from './lib/theme';
 
 type AppState =
@@ -34,7 +35,7 @@ export default function App() {
   useEffect(() => {
     const off = window.electronAPI.menu?.onAction((action) => {
       if (action === 'open-settings') {
-        void window.electronAPI.app.openSettingsWindow();
+        openSettingsAt('models');
       } else {
         // MainView 处理：命令面板 / 新建会话
         window.dispatchEvent(new CustomEvent('menu-action', { detail: action }));
@@ -65,6 +66,13 @@ export default function App() {
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [theme, setTheme] = useState<ThemeName>('light');
   const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('sidebar');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('models');
+
+  function openSettingsAt(tab: SettingsTab) {
+    setSettingsInitialTab(tab);
+    setSettingsOpen(true);
+  }
 
   // 主题写到 documentElement.dataset.theme（global.css 用 [data-theme="dark"] 选择器）
   useEffect(() => {
@@ -229,6 +237,9 @@ export default function App() {
 
   return (
     <>
+      {settingsOpen && (
+        <SettingsPanel initialTab={settingsInitialTab} onClose={() => setSettingsOpen(false)} />
+      )}
       <MainView
         config={state.config}
         info={state.info}
@@ -254,7 +265,10 @@ export default function App() {
           });
         }}
         // MainView 的回调会被按钮直接调用；显式包一层，避免 MouseEvent 被误当成设置 tab。
-        onOpenSettings={(tab) => void window.electronAPI.app.openSettingsWindow(tab)}
+        onOpenSettings={(tab) => {
+          setSettingsInitialTab(tab ?? 'models');
+          setSettingsOpen(true);
+        }}
         onProjectCreated={(project) => {
           setState((s) => s.kind === 'ready'
             ? { ...s, projects: [{ id: project.id, name: project.name, workDir: project.workDir, entryFile: project.entryFile, updatedAt: project.updatedAt, sessionCount: 0 }, ...s.projects] }
