@@ -35,4 +35,18 @@ describe('searchFiles', () => {
     expect(r.ok).toBe(true);
     expect(r.output).not.toContain('secret.js');
   });
+
+  it('rejects cwd escaping the workdir', async () => {
+    await write('outside/secret.js', '');
+    const r = await searchFiles({ pattern: '**/*.js', cwd: '../' }, tmpDir);
+    expect(r.ok).toBe(false);
+    expect(r.output).not.toContain('secret.js');
+  });
+
+  it('allows cwd within the workdir', async () => {
+    await write('sub/inner.js', '');
+    const r = await searchFiles({ pattern: '**/*.js', cwd: 'sub' }, tmpDir);
+    expect(r.ok).toBe(true);
+    expect(r.output).toContain('inner.js');
+  });
 });

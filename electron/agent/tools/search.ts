@@ -1,17 +1,45 @@
 import fg from 'fast-glob';
 import path from 'node:path';
 import type { SearchFilesArgs, ToolResult, OpenAITool } from '../../../shared/ipc';
-import { isWithinDir } from '../../fs/path-security';
+import { isWithinDir, canonicalCwd } from '../../fs/path-security';
+import { isAbsolutePathArg } from './shell';
+
+/**
+ * 校验并解析 cwd 参数（与 shell.ts 的 validateCwdArg 一致）：
+ * - undefined/空 → 工作目录根
+ * - 绝对路径 → 拒绝（返回 null）
+ * - 解析后越出工作目录（.. 越界） → 拒绝（返回 null）
+ * - realpath 后越出工作目录（symlink 逃逸） → 拒绝（返回 null）
+ * 成功返回规范化后的绝对路径。
+ */
+async function validateCwdArg(cwd: string | undefined, root: string): Promise<string | null> {
+  if (cwd === undefined || cwd === '') return path.normalize(root);
+  if (isAbsolutePathArg(cwd)) return null;
+  const resolved = path.resolve(root, cwd);
+  if (!isWithinDir(resolved, root)) return null;
+  const realResolved = await canonicalCwd(resolved);
+  const realRoot = await canonicalCwd(root);
+  if (!isWithinDir(realResolved, realRoot)) return null;
+  return resolved;
+}
 
 export async function searchFiles(args: SearchFilesArgs, cwd: string): Promise<ToolResult> {
   try {
-    const searchRoot = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
+    const searchRoot = await validateCwdArg(args.cwd, cwd);
+    if (searchRoot === null) {
+      const reason =
+        args.cwd !== undefined && isAbsolutePathArg(args.cwd)
+          ? `cwd "${args.cwd}" 是绝对路径，不允许。请使用工作目录内的相对子目录。`
+          : `cwd "${args.cwd}" 超出工作目录。`;
+      return { ok: false, output: '', error: reason };
+    }
+    // glob 结果路径相对 searchRoot，过滤基准必须与之一致（防 pattern 经 .. 逃逸）
     const files = (await fg(args.pattern, {
       cwd: searchRoot,
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
-    })).filter((file) => isWithinDir(path.resolve(cwd, file), cwd));
+    })).filter((file) => isWithinDir(path.resolve(searchRoot, file), searchRoot));
     return {
       ok: true,
       output: files.length === 0 ? '(无匹配)' : files.slice(0, 200).join('\n'),
