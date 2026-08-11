@@ -80,7 +80,7 @@ export function ChatStream(props: ChatStreamProps) {
                 />
               )}
               {e.kind === 'tool_result' && !e.meta && (
-                <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} />
+                <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} workDir={props.workDir} />
               )}
               {e.kind === 'summary' && (
                 <div className="summary-banner" title="上下文已被压缩，老消息被摘要替换">

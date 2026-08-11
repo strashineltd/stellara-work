@@ -2695,6 +2695,45 @@ html[data-platform='darwin'] .sidebar-toggle {
   background: var(--color-hover-overlay);
 }
 
+.tool-copy-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  padding: 0;
+  color: var(--color-text-faint);
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.tool-copy-btn:hover {
+  color: var(--color-text);
+  background: var(--color-hover-overlay);
+}
+
+.tool-copy-btn__copied {
+  color: var(--color-success);
+  font-size: var(--fs-xxs);
+}
+
+.tool-result-path {
+  margin-bottom: var(--space-2);
+  color: var(--color-text-soft);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}
+
+.tool-result-path .hoverable-path {
+  color: var(--color-text-soft);
+}
+
+.tool-result-output {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .shell-stdout,
 .shell-stderr,
 .shell-empty {
