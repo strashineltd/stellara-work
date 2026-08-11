@@ -595,9 +595,7 @@ export interface ProjectFileSelection {
 export interface ElectronAPI {
   app: {
     getInfo: () => Promise<AppInfo>;
-    /** 打开独立设置窗口（tab 可选：models/sessions/app/skills/shortcuts） */
-    openSettingsWindow: (tab?: string) => Promise<void>;
-    /** 监听其他窗口的设置变更广播 */
+    /** 监听设置变更广播 */
     onSettingsChanged: (callback: () => void) => () => void;
   };
   models: {

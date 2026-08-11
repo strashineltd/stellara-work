@@ -9,7 +9,6 @@ import { ChatStreamRegistry } from './chat/stream-registry';
 import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { resolveSessionModel } from './chat/session-context';
 import { installAppMenu } from './menu';
-import { openSettingsWindow, broadcastSettingsChanged } from './settings-window';
 import { notifyTaskEnd } from './notifications';
 import type {
   AppInfo,
@@ -59,6 +58,13 @@ async function grantWorkDir(workDir: string): Promise<string> {
   return resolved;
 }
 
+/** 向所有窗口广播设置已变更（渲染层据此刷新本地状态） */
+function broadcastSettingsChanged(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now() });
+  }
+}
+
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
@@ -71,20 +77,9 @@ function createWindow(): void {
     // macOS 深度适配：窗口底色跟随系统深浅色，避免主题切换时闪白；
     // 深色面板色与 grounded-tokens 深色背景一致
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1E2126' : '#FFFFFF',
-    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
-    ...(isMac
-      ? {
-          // macOS 12+ 原生圆角窗口；红绿灯保持系统默认位置（hiddenInset），
-          // 侧栏按钮通过 CSS margin 置于其下方，两者互不重叠
-          roundedCorners: true,
-        }
-      : {
-          titleBarOverlay: {
-            color: 'rgba(0, 0, 0, 0)',
-            symbolColor: '#65758B',
-            height: 72,
-          },
-        }),
+    // macOS 12+ 原生圆角窗口；无系统窗控（红绿灯/标题栏按钮），关闭走菜单
+    titleBarStyle: 'hidden',
+    ...(isMac ? { roundedCorners: true } : {}),
     icon: path.join(__dirname, '..', '..', 'assets', isMac ? 'icon-512.png' : 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -556,11 +551,6 @@ function registerIpcHandlers(): void {
   });
 
   // Settings
-  ipcMain.handle('settings:openWindow', (_e, tab?: string) => {
-    openSettingsWindow(tab);
-    return true;
-  });
-
   ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
     const { loadConfig } = await import('./config/config-v2');
     const cfg = await loadConfig();
