@@ -214,6 +214,7 @@ export type ToolName =
   | 'run_command'
   | 'search_files'
   | 'search_content'
+  | 'search_symbol'
   | 'list_files'
   | 'web_fetch'
   | 'task_complete'

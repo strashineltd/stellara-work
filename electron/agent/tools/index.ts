@@ -3,7 +3,7 @@ import { readFile, writeFile, editFile, fsTools } from './fs';
 import { runCommand, shellTools } from './shell';
 import { searchFiles, searchTools } from './search';
 import { searchContent, grepTools } from './grep';
-import { searchSymbolTools } from './search-symbol';
+import { searchSymbol, searchSymbolTools } from './search-symbol';
 import { listFiles, listFilesTools } from './list-files';
 import { webFetch, webFetchTools } from './web-fetch';
 import { taskComplete, taskCompleteTools } from './task-complete';
@@ -63,6 +63,8 @@ export async function invokeTool(
       return searchFiles(args as { pattern: string; cwd?: string }, cwd);
     case 'search_content':
       return searchContent(args as { pattern: string; query: string; caseSensitive?: boolean; regex?: boolean; cwd?: string }, cwd);
+    case 'search_symbol':
+      return searchSymbol(args as { symbol: string; include?: string; contextLines?: number; limit?: number }, cwd);
     case 'list_files':
       return listFiles(args as { path?: string; maxDepth?: number }, cwd);
     case 'web_fetch':
