@@ -66,8 +66,8 @@ describe('grounded design system', () => {
     expect(header).toMatch(/env\(titlebar-area-width/);
     expect(header).toMatch(/-webkit-app-region:\s*drag/);
     expect(workbench).toMatch(/\.main-header button,[\s\S]*?-webkit-app-region:\s*no-drag/);
-    expect(workbench).toMatch(/html\[data-platform='darwin'\]\s*\.main-header\s*\{/);
-    expect(workbench).toMatch(/padding-left:\s*78px/);
+    expect(workbench).not.toMatch(/data-platform='darwin'/);
+    expect(header).toMatch(/padding: 0 max\(22px[^}]*0 22px/);
   });
 
   it('keeps the workspace inspector available across all main sections', () => {

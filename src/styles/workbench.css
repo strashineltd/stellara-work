@@ -781,17 +781,6 @@ kbd {
   -webkit-app-region: drag;
 }
 
-/* macOS: traffic-light controls overlay the header on the left */
-html[data-platform='darwin'] .main-header {
-  padding-left: 78px;
-}
-
-/* macOS: 侧栏切换按钮贴到窗口最左缘（红绿灯下方），仅 macOS */
-html[data-platform='darwin'] .sidebar-toggle {
-  margin-left: -64px;
-  margin-top: 22px;
-}
-
 .main-header button,
 .main-header a,
 .main-header input,
