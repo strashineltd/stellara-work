@@ -254,6 +254,10 @@ export interface RunCommandArgs {
   command: string;
   /** 超时毫秒，默认 30000 */
   timeoutMs?: number;
+  /** 相对当前工作目录的子目录 */
+  cwd?: string;
+  /** 额外环境变量（键名需合法，禁止覆盖关键环境变量，最多 10 个） */
+  env?: Record<string, string>;
   needsApproval?: boolean;
 }
 

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { RunCommandArgs, ToolResult, OpenAITool, ToolResultMeta } from '../../../shared/ipc';
+import { isWithinDir } from '../../fs/path-security';
 
 /**
  * 命令白名单（安全子集）。
@@ -217,12 +218,82 @@ function validateFileArgs(exe: string, args: string[], cwd: string): string | nu
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024; // 5MB
 
 /**
+ * 不允许被模型覆盖的关键环境变量：
+ * 这些变量影响命令查找、语言环境、身份等，覆盖可能导致越权或提权。
+ */
+const FORBIDDEN_ENV_KEYS = new Set([
+  'PATH', 'HOME', 'HOST', 'OSTYPE', 'TERM', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR',
+]);
+
+/** 环境变量键名：仅允许 C 风格标识符（不能以数字开头） */
+const ENV_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const MAX_ENV_VARS = 10;
+
+/**
+ * 解析并校验 cwd 参数：
+ * - undefined/空 → 工作目录根
+ * - 绝对路径 → 拒绝（返回 null）
+ * - 解析后越出工作目录（.. 越界） → 拒绝（返回 null）
+ * 成功返回规范化后的绝对路径。
+ */
+function validateCwdArg(cwd: string | undefined, root: string): string | null {
+  if (cwd === undefined || cwd === '') return path.normalize(root);
+  if (isAbsolutePathArg(cwd)) return null;
+  const resolved = path.resolve(root, cwd);
+  if (!isWithinDir(resolved, root)) return null;
+  return resolved;
+}
+
+/**
+ * 校验并过滤额外环境变量：
+ * - 键名必须匹配 ^[A-Za-z_][A-Za-z0-9_]*$（最多 10 个）
+ * - 禁止覆盖 FORBIDDEN_ENV_KEYS
+ */
+function sanitizeEnv(
+  env: Record<string, string> | undefined,
+): { ok: true; env: Record<string, string> } | { ok: false; error: string } {
+  if (env === undefined) return { ok: true, env: {} };
+  const keys = Object.keys(env);
+  if (keys.length > MAX_ENV_VARS) {
+    return { ok: false, error: `env 变量数量超过限制（最多 ${MAX_ENV_VARS} 个）。` };
+  }
+  const safe: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (!ENV_KEY_REGEX.test(k)) {
+      return { ok: false, error: `env 键名 "${k}" 不合法（仅允许 A-Za-z0-9_，且不能以数字开头）。` };
+    }
+    if (FORBIDDEN_ENV_KEYS.has(k)) {
+      return { ok: false, error: `不允许覆盖关键环境变量：${k}。` };
+    }
+    safe[k] = v;
+  }
+  return { ok: true, env: safe };
+}
+
+/**
  * 跑 shell 命令（白名单 + no-shell + 路径约束）
  */
 export async function runCommand(args: RunCommandArgs, cwd: string): Promise<ToolResult> {
   const parsed = parseCommand(args.command);
   if ('error' in parsed) {
     return { ok: false, output: '', error: parsed.error };
+  }
+
+  // cwd 校验：必须是工作目录内的相对子目录
+  const resolvedCwd = validateCwdArg(args.cwd, cwd);
+  if (resolvedCwd === null) {
+    const reason =
+      args.cwd !== undefined && isAbsolutePathArg(args.cwd)
+        ? `cwd "${args.cwd}" 是绝对路径，不允许。请使用工作目录内的相对子目录。`
+        : `cwd "${args.cwd}" 超出工作目录。`;
+    return { ok: false, output: '', error: reason };
+  }
+
+  // env 校验：键名合法、数量 ≤ 10、禁止覆盖关键环境变量
+  const safeEnv = sanitizeEnv(args.env);
+  if (!safeEnv.ok) {
+    return { ok: false, output: '', error: safeEnv.error };
   }
 
   // 白名单校验：只用 basename，拒绝绝对路径 exe
@@ -266,7 +337,8 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     let child;
     try {
       child = spawn(exeBase, parsed.args, {
-        cwd,
+        cwd: resolvedCwd,
+        env: { ...process.env, ...safeEnv.env },
         shell: false,
         windowsHide: true,
       });
@@ -356,6 +428,8 @@ export const shellTools: OpenAITool[] = [
         type: 'object',
         properties: {
           command: { type: 'string', description: '要执行的命令，单行，格式 "exe arg1 arg2 ..."' },
+          cwd: { type: 'string', description: '相对当前工作目录的子目录，命令在其中执行（绝对路径或 .. 越界将被拒绝）' },
+          env: { type: 'object', description: '额外环境变量（键名仅允许 A-Za-z0-9_，最多 10 个，禁止覆盖 PATH/HOME 等关键变量）', additionalProperties: { type: 'string' } },
           timeoutMs: { type: 'number', description: '超时毫秒数（默认 30000）', minimum: 100, maximum: 300000 },
         },
         required: ['command'],

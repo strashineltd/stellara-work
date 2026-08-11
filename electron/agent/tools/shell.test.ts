@@ -220,4 +220,41 @@ describe('runCommand', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain('绝对路径');
   });
+
+  it('runs command in a subdirectory via cwd', async () => {
+    await fs.mkdir(path.join(tmpDir, 'sub'));
+    const r = await runCommand({ command: 'pwd', cwd: 'sub' }, tmpDir);
+    expect(r.ok).toBe(true);
+    expect(r.output.trim().endsWith('sub')).toBe(true);
+  });
+
+  it('rejects cwd outside workdir', async () => {
+    const r = await runCommand({ command: 'pwd', cwd: '..' }, tmpDir);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('工作目录');
+    const r2 = await runCommand({ command: 'pwd', cwd: '/etc' }, tmpDir);
+    expect(r2.ok).toBe(false);
+  });
+
+  it('injects env variables', async () => {
+    await fs.writeFile(path.join(tmpDir, 'env-check.js'), 'console.log(process.env.MY_FLAG)');
+    const r = await runCommand({ command: 'node env-check.js', env: { MY_FLAG: 'ok' } }, tmpDir);
+    expect(r.ok).toBe(true);
+    expect(r.output.trim()).toBe('ok');
+  });
+
+  it('rejects overriding critical env keys', async () => {
+    const r = await runCommand({ command: 'pwd', env: { PATH: '/evil' } }, tmpDir);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('PATH');
+  });
+
+  it('rejects invalid env key names and excessive count', async () => {
+    const r = await runCommand({ command: 'pwd', env: { '1BAD': 'x' } }, tmpDir);
+    expect(r.ok).toBe(false);
+    const many: Record<string, string> = {};
+    for (let i = 0; i < 11; i++) many[`K${i}`] = 'v';
+    const r2 = await runCommand({ command: 'pwd', env: many }, tmpDir);
+    expect(r2.ok).toBe(false);
+  });
 });
