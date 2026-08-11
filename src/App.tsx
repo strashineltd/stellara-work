@@ -11,7 +11,7 @@ import { resolveTheme } from './lib/theme';
 type AppState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; projects: ProjectSummary[]; initialConfig?: ConfiguredModel | null }
+  | { kind: 'onboarding'; presets: ModelPreset[]; info: AppInfo; initialConfig?: ConfiguredModel | null }
   | {
       kind: 'ready';
       config: ConfiguredModel | null;
@@ -115,7 +115,7 @@ export default function App() {
             workspaceOpen: false,
           });
         } else {
-          setState({ kind: 'onboarding', presets: modelList.presets, info, projects });
+          setState({ kind: 'onboarding', presets: modelList.presets, info });
         }
       })
       .catch((e) => {
@@ -202,7 +202,6 @@ export default function App() {
     return (
       <Onboarding
         presets={state.presets}
-        projects={state.projects}
         initialConfig={state.initialConfig}
         onComplete={(config) => {
           // 模型配置与项目分离：完成后进入空工作台（config 可为 null = 跳过），由用户继续创建。
@@ -250,7 +249,6 @@ export default function App() {
               kind: 'onboarding',
               presets: modelList.presets,
               info: state.info,
-              projects: state.projects,
               initialConfig: state.config,
             });
           });

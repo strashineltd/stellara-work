@@ -1,19 +1,16 @@
 import { useState, useEffect } from 'react';
-import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId, ProjectSummary } from '../../shared/ipc';
+import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId } from '../../shared/ipc';
 
 interface OnboardingProps {
   presets: ModelPreset[];
   /** 已有配置（用于"重新配置"模式：无 apiKey，仅 hasKey 提示已配） */
   initialConfig?: ConfiguredModel | null;
-  /** 已有项目列表（保留 prop；环境初始化已移除） */
-  projects?: ProjectSummary[];
   /** 完成（配置成功传 ConfiguredModel）或跳过（传 null） */
   onComplete: (config: ConfiguredModel | null) => void;
 }
 
 /** Wizard: welcome → model pick → connection；三步均可跳过 */
-export function Onboarding({ presets, initialConfig, projects, onComplete }: OnboardingProps) {
-  void projects;
+export function Onboarding({ presets, initialConfig, onComplete }: OnboardingProps) {
   const [step, setStep] = useState<'welcome' | 'pick' | 'connection'>(
     initialConfig ? 'connection' : 'welcome',
   );

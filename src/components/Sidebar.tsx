@@ -29,8 +29,6 @@ interface SidebarProps {
   onNavigateTasks?: () => void;
   onNavigateMemory?: () => void;
   onNavigateFiles?: () => void;
-  /** @deprecated Files are browsed from the files section; the full-screen modal entry lives in SidebarFileView. */
-  onOpenFiles?: () => void;
   onOpenSettings?: () => void;
 }
 

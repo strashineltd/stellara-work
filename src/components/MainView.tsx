@@ -24,7 +24,7 @@ import { CommandPalette } from './CommandPalette';
 import { useShortcuts } from '../hooks/useShortcuts';
 
 interface MainViewProps {
-  /** 可为 null：跳过引导后无模型配置（完整判空 UI 在 T2，此处用占位配置兜底） */
+  /** 可为 null：跳过引导后无模型配置；发送任务前会校验并提示打开设置 */
   config: ConfiguredModel | null;
   info: AppInfo;
   sidebarOpen: boolean;
@@ -571,7 +571,6 @@ export function MainView(props: MainViewProps) {
             onNavigateTasks={() => setActiveSection('tasks')}
             onNavigateMemory={() => setActiveSection('memory')}
             onNavigateFiles={() => setActiveSection('files')}
-            onOpenFiles={() => activeWorkDir ? setFileTreeOpen(true) : setCreateProjectOpen(true)}
             onOpenSettings={() => onOpenSettings()}
             onSelect={handleSelectSession}
             onNew={() => void handleNewSession()}

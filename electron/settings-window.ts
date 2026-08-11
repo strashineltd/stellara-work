@@ -56,7 +56,3 @@ export function broadcastSettingsChanged(): void {
     if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now() });
   }
 }
-
-export function closeSettingsWindow(): void {
-  if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
-}
