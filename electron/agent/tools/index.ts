@@ -3,19 +3,21 @@ import { readFile, writeFile, editFile, fsTools } from './fs';
 import { runCommand, shellTools } from './shell';
 import { searchFiles, searchTools } from './search';
 import { searchContent, grepTools } from './grep';
+import { searchSymbolTools } from './search-symbol';
 import { listFiles, listFilesTools } from './list-files';
 import { webFetch, webFetchTools } from './web-fetch';
 import { taskComplete, taskCompleteTools } from './task-complete';
 import { gitStatus, gitDiff, gitLog, gitTools } from './git';
 import { memorySearch, memorySave, memoryTools } from './memory';
 
-export { fsTools, shellTools, searchTools, grepTools, listFilesTools, webFetchTools, taskCompleteTools, gitTools, memoryTools };
+export { fsTools, shellTools, searchTools, grepTools, searchSymbolTools, listFilesTools, webFetchTools, taskCompleteTools, gitTools, memoryTools };
 
 export const allTools: OpenAITool[] = [
   ...fsTools,
   ...shellTools,
   ...searchTools,
   ...grepTools,
+  ...searchSymbolTools,
   ...listFilesTools,
   ...webFetchTools,
   ...taskCompleteTools,
@@ -30,6 +32,7 @@ export const planModeTools: OpenAITool[] = [
   fsTools.find((t) => t.function.name === 'read_file')!,
   searchTools[0],   // search_files
   grepTools[0],     // search_content
+  searchSymbolTools[0], // search_symbol（只读）
   listFilesTools[0], // list_files
   ...gitTools,      // git 操作是只读的
   // web_fetch 不进 plan mode（会发起外部请求）
