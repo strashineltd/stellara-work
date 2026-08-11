@@ -53,6 +53,34 @@ describe('applyStreamEventToEntries — plan events', () => {
   });
 });
 
+describe('applyStreamEventToEntries — subagent events', () => {
+  it('subagent_summary event pushes a subagent_summary entry with results', () => {
+    const { next } = apply([], {
+      type: 'subagent_summary',
+      subagentResults: [
+        { id: 'sub-abc', summary: '重构完成', ok: true, elapsedMs: 4200 },
+        { id: 'sub-def', summary: '测试失败', ok: false, elapsedMs: 900 },
+      ],
+    });
+    expect(next?.at(-1)).toEqual({
+      kind: 'subagent_summary',
+      results: [
+        { id: 'sub-abc', summary: '重构完成', ok: true, elapsedMs: 4200 },
+        { id: 'sub-def', summary: '测试失败', ok: false, elapsedMs: 900 },
+      ],
+    });
+  });
+
+  it('ignores subagent_start / progress / done (no entry; MainView state only)', () => {
+    const { next } = apply([], {
+      type: 'subagent_start',
+      subagentId: 'sub-abc',
+      subagentTask: '重构',
+    });
+    expect(next?.length).toBe(0);
+  });
+});
+
 describe('formatRelativeTime', () => {
   const now = Date.now();
 

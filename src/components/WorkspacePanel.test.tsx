@@ -245,3 +245,64 @@ describe('WorkspacePanel memory context', () => {
     expect(container.innerHTML).not.toContain('本次记忆');
   });
 });
+
+describe('WorkspacePanel subagents', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    (window as any).electronAPI = {
+      fs: {
+        listTree: vi.fn().mockResolvedValue(null),
+      },
+    };
+  });
+
+  const BASE = {
+    workDir: 'D:/test',
+    goal: GOAL,
+    progress: PROGRESS,
+    deliverables: DELIVERABLES,
+    touchedFiles: new Set<string>(),
+  };
+
+  const SUBAGENTS = [
+    { id: 'sub-abc', task: '重构 fs 模块', status: 'running', lastTool: 'read_file' },
+    { id: 'sub-def', task: '写测试', status: 'done', elapsedMs: 4200, summary: '完成 3 个测试' },
+    { id: 'sub-ghi', task: '坏任务', status: 'failed', elapsedMs: 900 },
+    { id: 'sub-jkl', task: '排队中', status: 'queued' },
+  ] as const;
+
+  it('renders the 子代理 section with cards, badges, last tool and elapsed time', () => {
+    const { container, querySelector, querySelectorAll } = render(
+      <WorkspacePanel {...BASE} subagents={[...SUBAGENTS]} />,
+    );
+    expect(querySelector('.subagent-list')).toBeTruthy();
+    expect(container.textContent).toContain('子代理');
+    const cards = querySelectorAll('.subagent-card');
+    expect(cards.length).toBe(4);
+    expect(cards[0]?.querySelector('.subagent-badge')?.textContent).toBe('执行中');
+    expect(cards[1]?.querySelector('.subagent-badge')?.textContent).toBe('完成');
+    expect(cards[2]?.querySelector('.subagent-badge')?.textContent).toBe('失败');
+    expect(cards[3]?.querySelector('.subagent-badge')?.textContent).toBe('排队');
+    expect(cards[0]?.textContent).toContain('sub-abc');
+    expect(cards[0]?.textContent).toContain('读取');
+    expect(cards[1]?.textContent).toContain('4.2s');
+  });
+
+  it('expands the summary when the card head is clicked', () => {
+    const { container } = render(
+      <WorkspacePanel {...BASE} subagents={[...SUBAGENTS]} />,
+    );
+    expect(container.textContent).not.toContain('完成 3 个测试');
+    const heads = container.querySelectorAll('.subagent-card-head');
+    act(() => {
+      heads[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('完成 3 个测试');
+  });
+
+  it('does not render the section when subagents is empty or missing', () => {
+    const { container } = render(<WorkspacePanel {...BASE} subagents={[]} />);
+    expect(container.textContent).not.toContain('子代理');
+    expect(container.querySelector('.subagent-list')).toBeNull();
+  });
+});

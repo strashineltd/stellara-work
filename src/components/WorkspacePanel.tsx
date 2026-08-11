@@ -48,6 +48,15 @@ export interface ContextStats {
   estimated?: boolean;
 }
 
+export interface SubagentInfo {
+  id: string;
+  task: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  lastTool?: string;
+  elapsedMs?: number;
+  summary?: string;
+}
+
 /** 工具名 → 中文（spec 3.1；未映射的显示原名） */
 const TOOL_LABELS: Record<string, string> = {
   read_file: '读取',
@@ -87,6 +96,7 @@ interface WorkspacePanelProps {
   memoryContext?: MemoryContextItem[];
   contextStats?: ContextStats | null;
   contextWindow?: number;
+  subagents?: SubagentInfo[];
 }
 
 const MIN_WIDTH = 200;
@@ -95,7 +105,7 @@ const DEFAULT_WIDTH = 280;
 
 export function WorkspacePanel({
   workDir, goal, progress, deliverables, touchedFiles,
-  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext, contextStats, contextWindow,
+  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext, contextStats, contextWindow, subagents,
 }: WorkspacePanelProps) {
   const [width, setWidth] = useState(initialWidth ?? DEFAULT_WIDTH);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -161,6 +171,7 @@ export function WorkspacePanel({
       <GoalSection goal={goal} stepStatus={stepStatus} onStepToggle={onStepToggle} />
       <ProgressSection progress={progress} goal={goal} stepStatus={stepStatus} />
       <ContextStatsSection contextStats={contextStats} contextWindow={contextWindow} />
+      <SubagentsSection subagents={subagents} />
       <DeliverablesSection deliverables={deliverables} />
       <MemoryInjectSection memoryContext={memoryContext} />
       <FileSection workDir={workDir} touchedFiles={touchedFiles} />
@@ -346,6 +357,60 @@ function ContextStatsSection({ contextStats, contextWindow }: { contextStats: Co
         )}
       </div>
     </details>
+  );
+}
+
+function SubagentsSection({ subagents }: { subagents?: SubagentInfo[] }) {
+  if (!subagents || subagents.length === 0) return null;
+  return (
+    <details className="workspace-section" open>
+      <summary className="workspace-section-header">
+        <span>子代理 ({subagents.length})</span>
+      </summary>
+      <div className="subagent-list">
+        {subagents.map((s) => (
+          <SubagentCard key={s.id} info={s} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+const SUBAGENT_BADGES: Record<SubagentInfo['status'], string> = {
+  queued: '排队',
+  running: '执行中',
+  done: '完成',
+  failed: '失败',
+};
+
+function SubagentCard({ info }: { info: SubagentInfo }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={`subagent-card ${info.status}`}>
+      <button
+        className="subagent-card-head"
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={`${info.id}（${SUBAGENT_BADGES[info.status]}）${info.summary ? '，点击展开摘要' : ''}`}
+        title={info.summary ? '点击展开摘要' : undefined}
+      >
+        <span className="subagent-id">{info.id}</span>
+        <span className={`subagent-badge ${info.status}`}>{SUBAGENT_BADGES[info.status]}</span>
+      </button>
+      {info.task && <div className="subagent-task">{info.task}</div>}
+      <div className="subagent-card-meta">
+        {info.lastTool && (
+          <span className="subagent-tool">最近工具：{toolLabel(info.lastTool)}</span>
+        )}
+        {info.elapsedMs != null && (
+          <span className="subagent-time">{(info.elapsedMs / 1000).toFixed(1)}s</span>
+        )}
+      </div>
+      {expanded && info.summary && (
+        <pre className="subagent-summary">{info.summary}</pre>
+      )}
+    </div>
   );
 }
 

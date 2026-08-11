@@ -113,6 +113,7 @@ export function ChatStream(props: ChatStreamProps) {
                 />
               )}
               {e.kind === 'report' && <ReportEntry entry={e} workDir={props.workDir} />}
+              {e.kind === 'subagent_summary' && <SubagentSummaryReport results={e.results} workDir={props.workDir} />}
             </div>
           ))}
           {props.busy && (
@@ -248,6 +249,22 @@ function ReportEntry({ entry, workDir }: {
           </div>
         </details>
       )}
+    </div>
+  );
+}
+
+function SubagentSummaryReport({ results, workDir }: {
+  results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
+  workDir?: string;
+}) {
+  const markdown = [
+    '## 子代理汇总',
+    '',
+    ...results.map((r) => `- ${r.id}: ${r.summary}`),
+  ].join('\n');
+  return (
+    <div className="subagent-summary-report">
+      <MarkdownView content={markdown} workDir={workDir} />
     </div>
   );
 }

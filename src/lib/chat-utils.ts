@@ -16,7 +16,8 @@ export type DisplayEntry =
   | { kind: 'summary'; tokensBefore: number; tokensAfter: number; compressedCount: number; summary: string }
   | { kind: 'report'; summary: string; files: Array<{ path: string; kind: 'write' | 'edit' }>; commands: Array<{ command: string; exitCode: number; ok: boolean }> }
   | { kind: 'plan'; steps: Array<{ description: string; status: string }> }
-  | { kind: 'verify'; phase: string; target?: string };
+  | { kind: 'verify'; phase: string; target?: string }
+  | { kind: 'subagent_summary'; results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> };
 
 // ============================================================================
 // 字符串工具
@@ -142,6 +143,10 @@ export function applyStreamEventToEntries(
   }
   if (ev.type === 'verify') {
     copy.push({ kind: 'verify', phase: ev.phase ?? 'post_edit', target: ev.target });
+    return copy;
+  }
+  if (ev.type === 'subagent_summary' && ev.subagentResults) {
+    copy.push({ kind: 'subagent_summary', results: ev.subagentResults });
     return copy;
   }
   return copy;

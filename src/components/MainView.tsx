@@ -11,7 +11,7 @@ import {
 } from '../lib/chat-utils';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
-import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats } from './WorkspacePanel';
+import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
 import { Header } from './chat/Header';
 import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
@@ -99,6 +99,8 @@ export function MainView(props: MainViewProps) {
   const [memoryContext, setMemoryContext] = useState<MemoryContextItem[]>([]);
   // 本次任务的上下文统计（usage/tool_result/summary 事件累计）
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
+  // 本次任务的子代理（subagent_start/progress/done 事件）
+  const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   // 会话结束后已沉淀记忆的提示（memories-extracted 事件）
   const [extractedNotice, setExtractedNotice] = useState<{ sessionId: string; count: number } | null>(null);
 
@@ -296,6 +298,7 @@ export function MainView(props: MainViewProps) {
     }
     setMemoryContext([]);
     setContextStats(null);
+    setSubagents([]);
     if (!activeSessionId) {
       setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再发送任务。' }]);
       return;
@@ -356,6 +359,41 @@ export function MainView(props: MainViewProps) {
             compressedCount: (prev?.compressedCount ?? 0) + 1,
             estimated: prev?.estimated,
           }));
+        }
+        if (ev.type === 'subagent_start' && ev.subagentId) {
+          const subagentId = ev.subagentId;
+          const subagentTask = ev.subagentTask ?? '';
+          setSubagents((prev) => {
+            if (prev.some((s) => s.id === subagentId)) return prev;
+            return [...prev, { id: subagentId, task: subagentTask, status: 'running' as const }];
+          });
+        }
+        if (ev.type === 'subagent_progress' && ev.subagentId) {
+          const subagentId = ev.subagentId;
+          const subagentTool = ev.subagentTool;
+          setSubagents((prev) =>
+            prev.map((s) =>
+              s.id === subagentId ? { ...s, lastTool: subagentTool } : s,
+            ),
+          );
+        }
+        if (ev.type === 'subagent_done' && ev.subagentId) {
+          const subagentId = ev.subagentId;
+          const subagentOk = ev.subagentOk;
+          const subagentSummary = ev.subagentSummary;
+          const subagentElapsedMs = ev.subagentElapsedMs;
+          setSubagents((prev) =>
+            prev.map((s) =>
+              s.id === subagentId
+                ? {
+                    ...s,
+                    status: subagentOk ? 'done' as const : 'failed' as const,
+                    summary: subagentSummary,
+                    elapsedMs: subagentElapsedMs,
+                  }
+                : s,
+            ),
+          );
         }
         if (ev.type === 'task_complete') {
           setEntries((prev) => {
@@ -715,6 +753,7 @@ export function MainView(props: MainViewProps) {
             memoryContext={memoryContext}
             contextStats={contextStats}
             contextWindow={config?.contextWindow}
+            subagents={subagents}
           />
         )}
       </div>

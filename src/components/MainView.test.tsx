@@ -533,6 +533,100 @@ describe('MainView context stats', () => {
   });
 });
 
+describe('MainView subagents', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  async function typeAndSend(querySelector: (sel: string) => Element | null, text: string) {
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+  }
+
+  it('tracks subagent events as cards and renders the summary report', async () => {
+    const events = (async function* () {
+      yield { type: 'subagent_start', subagentId: 'sub-abc', subagentTask: '重构 fs 模块' };
+      yield { type: 'subagent_progress', subagentId: 'sub-abc', subagentTool: 'read_file' };
+      yield { type: 'subagent_done', subagentId: 'sub-abc', subagentOk: true, subagentElapsedMs: 4200 };
+      yield { type: 'subagent_start', subagentId: 'sub-def', subagentTask: '写测试' };
+      yield { type: 'subagent_done', subagentId: 'sub-def', subagentOk: false, subagentElapsedMs: 900 };
+      yield {
+        type: 'subagent_summary',
+        subagentResults: [
+          { id: 'sub-abc', summary: '重构完成', ok: true, elapsedMs: 4200 },
+          { id: 'sub-def', summary: '测试失败', ok: false, elapsedMs: 900 },
+        ],
+      };
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's1', events });
+    const { container, querySelector, querySelectorAll } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj' },
+    });
+    await typeAndSend(querySelector, '写个测试');
+
+    const cards = querySelectorAll('.subagent-card');
+    expect(cards.length).toBe(2);
+    expect(cards[0]?.querySelector('.subagent-badge')?.textContent).toBe('完成');
+    expect(cards[0]?.textContent).toContain('sub-abc');
+    expect(cards[0]?.textContent).toContain('读取');
+    expect(cards[0]?.textContent).toContain('4.2s');
+    expect(cards[1]?.querySelector('.subagent-badge')?.textContent).toBe('失败');
+
+    const report = querySelector('.subagent-summary-report');
+    expect(report).toBeTruthy();
+    expect(container.textContent).toContain('子代理汇总');
+    expect(container.textContent).toContain('重构完成');
+  });
+
+  it('clears subagent cards when a new task starts', async () => {
+    const firstEvents = (async function* () {
+      yield { type: 'subagent_start', subagentId: 'sub-abc', subagentTask: '任务一' };
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's1', events: firstEvents });
+    const { querySelector, querySelectorAll } = await renderMainView({
+      workspaceOpen: true,
+      config: { ...CONFIG, workDir: 'D:/proj' },
+    });
+    await typeAndSend(querySelector, '第一个任务');
+    expect(querySelectorAll('.subagent-card').length).toBe(1);
+
+    const secondEvents = (async function* () {
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's2', events: secondEvents });
+    await typeAndSend(querySelector, '第二个任务');
+    expect(querySelectorAll('.subagent-card').length).toBe(0);
+    expect(querySelector('.subagent-summary-report')).toBeNull();
+  });
+});
+
 describe('MainView without a configured model', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

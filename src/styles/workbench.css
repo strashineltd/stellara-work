@@ -4879,6 +4879,128 @@ html[data-platform='darwin'] .sidebar-toggle {
   font-size: var(--fs-xs);
 }
 
+/* ============ 子代理卡片 ============ */
+
+.subagent-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.subagent-card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.subagent-card:last-child {
+  margin-bottom: 0;
+}
+
+.subagent-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text);
+  text-align: left;
+}
+
+.subagent-card-head:hover .subagent-id {
+  color: var(--color-accent);
+}
+
+.subagent-id {
+  overflow: hidden;
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xxs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.subagent-badge.queued {
+  background: color-mix(in srgb, var(--color-text-faint) 15%, var(--color-bg-content));
+  color: var(--color-text-soft);
+}
+
+.subagent-badge.running {
+  background: color-mix(in srgb, var(--color-accent) 15%, var(--color-bg-content));
+  color: var(--color-accent);
+}
+
+.subagent-badge.done {
+  background: color-mix(in srgb, var(--color-success) 15%, var(--color-bg-content));
+  color: var(--color-success);
+}
+
+.subagent-badge.failed {
+  background: color-mix(in srgb, var(--color-danger) 15%, var(--color-bg-content));
+  color: var(--color-danger);
+}
+
+.subagent-task {
+  overflow: hidden;
+  color: var(--color-text-faint);
+  font-size: var(--fs-xxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-soft);
+  font-size: var(--fs-xxs);
+}
+
+.subagent-time {
+  margin-left: auto;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.subagent-summary {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-2);
+  overflow-wrap: break-word;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-soft);
+  color: var(--color-text-soft);
+  font-size: var(--fs-xxs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* ============ 子代理汇总报告（聊天流） ============ */
+
+.subagent-summary-report {
+  margin: var(--space-2) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
 .memory-extracted-hint {
   margin: var(--space-2) var(--space-4) 0;
   padding: var(--space-2) var(--space-3);

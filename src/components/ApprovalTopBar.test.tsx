@@ -112,4 +112,18 @@ describe('ApprovalTopBar', () => {
     const bar = container.querySelector('.approval-top-bar')!;
     expect(bar.classList.contains('approval-top-bar')).toBe(true);
   });
+
+  it('labels subagent approvals with 子代理请求 prefix', () => {
+    const { getByText } = render(
+      <ApprovalTopBar request={{ ...REQ, id: 'sub-abc-1' }} onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    expect(getByText('子代理请求：')).toBeTruthy();
+  });
+
+  it('keeps 需要确认 for regular approvals', () => {
+    const { getByText } = render(
+      <ApprovalTopBar request={REQ} onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    expect(getByText('需要确认')).toBeTruthy();
+  });
 });

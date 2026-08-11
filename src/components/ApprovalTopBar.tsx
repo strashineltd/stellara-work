@@ -14,7 +14,9 @@ export function ApprovalTopBar({ request, onApprove, onReject }: ApprovalTopBarP
       <div className="approval-top-bar__inner">
         <span className="approval-top-bar__icon"><Icon name="shield" size={18} /></span>
         <div className="approval-top-bar__message">
-          <span className="approval-top-bar__title">需要确认</span>
+          <span className="approval-top-bar__title">
+            {request.id.startsWith('sub-') ? '子代理请求：' : '需要确认'}
+          </span>
           <code className="approval-top-bar__tool">{request.toolName}</code>
         </div>
         <pre className="approval-top-bar__args">{prettyApprovalArgs(request.args)}</pre>
