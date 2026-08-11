@@ -46,4 +46,16 @@ describe('searchSymbol', () => {
     const bad = await searchSymbol({ symbol: 'f', limit: 500 }, tmpDir);
     expect(bad.ok).toBe(false);
   });
+
+  it('rejects include patterns escaping the workdir', async () => {
+    await write('inner/.keep', '');
+    await write('outside/secret.js', 'function secretFunc() {}\n');
+    const r = await searchSymbol(
+      { symbol: 'secretFunc', include: '../**/*.js' },
+      path.join(tmpDir, 'inner'),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.output).not.toContain('secretFunc');
+    expect(r.output).toContain('未找到');
+  });
 });

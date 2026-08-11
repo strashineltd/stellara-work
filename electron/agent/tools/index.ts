@@ -1,4 +1,4 @@
-import type { OpenAITool, ToolName, ToolArgs, ToolResult } from '../../../shared/ipc';
+import type { OpenAITool, ToolName, ToolArgs, ToolResult, RunCommandArgs } from '../../../shared/ipc';
 import { readFile, writeFile, editFile, fsTools } from './fs';
 import { runCommand, shellTools } from './shell';
 import { searchFiles, searchTools } from './search';
@@ -56,7 +56,7 @@ export async function invokeTool(
       );
     case 'run_command':
       return runCommand(
-        args as { command: string; timeoutMs?: number },
+        args as RunCommandArgs,
         cwd,
       );
     case 'search_files':

@@ -236,6 +236,23 @@ describe('runCommand', () => {
     expect(r2.ok).toBe(false);
   });
 
+  it('rejects cwd symlink escaping workdir', async () => {
+    const outside = path.join(os.tmpdir(), `stellara-outside-${Date.now()}`);
+    await fs.mkdir(outside);
+    try {
+      try {
+        await fs.symlink(outside, path.join(tmpDir, 'link'), 'dir');
+      } catch {
+        return; // 平台不允许创建 symlink 时跳过
+      }
+      const r = await runCommand({ command: 'pwd', cwd: 'link' }, tmpDir);
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('工作目录');
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('injects env variables', async () => {
     await fs.writeFile(path.join(tmpDir, 'env-check.js'), 'console.log(process.env.MY_FLAG)');
     const r = await runCommand({ command: 'node env-check.js', env: { MY_FLAG: 'ok' } }, tmpDir);

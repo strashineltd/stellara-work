@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { RunCommandArgs, ToolResult, OpenAITool, ToolResultMeta } from '../../../shared/ipc';
-import { isWithinDir } from '../../fs/path-security';
+import { isWithinDir, canonicalCwd } from '../../fs/path-security';
 
 /**
  * 命令白名单（安全子集）。
@@ -235,13 +235,17 @@ const MAX_ENV_VARS = 10;
  * - undefined/空 → 工作目录根
  * - 绝对路径 → 拒绝（返回 null）
  * - 解析后越出工作目录（.. 越界） → 拒绝（返回 null）
+ * - realpath 后越出工作目录（symlink 逃逸） → 拒绝（返回 null）
  * 成功返回规范化后的绝对路径。
  */
-function validateCwdArg(cwd: string | undefined, root: string): string | null {
+async function validateCwdArg(cwd: string | undefined, root: string): Promise<string | null> {
   if (cwd === undefined || cwd === '') return path.normalize(root);
   if (isAbsolutePathArg(cwd)) return null;
   const resolved = path.resolve(root, cwd);
   if (!isWithinDir(resolved, root)) return null;
+  const realResolved = await canonicalCwd(resolved);
+  const realRoot = await canonicalCwd(root);
+  if (!isWithinDir(realResolved, realRoot)) return null;
   return resolved;
 }
 
@@ -280,8 +284,8 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     return { ok: false, output: '', error: parsed.error };
   }
 
-  // cwd 校验：必须是工作目录内的相对子目录
-  const resolvedCwd = validateCwdArg(args.cwd, cwd);
+  // cwd 校验：必须是工作目录内的相对子目录（含 symlink realpath 检查）
+  const resolvedCwd = await validateCwdArg(args.cwd, cwd);
   if (resolvedCwd === null) {
     const reason =
       args.cwd !== undefined && isAbsolutePathArg(args.cwd)

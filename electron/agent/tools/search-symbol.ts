@@ -2,6 +2,7 @@ import fg from 'fast-glob';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
+import { isWithinDir } from '../../fs/path-security';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const DEFAULT_INCLUDE = '**/*.{ts,tsx,js,jsx,py,swift,go,rs,java}';
@@ -33,12 +34,12 @@ export async function searchSymbol(args: SearchSymbolArgs, cwd: string): Promise
     }
 
     const include = args.include ?? DEFAULT_INCLUDE;
-    const files = await fg(include, {
+    const files = (await fg(include, {
       cwd,
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
-    });
+    })).filter((file) => isWithinDir(path.resolve(cwd, file), cwd));
 
     const esc = escapeRegExp(symbol);
     const definitionRe = new RegExp(
