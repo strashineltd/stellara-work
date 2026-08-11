@@ -1,4 +1,4 @@
-import type { OpenAITool, ToolName, ToolArgs, ToolResult, RunCommandArgs } from '../../../shared/ipc';
+import type { OpenAITool, ToolName, ToolArgs, ToolResult, RunCommandArgs, DispatchSubagentsArgs } from '../../../shared/ipc';
 import { readFile, writeFile, editFile, fsTools } from './fs';
 import { runCommand, shellTools } from './shell';
 import { searchFiles, searchTools } from './search';
@@ -9,8 +9,9 @@ import { webFetch, webFetchTools } from './web-fetch';
 import { taskComplete, taskCompleteTools } from './task-complete';
 import { gitStatus, gitDiff, gitLog, gitTools } from './git';
 import { memorySearch, memorySave, memoryTools } from './memory';
+import { dispatchSubagents, dispatchSubagentsTools } from './dispatch-subagents';
 
-export { fsTools, shellTools, searchTools, grepTools, searchSymbolTools, listFilesTools, webFetchTools, taskCompleteTools, gitTools, memoryTools };
+export { fsTools, shellTools, searchTools, grepTools, searchSymbolTools, listFilesTools, webFetchTools, taskCompleteTools, gitTools, memoryTools, dispatchSubagentsTools };
 
 export const allTools: OpenAITool[] = [
   ...fsTools,
@@ -23,6 +24,7 @@ export const allTools: OpenAITool[] = [
   ...taskCompleteTools,
   ...gitTools,
   ...memoryTools,
+  ...dispatchSubagentsTools,
 ];
 
 /**
@@ -81,6 +83,8 @@ export async function invokeTool(
       return memorySearch(args as { query: string; scope?: string; kind?: string; limit?: number }, cwd);
     case 'memory_save':
       return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[] }, cwd);
+    case 'dispatch_subagents':
+      return dispatchSubagents(args as DispatchSubagentsArgs, cwd);
     default: {
       const rawName = name as string;
       if (rawName.startsWith('mcp__')) {

@@ -222,7 +222,8 @@ export type ToolName =
   | 'git_diff'
   | 'git_log'
   | 'memory_search'
-  | 'memory_save';
+  | 'memory_save'
+  | 'dispatch_subagents';
 
 export interface ReadFileArgs {
   path: string;
@@ -290,6 +291,23 @@ export interface TaskCompleteArgs {
   summary?: string;
 }
 
+/** 单个子代理任务定义（dispatch_subagents 的 subagents 数组项） */
+export interface SubagentDef {
+  id: string;
+  task: string;
+}
+
+/** 单个子代理执行结果（汇总报告用） */
+export interface SubagentResult {
+  id: string;
+  summary: string;
+  ok: boolean;
+}
+
+export interface DispatchSubagentsArgs {
+  subagents: SubagentDef[];
+}
+
 export type ToolArgs =
   | ReadFileArgs
   | WriteFileArgs
@@ -299,7 +317,8 @@ export type ToolArgs =
   | SearchContentArgs
   | ListFilesArgs
   | WebFetchArgs
-  | TaskCompleteArgs;
+  | TaskCompleteArgs
+  | DispatchSubagentsArgs;
 
 export interface ToolResult {
   ok: boolean;
