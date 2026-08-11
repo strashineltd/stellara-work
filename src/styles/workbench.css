@@ -2695,6 +2695,74 @@ html[data-platform='darwin'] .sidebar-toggle {
   background: var(--color-hover-overlay);
 }
 
+.shell-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.shell-duration {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+}
+
+.shell-exit {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  font-weight: 650;
+}
+
+.shell-exit--success {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.shell-exit--danger {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.shell-lineno-btn {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  margin-right: 2px;
+  padding: 0 8px;
+  color: var(--color-text-faint);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  white-space: nowrap;
+}
+
+.shell-lineno-btn:hover {
+  color: var(--color-text);
+  background: var(--color-hover-overlay);
+}
+
+.shell-lineno-btn--active {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.shell-linenos {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-soft);
+}
+
 .tool-copy-btn {
   display: grid;
   place-items: center;

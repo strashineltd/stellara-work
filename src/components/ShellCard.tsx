@@ -5,20 +5,24 @@ interface ShellCardProps {
   command: string;
   stdout: string;
   stderr: string;
-  exitCode: number;
-  durationMs: number;
+  /** 缺失（null/undefined）时不显示退出码徽章 */
+  exitCode?: number | null;
+  /** 缺失（null/undefined）时不显示时长 */
+  durationMs?: number | null;
   ok: boolean;
 }
 
 /**
  * Shell 输出卡片
- * - 显示命令 + exitCode + 耗时
+ * - 显示命令 + 时长 + 退出码徽章
  * - stdout / stderr 分色
+ * - 行号开关（仅 stdout 编号）
  * - 复制按钮
  * - 长输出默认折叠
  */
 export function ShellCard({ command, stdout, stderr, exitCode, durationMs, ok }: ShellCardProps) {
   const [open, setOpen] = useState(false);
+  const [lineNumbers, setLineNumbers] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,14 +54,32 @@ export function ShellCard({ command, stdout, stderr, exitCode, durationMs, ok }:
         >
           <span className="tool-card-icon"><Icon name="terminal" size={14} /></span>
           <span className="tool-card-name">{truncateMiddle(command, 80)}</span>
-          <span className="tool-card-summary">
-            exit {exitCode} · {durationMs}ms
+          <span className="shell-meta">
+            {durationMs != null && (
+              <span className="shell-duration">{`${(durationMs / 1000).toFixed(1)}s`}</span>
+            )}
+            {exitCode != null && (
+              <span
+                className={`shell-exit ${exitCode === 0 ? 'shell-exit--success' : 'shell-exit--danger'}`}
+              >
+                exit {exitCode}
+              </span>
+            )}
           </span>
           {longOutput && (
             <span className="tool-card-chevron">
               <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} />
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          className={`shell-lineno-btn ${lineNumbers ? 'shell-lineno-btn--active' : ''}`}
+          onClick={() => setLineNumbers((v) => !v)}
+          aria-pressed={lineNumbers}
+          title="显示/隐藏行号"
+        >
+          行号
         </button>
         <button
           type="button"
@@ -70,7 +92,11 @@ export function ShellCard({ command, stdout, stderr, exitCode, durationMs, ok }:
       </div>
       {open && (
         <div className="shell-body">
-          {stdout && <pre className="shell-stdout">{stdout.slice(0, 20000)}</pre>}
+          {stdout && (
+            <pre className={`shell-stdout${lineNumbers ? ' shell-linenos' : ''}`}>
+              {lineNumbers ? numberLines(stdout.slice(0, 20000)) : stdout.slice(0, 20000)}
+            </pre>
+          )}
           {stderr && <pre className="shell-stderr">{stderr.slice(0, 20000)}</pre>}
           {!stdout && !stderr && <pre className="shell-empty">（无输出）</pre>}
           {truncated && <div className="shell-truncated">（输出过长，已截断）</div>}
@@ -85,4 +111,11 @@ function truncateMiddle(s: string, max: number): string {
   const head = Math.ceil((max - 1) / 2);
   const tail = Math.floor((max - 1) / 2);
   return s.slice(0, head) + '…' + s.slice(s.length - tail);
+}
+
+function numberLines(s: string): string {
+  return s
+    .split('\n')
+    .map((line, i) => `${i + 1}: ${line}`)
+    .join('\n');
 }
