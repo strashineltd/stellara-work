@@ -475,3 +475,108 @@ describe('cumulative usage events', () => {
     }
   });
 });
+
+describe('maxToolCalls parameterization', () => {
+  beforeEach(() => {
+    mockChat.mockReset();
+    mockInvokeTool.mockReset();
+    mockChat.mockImplementation(() => contentThenDone(''));
+  });
+
+  function toolCallTurn(name: string, id: string): AsyncGenerator<ChatStreamEvent> {
+    return (async function* () {
+      yield {
+        type: 'tool_call',
+        toolCall: { id, type: 'function', function: { name, arguments: '{}' } },
+      };
+      yield { type: 'done' };
+    })();
+  }
+
+  it('maxToolCalls + requireApprovalAfterLimit: the call after the limit goes to onApproval instead of a hard stop', async () => {
+    // search_symbol: 非危险、非只读 → 正常情况下永远不走审批；超限后才触发
+    mockChat
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't1'))
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't2'))
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't3'))
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't4'));
+    mockInvokeTool.mockResolvedValue({ ok: true, output: 'found' });
+
+    const approvals: string[] = [];
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', {
+      model: makeConfig(),
+      cwd: '/work',
+      maxToolCalls: 3,
+      requireApprovalAfterLimit: true,
+      onApproval: async (tc) => {
+        approvals.push(tc.function.name);
+        return true;
+      },
+    })) {
+      events.push(ev);
+    }
+
+    expect(approvals).toEqual(['search_symbol']); // 仅第 4 次调用触发审批
+    expect(mockInvokeTool).toHaveBeenCalledTimes(4);
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('maxToolCalls without approval mode: over-limit calls stop with an error (existing behavior)', async () => {
+    mockChat
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't1'))
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't2'))
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't3'))
+      .mockReturnValueOnce(toolCallTurn('search_symbol', 't4'));
+    mockInvokeTool.mockResolvedValue({ ok: true, output: 'found' });
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', { model: makeConfig(), cwd: '/work', maxToolCalls: 3 })) {
+      events.push(ev);
+    }
+
+    expect(mockInvokeTool).toHaveBeenCalledTimes(3);
+    const err = events.find((e) => e.type === 'error');
+    expect(err?.type === 'error' && err.error).toContain('工具调用上限');
+  });
+
+  it('requireApprovalAfterLimit: read-only tool over the limit also goes through onApproval', async () => {
+    mockChat
+      .mockReturnValueOnce(toolCallTurn('read_file', 'r1'))
+      .mockReturnValueOnce(toolCallTurn('read_file', 'r2'))
+      .mockReturnValueOnce(toolCallTurn('read_file', 'r3'));
+    mockInvokeTool.mockResolvedValue({ ok: true, output: 'content' });
+
+    const approvals: string[] = [];
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', {
+      model: makeConfig(),
+      cwd: '/work',
+      maxToolCalls: 2,
+      requireApprovalAfterLimit: true,
+      onApproval: async (tc) => {
+        approvals.push(tc.function.name);
+        return true;
+      },
+    })) {
+      events.push(ev);
+    }
+
+    expect(approvals).toEqual(['read_file']); // 前 2 次只读并行免审批，第 3 次超限走审批
+    expect(mockInvokeTool).toHaveBeenCalledTimes(3);
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('rolePrompt: injected into the system message content', async () => {
+    const rolePrompt = '你是子代理，负责文件系统操作，完成任务后立即返回。';
+
+    const events: ChatStreamEvent[] = [];
+    for await (const ev of collect('task', { model: makeConfig(), cwd: '/work', rolePrompt })) {
+      events.push(ev);
+    }
+
+    const messages = mockChat.mock.calls[0][0].messages as ChatMessage[];
+    expect(messages[0].role).toBe('system');
+    expect(messages[0].content).toContain(rolePrompt);
+  });
+});

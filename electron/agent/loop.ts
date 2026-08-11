@@ -13,11 +13,15 @@ export interface AgentLoopOptions {
   platform?: AgentPlatformInfo;
   /** 之前轮次的消息（不含 system；不含本轮的 user）— 多轮上下文 */
   history?: ChatMessage[];
+  /** 身份提示词片段（如子代理角色说明），追加到 system prompt 尾部 */
+  rolePrompt?: string;
   /** Plan 模式：agent 只能调只读工具 */
   planMode?: boolean;
   /** 从 plan mode 传入的结构化计划（build mode 用其追踪进度） */
   plan?: Plan | null;
   maxIterations?: number;
+  /** 单次 run 的最大工具调用次数；默认 50。子代理等长任务场景可放宽（如 100） */
+  maxToolCalls?: number;
   /** 上下文压缩配置；不传则用默认（24K token 阈值 + 保留最近 12 轮） */
   compression?: Partial<CompressionConfig>;
   /** skills/ 目录下加载的技能定义（注入 system prompt） */
@@ -36,6 +40,11 @@ export interface AgentLoopOptions {
    * 必须实现超时，否则 agent 会卡死。
    */
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
+  /**
+   * 达到 maxToolCalls 上限后不报错停止，而是转为强制审批模式：
+   * 后续每个工具调用（含只读）都先经 onApproval 批准，拒绝则返回"用户拒绝"。
+   */
+  requireApprovalAfterLimit?: boolean;
   /**
    * Plan 批准回调：plan 模式产出 READY TO EXECUTE 计划后暂停，等待用户批准。
    * 返回 true 则切到 build 模式继续执行；返回 false 则 yield user_aborted 错误并停止。
@@ -77,6 +86,9 @@ export async function* runAgentLoop(
   // Memory OS: 检索相关记忆并注入 system prompt
   const platformInfo = options.platform ?? { platform: process.platform, arch: process.arch };
   let systemPrompt = getSystemPrompt(planMode, platformInfo, options.skills, options.activeSkill);
+  if (options.rolePrompt) {
+    systemPrompt += `\n\n${options.rolePrompt}`;
+  }
   if (!planMode) {
     try {
       const { retrieveMemoriesForInjection } = await import('../memory/memory-injector');
@@ -118,7 +130,7 @@ export async function* runAgentLoop(
   let planEmitted = false;
 
   // 任务预算限制
-  const MAX_TOOL_CALLS = 50;
+  const MAX_TOOL_CALLS = options.maxToolCalls ?? 50;
   const MAX_RUNTIME_MS = 10 * 60 * 1000; // 10 分钟
   const MAX_COMMANDS = 20;
   const startTime = Date.now();
@@ -222,7 +234,7 @@ export async function* runAgentLoop(
           if (messages[0]?.role === 'system') {
             messages[0] = {
               role: 'system',
-              content: `${getSystemPrompt(false, platformInfo, options.skills, options.activeSkill)}\n\n${formatPlanProgress(parsed)}`,
+              content: `${getSystemPrompt(false, platformInfo, options.skills, options.activeSkill)}${options.rolePrompt ? `\n\n${options.rolePrompt}` : ''}\n\n${formatPlanProgress(parsed)}`,
             };
           }
           if (toolCalls.length === 0) {
@@ -273,7 +285,12 @@ export async function* runAgentLoop(
     const readOnlyCalls: ToolCall[] = [];
     const writeCalls: ToolCall[] = [];
     for (const tc of toolCalls) {
-      if (READ_ONLY_TOOLS.has(tc.function.name) && !tc.function.name.startsWith('mcp__') && !planMode) {
+      if (
+        READ_ONLY_TOOLS.has(tc.function.name) &&
+        !tc.function.name.startsWith('mcp__') &&
+        !planMode &&
+        !(options.requireApprovalAfterLimit && totalToolCalls >= MAX_TOOL_CALLS)
+      ) {
         readOnlyCalls.push(tc);
       } else {
         writeCalls.push(tc);
@@ -282,7 +299,7 @@ export async function* runAgentLoop(
 
     // 任务预算检查
     const elapsed = Date.now() - startTime;
-    if (totalToolCalls >= MAX_TOOL_CALLS) {
+    if (totalToolCalls >= MAX_TOOL_CALLS && !options.requireApprovalAfterLimit) {
       yield { type: 'error', error: `达到工具调用上限 (${MAX_TOOL_CALLS})，任务已停止。请简化需求后重试。` };
       return;
     }
@@ -291,7 +308,7 @@ export async function* runAgentLoop(
       return;
     }
     const pendingCalls = readOnlyCalls.length + writeCalls.length;
-    if (totalToolCalls + pendingCalls > MAX_TOOL_CALLS) {
+    if (!options.requireApprovalAfterLimit && totalToolCalls + pendingCalls > MAX_TOOL_CALLS) {
       yield { type: 'error', error: `剩余工具调用将超过上限 (${totalToolCalls}+${pendingCalls} > ${MAX_TOOL_CALLS})，任务已停止。` };
       return;
     }
@@ -403,8 +420,12 @@ export async function* runAgentLoop(
         continue;
       }
 
-      // 危险操作需要批准（MCP 工具可能写数据，一律走审批）
-      if (DANGEROUS_TOOLS.has(toolName) || toolName.startsWith('mcp__')) {
+      // 危险操作需要批准（MCP 工具可能写数据，一律走审批；超限强制审批模式下所有工具都走审批）
+      if (
+        DANGEROUS_TOOLS.has(toolName) ||
+        toolName.startsWith('mcp__') ||
+        (options.requireApprovalAfterLimit && totalToolCalls >= MAX_TOOL_CALLS)
+      ) {
         if (!onApproval) {
           yield {
             type: 'tool_result',
