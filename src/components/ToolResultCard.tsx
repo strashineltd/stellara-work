@@ -77,7 +77,7 @@ export function ToolResultCard({ name, ok, output, error, meta, workDir }: ToolR
           </button>
         )}
       </div>
-      {open && (
+      {(open || !longOutput) && (
         <div className="tool-card-body">
           {meta?.kind === 'edit' && meta.path && (
             <div className="tool-result-path">

@@ -2766,10 +2766,11 @@ html[data-platform='darwin'] .sidebar-toggle {
 .tool-copy-btn {
   display: grid;
   place-items: center;
-  width: 30px;
+  width: auto;
+  min-width: 30px;
   height: 30px;
   margin-right: 4px;
-  padding: 0;
+  padding: 0 6px;
   color: var(--color-text-faint);
   border-radius: var(--radius-sm);
   background: transparent;

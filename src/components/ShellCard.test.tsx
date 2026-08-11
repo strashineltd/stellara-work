@@ -114,4 +114,16 @@ describe('ShellCard', () => {
     expect(headerInner?.textContent).not.toMatch(/ms/);
     unmount();
   });
+
+  it('短 stdout 直接显示且无展开按钮', () => {
+    const { container, unmount } = render(
+      <ShellCard command="echo hi" stdout="hi" stderr="" exitCode={0} ok />
+    );
+    expect(container.querySelector('.tool-card-chevron')).toBeNull();
+    const body = container.querySelector('.shell-body');
+    expect(body).not.toBeNull();
+    const stdoutPre = container.querySelector<HTMLPreElement>('.shell-stdout');
+    expect(stdoutPre?.textContent).toBe('hi');
+    unmount();
+  });
 });

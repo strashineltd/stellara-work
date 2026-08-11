@@ -90,4 +90,17 @@ describe('ToolResultCard', () => {
     expect(container.querySelector('[aria-label="复制内容"]')).toBeNull();
     unmount();
   });
+
+  it('shows short output directly without expand button', async () => {
+    const { container, unmount } = await render(
+      <ToolResultCard name="tool" ok output="ok" />,
+    );
+    expect(container.querySelector('.tool-card-chevron')).toBeNull();
+    const body = container.querySelector('.tool-card-body');
+    expect(body).not.toBeNull();
+    expect(body!.textContent).toContain('ok');
+    const header = container.querySelector('.tool-card-header-inner') as HTMLButtonElement;
+    expect(header.disabled).toBe(true);
+    unmount();
+  });
 });

@@ -90,7 +90,7 @@ export function ShellCard({ command, stdout, stderr, exitCode, durationMs, ok }:
           <Icon name={copied ? 'check' : 'copy'} size={14} />
         </button>
       </div>
-      {open && (
+      {(open || !longOutput) && (
         <div className="shell-body">
           {stdout && (
             <pre className={`shell-stdout${lineNumbers ? ' shell-linenos' : ''}`}>
