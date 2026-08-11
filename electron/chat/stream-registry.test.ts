@@ -38,4 +38,14 @@ describe('ChatStreamRegistry', () => {
     await expect(pending).resolves.toBe(false);
     vi.useRealTimers();
   });
+
+  it('allStreamIds lists active streams and skips cleaned-up ones', () => {
+    const registry = new ChatStreamRegistry();
+    registry.start('main-1');
+    registry.start('sub-1');
+    registry.cleanup('main-1');
+    expect(registry.allStreamIds()).toEqual(['sub-1']);
+    registry.cleanup('sub-1');
+    expect(registry.allStreamIds()).toEqual([]);
+  });
 });
