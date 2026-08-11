@@ -126,7 +126,11 @@ export interface ChatStreamEvent {
     | 'verify'
     | 'task_complete'
     | 'memory_context'
-    | 'usage';
+    | 'usage'
+    | 'subagent_start'
+    | 'subagent_progress'
+    | 'subagent_done'
+    | 'subagent_summary';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };
@@ -156,6 +160,14 @@ export interface ChatStreamEvent {
   totals?: { promptTokens: number; completionTokens: number };
   /** 会话内各工具调用次数（由调用方汇总） */
   toolCounts?: Record<string, number>;
+  /** 子代理相关事件（subagent_start / subagent_progress / subagent_done / subagent_summary） */
+  subagentId?: string;
+  subagentTask?: string;
+  subagentTool?: string;
+  subagentOk?: boolean;
+  subagentSummary?: string;
+  subagentElapsedMs?: number;
+  subagentResults?: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
 }
 
 /** 错误类型 — 用于分类 + 引导文案 */

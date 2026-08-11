@@ -22,6 +22,11 @@ export class ChatStreamRegistry {
     return this.controllers.get(streamId)?.signal;
   }
 
+  /** 当前所有活跃流的 id（级联取消子代理流用） */
+  allStreamIds(): string[] {
+    return [...this.controllers.keys()];
+  }
+
   requestApproval(
     streamId: string,
     approvalId: string,

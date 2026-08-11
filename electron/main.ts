@@ -6,6 +6,7 @@ import { loadEnv, getEnvPath } from './config/env';
 import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
+import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { resolveSessionModel } from './chat/session-context';
 import { installAppMenu } from './menu';
 import { openSettingsWindow, broadcastSettingsChanged } from './settings-window';
@@ -900,9 +901,15 @@ async function runAgentLoopForIpc(
     powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
   }
 
-  try {
-    // 使用已验证的工作目录（chat:start 已检查 model.workDir 必须存在）
-    const cwd = model.workDir!;
+    try {
+      // 使用已验证的工作目录（chat:start 已检查 model.workDir 必须存在）
+      const cwd = model.workDir!;
+
+      // 注册子代理执行器：dispatch_subagents 工具在本次会话内可并行启动子代理 loop
+      setSubagentRunner({
+        run: (task) => runOneSubagent(task, model, cwd, send),
+      });
+
 
     // 加载 skills（注入 system prompt）
     let skills: import('../shared/ipc').SkillDef[] = [];
@@ -988,8 +995,14 @@ async function runAgentLoopForIpc(
       send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
     }
   } finally {
-    // 清理
+    // 清理：主会话结束 → 级联 abort 所有子代理流（runOneSubagent 各自 cleanup）
+    for (const subId of chatStreams.allStreamIds()) {
+      if (subId.startsWith('sub-')) {
+        chatStreams.abort(subId);
+      }
+    }
     chatStreams.cleanup(streamId);
+    setSubagentRunner(null);
     if (!terminalEventSent) send({ type: 'done' });
 
     // macOS：任务结束恢复系统休眠策略
@@ -1000,6 +1013,86 @@ async function runAgentLoopForIpc(
     // 异步提取记忆（不阻塞会话结束）
     void extractMemoriesFromSession(request, model).catch(() => {});
   }
+}
+
+/**
+ * 运行单个子代理：独立 streamId（sub- 前缀）、独立 AbortController 与上下文，
+ * 共享 model / cwd / 审批通道。事件通过 parentSend 以 subagent_* 标注转发到主会话流。
+ */
+async function runOneSubagent(
+  task: string,
+  model: ModelConfig,
+  cwd: string,
+  parentSend: (event: ChatStreamEvent) => void,
+): Promise<{ summary: string; ok: boolean }> {
+  const streamId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const ctrl = chatStreams.start(streamId);
+  const startedAt = Date.now();
+  let summary = '';
+  let ok = false;
+
+  parentSend({ type: 'subagent_start', subagentId: streamId, subagentTask: task });
+
+  try {
+    for await (const event of runAgentLoop(task, {
+      model,
+      cwd,
+      history: [],
+      platform: { platform: process.platform, arch: process.arch },
+      maxToolCalls: 100,
+      requireApprovalAfterLimit: true,
+      rolePrompt: '你是子代理，专注完成分配的任务。完成后用简洁报告总结成果（改了哪些文件、结果如何）。',
+      signal: ctrl.signal,
+      onApproval: async (toolCall) => {
+        // 复用主会话审批机制：approvalId 带 sub- 前缀，渲染层据此标注为子代理审批
+        const approvalId = `sub-${streamId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        parentSend({
+          type: 'approval_required',
+          approval: {
+            id: approvalId,
+            toolName: toolCall.function.name,
+            args: toolCall.function.arguments,
+            toolCallId: toolCall.id,
+          },
+        });
+        return chatStreams.requestApproval(streamId, approvalId, 60_000);
+      },
+    })) {
+      if (ctrl.signal.aborted) break;
+      if (event.type === 'content' && event.content) {
+        summary += event.content;
+      }
+      if (event.type === 'tool_result' && event.toolResult) {
+        parentSend({
+          type: 'subagent_progress',
+          subagentId: streamId,
+          subagentTool: event.toolResult.name,
+        });
+      }
+      if (event.type === 'task_complete') {
+        ok = true;
+      }
+      if (event.type === 'done') {
+        ok = true;
+      }
+      if (event.type === 'error') {
+        ok = false;
+      }
+    }
+  } catch (err) {
+    summary = err instanceof Error ? err.message : String(err);
+    ok = false;
+  } finally {
+    chatStreams.cleanup(streamId);
+  }
+
+  parentSend({
+    type: 'subagent_done',
+    subagentId: streamId,
+    subagentOk: ok,
+    subagentElapsedMs: Date.now() - startedAt,
+  });
+  return { summary: summary.trim(), ok };
 }
 
 /**

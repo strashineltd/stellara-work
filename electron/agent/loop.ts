@@ -59,7 +59,7 @@ export interface AgentLoopOptions {
 const READ_ONLY_TOOLS = new Set(['read_file', 'search_files', 'search_content', 'list_files', 'git_status', 'git_diff', 'git_log']);
 
 // 危险工具集合（需要审批）
-const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch']);
+const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents']);
 
 /**
  * Agent 循环：plan → tool → verify
