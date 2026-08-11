@@ -69,14 +69,15 @@ describe('dispatchSubagents validation', () => {
 describe('dispatchSubagents parallel scheduling', () => {
   it('runs 11 subagents with peak concurrency 10 and completes all', async () => {
     const counters = { active: 0, peak: 0 };
-    const run = vi.fn(async (task: string) => {
+    const setTotal = vi.fn();
+    const run = vi.fn(async (task: string, _id: string) => {
       counters.active += 1;
       counters.peak = Math.max(counters.peak, counters.active);
       await new Promise((resolve) => setTimeout(resolve, 20));
       counters.active -= 1;
       return { summary: `done: ${task}`, ok: true };
     });
-    setSubagentRunner({ run });
+    setSubagentRunner({ run, setTotal });
 
     const defs = Array.from({ length: 11 }, (_, i) => ({ id: `s${i}`, task: `t${i}` }));
     const result = await dispatchSubagents({ subagents: defs }, '/work');
@@ -84,6 +85,31 @@ describe('dispatchSubagents parallel scheduling', () => {
     expect(counters.peak).toBe(10);
     expect(counters.peak).toBeLessThanOrEqual(10);
     expect(run).toHaveBeenCalledTimes(11);
+    expect(run.mock.calls.map(([, id]) => id)).toEqual(defs.map((d) => d.id));
+    expect(setTotal).toHaveBeenCalledWith(11);
+    expect(result.ok).toBe(true);
+  });
+
+  it('passes each def id as the second argument to run', async () => {
+    const run = vi.fn(async (_task: string, _id: string) => ({ summary: 'r', ok: true }));
+    setSubagentRunner({ run });
+
+    const result = await dispatchSubagents(
+      { subagents: [{ id: 'alpha', task: 'tA' }, { id: 'beta-x', task: 'tB' }] },
+      '/work',
+    );
+
+    expect(run).toHaveBeenNthCalledWith(1, 'tA', 'alpha');
+    expect(run).toHaveBeenNthCalledWith(2, 'tB', 'beta-x');
+    expect(result.ok).toBe(true);
+  });
+
+  it('does not require setTotal (old runners stay compatible)', async () => {
+    const run = vi.fn(async (_task: string, _id: string) => ({ summary: 'r', ok: true }));
+    setSubagentRunner({ run });
+
+    const result = await dispatchSubagents({ subagents: [{ id: 'a', task: 't1' }] }, '/work');
+
     expect(result.ok).toBe(true);
   });
 
@@ -146,13 +172,13 @@ describe('dispatchSubagents registration', () => {
   });
 
   it('routes dispatch_subagents through invokeTool', async () => {
-    const run = vi.fn(async (task: string) => ({ summary: `s(${task})`, ok: true }));
+    const run = vi.fn(async (task: string, _id: string) => ({ summary: `s(${task})`, ok: true }));
     setSubagentRunner({ run });
 
     const args: DispatchSubagentsArgs = { subagents: [{ id: 'a', task: 'do it' }] };
     const result = await invokeTool('dispatch_subagents', args, '/some/cwd');
 
-    expect(run).toHaveBeenCalledWith('do it');
+    expect(run).toHaveBeenCalledWith('do it', 'a');
     expect(result.ok).toBe(true);
     expect(result.output).toContain('## #1 a\ns(do it)');
   });

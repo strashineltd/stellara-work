@@ -906,8 +906,27 @@ async function runAgentLoopForIpc(
       const cwd = model.workDir!;
 
       // 注册子代理执行器：dispatch_subagents 工具在本次会话内可并行启动子代理 loop
+      // 批次内全部完成时发射 subagent_summary 汇总报告（卡片 id 与报告 id 均为 def.id）
+      const subagentResults: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> = [];
+      let subagentTotal = 0;
       setSubagentRunner({
-        run: (task) => runOneSubagent(task, model, cwd, send),
+        setTotal: (total) => {
+          subagentTotal = total;
+        },
+        run: async (task, id) => {
+          const startedAt = Date.now();
+          const result = await runOneSubagent(task, id, model, cwd, send);
+          subagentResults.push({
+            id,
+            summary: result.summary,
+            ok: result.ok,
+            elapsedMs: Date.now() - startedAt,
+          });
+          if (subagentTotal > 0 && subagentResults.length >= subagentTotal) {
+            send({ type: 'subagent_summary', subagentResults: [...subagentResults] });
+          }
+          return result;
+        },
       });
 
 
@@ -1016,11 +1035,13 @@ async function runAgentLoopForIpc(
 }
 
 /**
- * 运行单个子代理：独立 streamId（sub- 前缀）、独立 AbortController 与上下文，
- * 共享 model / cwd / 审批通道。事件通过 parentSend 以 subagent_* 标注转发到主会话流。
+ * 运行单个子代理：独立 streamId（sub- 前缀，仅用于 registry 隔离）、独立 AbortController
+ * 与上下文，共享 model / cwd / 审批通道。事件通过 parentSend 以 subagent_* 标注转发到
+ * 主会话流，subagentId 使用 def.id（与审批标注、汇总报告一致）。
  */
 async function runOneSubagent(
   task: string,
+  defId: string,
   model: ModelConfig,
   cwd: string,
   parentSend: (event: ChatStreamEvent) => void,
@@ -1031,7 +1052,7 @@ async function runOneSubagent(
   let summary = '';
   let ok = false;
 
-  parentSend({ type: 'subagent_start', subagentId: streamId, subagentTask: task });
+  parentSend({ type: 'subagent_start', subagentId: defId, subagentTask: task });
 
   try {
     for await (const event of runAgentLoop(task, {
@@ -1044,8 +1065,8 @@ async function runOneSubagent(
       rolePrompt: '你是子代理，专注完成分配的任务。完成后用简洁报告总结成果（改了哪些文件、结果如何）。',
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
-        // 复用主会话审批机制：approvalId 带 sub- 前缀，渲染层据此标注为子代理审批
-        const approvalId = `sub-${streamId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // 复用主会话审批机制：approvalId 带 sub-{defId}- 前缀，渲染层据此标注为子代理审批
+        const approvalId = `sub-${defId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         parentSend({
           type: 'approval_required',
           approval: {
@@ -1065,7 +1086,7 @@ async function runOneSubagent(
       if (event.type === 'tool_result' && event.toolResult) {
         parentSend({
           type: 'subagent_progress',
-          subagentId: streamId,
+          subagentId: defId,
           subagentTool: event.toolResult.name,
         });
       }
@@ -1088,8 +1109,9 @@ async function runOneSubagent(
 
   parentSend({
     type: 'subagent_done',
-    subagentId: streamId,
+    subagentId: defId,
     subagentOk: ok,
+    subagentSummary: summary.trim(),
     subagentElapsedMs: Date.now() - startedAt,
   });
   return { summary: summary.trim(), ok };

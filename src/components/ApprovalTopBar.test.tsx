@@ -113,11 +113,22 @@ describe('ApprovalTopBar', () => {
     expect(bar.classList.contains('approval-top-bar')).toBe(true);
   });
 
-  it('labels subagent approvals with 子代理请求 prefix', () => {
+  it('labels subagent approvals with the subagent def id', () => {
     const { getByText } = render(
       <ApprovalTopBar request={{ ...REQ, id: 'sub-abc-1' }} onApprove={vi.fn()} onReject={vi.fn()} />,
     );
-    expect(getByText('子代理请求：')).toBeTruthy();
+    expect(getByText('子代理 abc 请求：')).toBeTruthy();
+  });
+
+  it('parses dashed def ids from full subagent approval ids', () => {
+    const { getByText } = render(
+      <ApprovalTopBar
+        request={{ ...REQ, id: 'sub-refactor-fs-1750000000000-abc123' }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+    expect(getByText('子代理 refactor-fs 请求：')).toBeTruthy();
   });
 
   it('keeps 需要确认 for regular approvals', () => {

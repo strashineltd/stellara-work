@@ -2,7 +2,9 @@ import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 import type { DispatchSubagentsArgs } from '../../../shared/ipc';
 
 export interface SubagentRunner {
-  run(task: string): Promise<{ summary: string; ok: boolean }>;
+  run(task: string, id: string): Promise<{ summary: string; ok: boolean }>;
+  /** 可选的批次总数上报：runner 借此在全部完成后发射汇总事件 */
+  setTotal?(total: number): void;
 }
 
 let runner: SubagentRunner | null = null;
@@ -46,13 +48,15 @@ export async function dispatchSubagents(
   const results: Array<{ summary: string; ok: boolean }> = new Array(total);
   let cursor = 0;
 
+  subagentRunner.setTotal?.(total);
+
   const worker = async (): Promise<void> => {
     while (true) {
       const index = cursor;
       cursor += 1;
       if (index >= total) return;
       try {
-        results[index] = await subagentRunner.run(defs[index].task);
+        results[index] = await subagentRunner.run(defs[index].task, defs[index].id);
       } catch (err) {
         results[index] = {
           summary: err instanceof Error ? err.message : String(err),

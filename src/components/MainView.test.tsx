@@ -571,9 +571,9 @@ describe('MainView subagents', () => {
     const events = (async function* () {
       yield { type: 'subagent_start', subagentId: 'sub-abc', subagentTask: '重构 fs 模块' };
       yield { type: 'subagent_progress', subagentId: 'sub-abc', subagentTool: 'read_file' };
-      yield { type: 'subagent_done', subagentId: 'sub-abc', subagentOk: true, subagentElapsedMs: 4200 };
+      yield { type: 'subagent_done', subagentId: 'sub-abc', subagentOk: true, subagentSummary: '重构完成', subagentElapsedMs: 4200 };
       yield { type: 'subagent_start', subagentId: 'sub-def', subagentTask: '写测试' };
-      yield { type: 'subagent_done', subagentId: 'sub-def', subagentOk: false, subagentElapsedMs: 900 };
+      yield { type: 'subagent_done', subagentId: 'sub-def', subagentOk: false, subagentSummary: '测试失败', subagentElapsedMs: 900 };
       yield {
         type: 'subagent_summary',
         subagentResults: [
@@ -597,6 +597,15 @@ describe('MainView subagents', () => {
     expect(cards[0]?.textContent).toContain('读取');
     expect(cards[0]?.textContent).toContain('4.2s');
     expect(cards[1]?.querySelector('.subagent-badge')?.textContent).toBe('失败');
+
+    act(() => {
+      cards[0]!.querySelector('.subagent-card-head')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(cards[0]?.querySelector('.subagent-summary')?.textContent).toContain('重构完成');
+    act(() => {
+      cards[1]!.querySelector('.subagent-card-head')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(cards[1]?.querySelector('.subagent-summary')?.textContent).toContain('测试失败');
 
     const report = querySelector('.subagent-summary-report');
     expect(report).toBeTruthy();
