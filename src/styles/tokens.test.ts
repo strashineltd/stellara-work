@@ -56,17 +56,17 @@ describe('grounded design system', () => {
     expect(mainView).toMatch(/box-shadow:\s*none\s*;/);
   });
 
-  it('uses a frameless title bar without system window controls', () => {
+  it('keeps native window controls (macOS traffic lights / Windows overlay)', () => {
     const windowOptions = electronMain.match(/new BrowserWindow\(\{([\s\S]*?)webPreferences:/)?.[1] ?? '';
     const header = workbench.match(/\.main-header\s*\{([^}]*)\}/)?.[1] ?? '';
 
-    expect(windowOptions).toMatch(/frame:\s*false/);
-    expect(windowOptions).not.toMatch(/titleBarOverlay/);
-    expect(windowOptions).not.toMatch(/trafficLightPosition/);
+    expect(windowOptions).toMatch(/titleBarStyle:\s*isMac \? 'hiddenInset' : 'hidden'/);
+    expect(windowOptions).toMatch(/trafficLightPosition/);
+    expect(windowOptions).toMatch(/titleBarOverlay/);
     expect(header).toMatch(/env\(titlebar-area-width/);
     expect(header).toMatch(/-webkit-app-region:\s*drag/);
     expect(workbench).toMatch(/\.main-header button,[\s\S]*?-webkit-app-region:\s*no-drag/);
-    expect(workbench).not.toMatch(/data-platform='darwin'/);
+    expect(workbench).toMatch(/html\[data-platform='darwin'\]\s*\.main-header\s*\{/);
     expect(header).toMatch(/padding: 0 max\(22px[^}]*0 22px/);
   });
 

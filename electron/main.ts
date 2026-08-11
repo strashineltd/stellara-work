@@ -77,10 +77,17 @@ function createWindow(): void {
     // macOS 深度适配：窗口底色跟随系统深浅色，避免主题切换时闪白；
     // 深色面板色与 grounded-tokens 深色背景一致
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1E2126' : '#FFFFFF',
-    // 无系统窗控（双平台一致）：frame: false 移除 macOS 红绿灯与 Windows 原生按钮；
-    // macOS 配 roundedCorners 保留 12+ 原生圆角；拖拽依赖渲染层 .main-header 的 -webkit-app-region: drag。
-    frame: false,
-    roundedCorners: true,
+    // macOS：hiddenInset 红绿灯（系统标准窗控）；Windows：隐藏标题栏 + 系统窗控 overlay
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    ...(isMac
+      ? { roundedCorners: true, trafficLightPosition: { x: 14, y: 13 } }
+      : {
+          titleBarOverlay: {
+            color: 'rgba(0, 0, 0, 0)',
+            symbolColor: '#65758B',
+            height: 72,
+          },
+        }),
     icon: path.join(__dirname, '..', '..', 'assets', isMac ? 'icon-512.png' : 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
