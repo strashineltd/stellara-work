@@ -440,14 +440,29 @@ export function MainView(props: MainViewProps) {
   );
 
   // ---- Slash / Skills ----
+  // 技能加载/重载引用最新 activeWorkDir（监听回调需在空依赖 effect 中稳定，用 ref 避免每次重绑）
+  const activeWorkDirRef = useRef(activeWorkDir);
+  useEffect(() => {
+    activeWorkDirRef.current = activeWorkDir;
+  }, [activeWorkDir]);
+
   function handleLoadSkills() {
-    if (!activeWorkDir) return;
-    void window.electronAPI.skills.list(activeWorkDir).then((items) => {
+    const workDir = activeWorkDirRef.current;
+    if (!workDir) return;
+    void window.electronAPI.skills.list(workDir).then((items) => {
       setSlash((s) => ({ ...s, skillsLoaded: true, slashItems: items }));
     }).catch(() => {
       setSlash((s) => ({ ...s, skillsLoaded: true, slashItems: [] }));
     });
   }
+
+  // 技能/MCP 等设置被其他窗口（设置窗口）修改 → 广播 settings-changed → 重载 slash 技能列表
+  useEffect(() => {
+    return window.electronAPI.app.onSettingsChanged(() => {
+      setSlash((s) => ({ ...s, skillsLoaded: false }));
+      void handleLoadSkills();
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSlashApply(skill: SkillDef) {
     setInput(skill.prompt);

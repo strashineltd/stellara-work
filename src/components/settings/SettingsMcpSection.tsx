@@ -14,6 +14,19 @@ function errorMessage(e: unknown): string {
 }
 
 /**
+ * 解析参数输入：支持 "双引号" / '单引号' 分组（引号内空格不拆分），空段自动忽略
+ */
+function parseArgs(input: string): string[] {
+  const out: string[] = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(input)) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3]);
+  }
+  return out;
+}
+
+/**
  * 设置窗口「技能与 MCP」面板的 MCP 区块：服务器列表（传输徽章 / 启用开关 / 删除确认 / 展开工具白名单勾选），
  * 折叠式添加表单（stdio → command+args，http → url）+ 测试连接（结果 tools 缓存用于勾选回显）。
  * 白名单语义：tools 空数组 = 默认启用全部工具；勾选变化即时 mcp.update 保存。
@@ -176,7 +189,7 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
       ...base,
       transport: 'stdio' as const,
       command: command.trim(),
-      args: args.split(/\s+/).map((a) => a.trim()).filter(Boolean),
+      args: parseArgs(args),
     };
   }
 
@@ -273,7 +286,7 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
                 )}
               </div>
               <button
-                className={`settings-mcp-switch ${server.enabled ? 'on' : ''}`}
+                className={`settings-switch ${server.enabled ? 'on' : ''}`}
                 role="switch"
                 aria-checked={server.enabled}
                 aria-label={`${server.enabled ? '停用' : '启用'} ${server.name}`}

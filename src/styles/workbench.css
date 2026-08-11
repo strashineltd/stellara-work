@@ -5706,7 +5706,7 @@ html[data-platform='darwin'] .settings-window__titlebar {
   font-size: 10.5px;
 }
 
-/* 启用开关（对照预览页 .switch，MCP 区块 .settings-mcp-switch 同款） */
+/* 启用开关（role="switch" 按钮；技能列表与 MCP 区块共用 .settings-switch） */
 .settings-switch {
   position: relative;
   flex: 0 0 auto;
@@ -5856,46 +5856,6 @@ html[data-platform='darwin'] .settings-window__titlebar {
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
-}
-
-/* 启用开关（role="switch" 按钮） */
-.settings-mcp-switch {
-  position: relative;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 19px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 999px;
-  outline: none;
-  background: var(--color-bg-input);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.settings-mcp-switch:focus-visible {
-  border-color: var(--color-accent);
-}
-
-.settings-mcp-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: var(--color-text-faint);
-  transition: transform 0.15s ease, background 0.15s ease;
-}
-
-.settings-mcp-switch.on {
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-
-.settings-mcp-switch.on::after {
-  transform: translateX(15px);
-  background: var(--color-accent);
 }
 
 /* 服务器展开区（工具数 / 说明） */

@@ -254,10 +254,10 @@ describe('SettingsSkillsMcp（技能与 MCP 面板）', () => {
       expect(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-badge')?.textContent).toBe('stdio');
       expect(container.querySelector('.settings-mcp-row[data-server="github"] .settings-mcp-badge')?.textContent).toBe('http');
 
-      const fsSwitch = container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-switch');
+      const fsSwitch = container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-switch');
       expect(fsSwitch?.getAttribute('role')).toBe('switch');
       expect(fsSwitch?.getAttribute('aria-checked')).toBe('true');
-      const ghSwitch = container.querySelector('.settings-mcp-row[data-server="github"] .settings-mcp-switch');
+      const ghSwitch = container.querySelector('.settings-mcp-row[data-server="github"] .settings-switch');
       expect(ghSwitch?.getAttribute('aria-checked')).toBe('false');
 
       expect(container.querySelectorAll('.settings-mcp-row .settings-mcp-delete').length).toBe(2);
@@ -273,10 +273,10 @@ describe('SettingsSkillsMcp（技能与 MCP 面板）', () => {
     it('toggles the enabled switch via mcp.update', async () => {
       const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
-      await fireClick(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-switch'));
+      await fireClick(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-switch'));
 
       expect(mocks.mcpUpdate).toHaveBeenCalledWith('filesystem', { enabled: false });
-      expect(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-mcp-switch')?.getAttribute('aria-checked')).toBe('false');
+      expect(container.querySelector('.settings-mcp-row[data-server="filesystem"] .settings-switch')?.getAttribute('aria-checked')).toBe('false');
     });
 
     it('deletes a server only after confirmation', async () => {

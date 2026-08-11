@@ -105,6 +105,7 @@ describe('MainView session deletion confirmation', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -171,6 +172,7 @@ describe('MainView shortcut wiring', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -258,6 +260,7 @@ describe('MainView model-missing banner', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -302,6 +305,7 @@ describe('MainView memory context', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -390,6 +394,7 @@ describe('MainView files section', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -425,6 +430,7 @@ describe('MainView context stats', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -543,6 +549,7 @@ describe('MainView without a configured model', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -580,5 +587,71 @@ describe('MainView without a configured model', () => {
     await act(async () => {});
     expect(container.textContent).toContain('请先配置模型');
     expect(onOpenSettings).toHaveBeenCalled();
+  });
+});
+
+describe('MainView slash skills reload on settings change', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  it('refetches slash skills and resets skillsLoaded when settings change', async () => {
+    const skillsList = vi.fn().mockResolvedValue([]);
+    (window as any).electronAPI.skills.list = skillsList;
+    let settingsCb: (() => void) | null = null;
+    (window as any).electronAPI.app.onSettingsChanged = vi.fn((cb: () => void) => {
+      settingsCb = cb;
+      return () => {};
+    });
+    const { querySelector } = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
+    const textarea = querySelector('textarea')!;
+    const typeIn = (value: string) =>
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+        setter.call(textarea, value);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+    // 首次输入 / 触发懒加载
+    typeIn('/');
+    await act(async () => {});
+    expect(skillsList).toHaveBeenCalledTimes(1);
+
+    // 已加载状态下再次输入 / 不重复请求
+    act(() => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    typeIn('/x');
+    await act(async () => {});
+    expect(skillsList).toHaveBeenCalledTimes(1);
+
+    // 设置变更 → 重新拉取技能；pending 期间 skillsLoaded 保持 false
+    skillsList.mockReturnValue(new Promise(() => {}));
+    act(() => {
+      settingsCb!();
+    });
+    await act(async () => {});
+    expect(skillsList).toHaveBeenCalledTimes(2);
+
+    // skillsLoaded 已重置 → 继续输入触发再次懒加载
+    typeIn('/x2');
+    await act(async () => {});
+    expect(skillsList).toHaveBeenCalledTimes(3);
   });
 });

@@ -694,14 +694,17 @@ function registerIpcHandlers(): void {
     if (!name) throw new Error('技能名称不能为空');
     const file = `${name}.md`;
     const resolved = await assertSkillFile(workDir, file, 'write');
-    let exists = true;
+    // 首次创建时 workDir/skills 可能不存在：先建目录再写入（递归对已存在目录是无操作）
+    await fs.mkdir(path.dirname(resolved), { recursive: true });
     try {
-      await fs.access(resolved);
-    } catch {
-      exists = false;
+      // wx 标志：独占创建，已存在时抛 EEXIST（避免先查后写的竞态）
+      await fs.writeFile(resolved, buildSkillMarkdown({ name, description: input.description, prompt: input.prompt }), { encoding: 'utf-8', flag: 'wx' });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'EEXIST') {
+        throw new Error('同名技能已存在');
+      }
+      throw e;
     }
-    if (exists) throw new Error(`技能已存在：${file}`);
-    await fs.writeFile(resolved, buildSkillMarkdown({ name, description: input.description, prompt: input.prompt }), 'utf-8');
     broadcastSettingsChanged();
     return { file };
   });
