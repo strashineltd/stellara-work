@@ -154,6 +154,17 @@ describe('SettingsSkillsPanel', () => {
     expect(mocks.skillsList).not.toHaveBeenCalled();
   });
 
+  it('keeps the create-skill button visible without a workDir and prompts to pick a project', async () => {
+    mocks = installApi(null);
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    const createBtn = container.querySelector('.settings-skill-create');
+    expect(createBtn).toBeTruthy();
+    await fireClick(createBtn);
+    expect(container.querySelector('.settings-skill-form')).toBeNull();
+    expect(byText(container, '请先创建或选择项目，技能保存在项目的 skills/ 目录中')).toBeTruthy();
+  });
+
   it('creates a skill via the form: calls skills.create with name/description/prompt, closes the form and refreshes the list', async () => {
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 

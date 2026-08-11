@@ -125,6 +125,10 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
   }
 
   function openCreate() {
+    if (!workDir) {
+      setError('请先创建或选择项目，技能保存在项目的 skills/ 目录中');
+      return;
+    }
     setShowForm('new');
     setEditingFile(null);
     setFormName('');
@@ -196,41 +200,43 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
         </div>
       )}
 
+      <div className="settings-skill-toolbar">
+        <div className="settings-skill-search">
+          <Icon name="search" size={14} />
+          <input
+            type="text"
+            placeholder="搜索技能名称或描述…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜索技能"
+            disabled={!workDir}
+          />
+        </div>
+        <button
+          className="btn btn-secondary settings-skill-template-copy"
+          onClick={() => void copyTemplate()}
+          type="button"
+          title="复制 markdown 模板到剪贴板"
+        >
+          <Icon name="copy" size={14} />
+          {templateCopied ? '已复制' : '复制模板'}
+        </button>
+        <button
+          className="btn btn-primary settings-skill-create"
+          onClick={openCreate}
+          type="button"
+          title="新建技能"
+        >
+          <Icon name="plus" size={14} />
+          新建技能
+        </button>
+      </div>
+
       {workDir && (
         <>
           <div className="settings-section">
             <div className="settings-section__title">
               技能 <span className="count">{skillsLoading ? '加载中…' : skills.length}</span>
-            </div>
-            <div className="settings-skill-toolbar">
-              <div className="settings-skill-search">
-                <Icon name="search" size={14} />
-                <input
-                  type="text"
-                  placeholder="搜索技能名称或描述…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  aria-label="搜索技能"
-                />
-              </div>
-              <button
-                className="btn btn-secondary settings-skill-template-copy"
-                onClick={() => void copyTemplate()}
-                type="button"
-                title="复制 markdown 模板到剪贴板"
-              >
-                <Icon name="copy" size={14} />
-                {templateCopied ? '已复制' : '复制模板'}
-              </button>
-              <button
-                className="btn btn-primary settings-skill-create"
-                onClick={openCreate}
-                type="button"
-                title="新建技能"
-              >
-                <Icon name="plus" size={14} />
-                新建技能
-              </button>
             </div>
 
             {showForm && (
