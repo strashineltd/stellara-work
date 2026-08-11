@@ -77,9 +77,10 @@ function createWindow(): void {
     // macOS 深度适配：窗口底色跟随系统深浅色，避免主题切换时闪白；
     // 深色面板色与 grounded-tokens 深色背景一致
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1E2126' : '#FFFFFF',
-    // macOS 12+ 原生圆角窗口；无系统窗控（红绿灯/标题栏按钮），关闭走菜单
-    titleBarStyle: 'hidden',
-    ...(isMac ? { roundedCorners: true } : {}),
+    // macOS：frame: false 才是真正的无边框（titleBarStyle: 'hidden' 会保留红绿灯），
+    // 配合 roundedCorners 保留 12+ 原生圆角；拖拽依赖渲染层 .main-header 的 -webkit-app-region: drag。
+    // Windows：titleBarStyle: 'hidden' + 无系统窗控（关闭走菜单/快捷键）
+    ...(isMac ? { frame: false, roundedCorners: true } : { titleBarStyle: 'hidden' }),
     icon: path.join(__dirname, '..', '..', 'assets', isMac ? 'icon-512.png' : 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

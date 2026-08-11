@@ -60,7 +60,7 @@ describe('grounded design system', () => {
     const windowOptions = electronMain.match(/new BrowserWindow\(\{([\s\S]*?)webPreferences:/)?.[1] ?? '';
     const header = workbench.match(/\.main-header\s*\{([^}]*)\}/)?.[1] ?? '';
 
-    expect(windowOptions).toMatch(/titleBarStyle:\s*'hidden'/);
+    expect(windowOptions).toMatch(/frame:\s*false/);
     expect(windowOptions).not.toMatch(/titleBarOverlay/);
     expect(windowOptions).not.toMatch(/trafficLightPosition/);
     expect(header).toMatch(/env\(titlebar-area-width/);

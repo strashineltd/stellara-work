@@ -83,6 +83,9 @@ export function installAppMenu(getWindow: () => BrowserWindow | null): void {
         { role: 'minimize', label: '最小化' },
         { role: 'zoom', label: '缩放' },
         { type: 'separator' },
+        // 红绿灯已移除，Cmd+W 是唯一的窗口关闭途径（Cmd+Q 退出整个应用）
+        { role: 'close', label: '关闭窗口' },
+        { type: 'separator' },
         { role: 'front', label: '全部置于最前' },
       ],
     },
