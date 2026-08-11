@@ -266,6 +266,14 @@ describe('runCommand', () => {
     expect(r.error).toContain('PATH');
   });
 
+  it('rejects overriding loader/identity env keys', async () => {
+    for (const key of ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'PWD', 'LOGNAME']) {
+      const r = await runCommand({ command: 'pwd', env: { [key]: '/evil' } }, tmpDir);
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain(key);
+    }
+  });
+
   it('rejects invalid env key names and excessive count', async () => {
     const r = await runCommand({ command: 'pwd', env: { '1BAD': 'x' } }, tmpDir);
     expect(r.ok).toBe(false);

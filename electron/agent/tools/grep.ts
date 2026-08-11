@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 import type { SearchContentArgs } from '../../../shared/ipc';
+import { isWithinDir } from '../../fs/path-security';
 
 const MAX_MATCHES = 200;
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -10,12 +11,12 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export async function searchContent(args: SearchContentArgs, cwd: string): Promise<ToolResult> {
   try {
     const searchRoot = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
-    const files = await fg(args.pattern, {
+    const files = (await fg(args.pattern, {
       cwd: searchRoot,
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
-    });
+    })).filter((file) => isWithinDir(path.resolve(cwd, file), cwd));
 
     const query = args.query;
     const caseSensitive = args.caseSensitive ?? true;

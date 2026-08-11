@@ -1,16 +1,17 @@
 import fg from 'fast-glob';
 import path from 'node:path';
 import type { SearchFilesArgs, ToolResult, OpenAITool } from '../../../shared/ipc';
+import { isWithinDir } from '../../fs/path-security';
 
 export async function searchFiles(args: SearchFilesArgs, cwd: string): Promise<ToolResult> {
   try {
     const searchRoot = args.cwd ? path.resolve(cwd, args.cwd) : cwd;
-    const files = await fg(args.pattern, {
+    const files = (await fg(args.pattern, {
       cwd: searchRoot,
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
-    });
+    })).filter((file) => isWithinDir(path.resolve(cwd, file), cwd));
     return {
       ok: true,
       output: files.length === 0 ? '(无匹配)' : files.slice(0, 200).join('\n'),

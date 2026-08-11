@@ -223,6 +223,7 @@ const MAX_OUTPUT_BYTES = 5 * 1024 * 1024; // 5MB
  */
 const FORBIDDEN_ENV_KEYS = new Set([
   'PATH', 'HOME', 'HOST', 'OSTYPE', 'TERM', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR',
+  'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PWD', 'LOGNAME',
 ]);
 
 /** 环境变量键名：仅允许 C 风格标识符（不能以数字开头） */
