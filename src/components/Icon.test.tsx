@@ -36,4 +36,10 @@ describe('Icon', () => {
     expect(svg.classList.contains('custom-icon')).toBe(true);
     unmount();
   });
+
+  it('supports the paperclip icon used by the attachment picker', () => {
+    const { svg, unmount } = renderIcon(<Icon name="paperclip" />);
+    expect(svg.querySelectorAll('path').length).toBeGreaterThan(0);
+    unmount();
+  });
 });

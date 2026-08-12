@@ -654,6 +654,10 @@ export interface ElectronAPI {
     selectProjectDir: () => Promise<{ workDir: string; entryFile?: string } | null>;
     /** 通过系统保存窗口安全新建项目入口文件（禁止覆盖） */
     createProjectFile: () => Promise<ProjectFileSelection | null>;
+    /** 多选任意附件文件，返回绝对路径列表（或 null 取消）；校验由 attachments:add 完成 */
+    openAttachmentFiles: () => Promise<string[] | null>;
+    /** 拖拽 drop 的 File → 磁盘绝对路径（webUtils.getPathForFile；非本地文件返回 ''） */
+    getPathForFile: (file: File) => string;
   };
   projects: {
     list: () => Promise<ProjectSummary[]>;

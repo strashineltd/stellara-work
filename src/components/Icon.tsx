@@ -19,6 +19,7 @@ export type IconName =
   | 'moon'
   | 'panel-left'
   | 'panel-right'
+  | 'paperclip'
   | 'plus'
   | 'refresh'
   | 'search'
@@ -110,6 +111,8 @@ export function Icon({ name, size = 16, className, ...props }: IconProps) {
           <path d="M10.5 2v12" />
         </svg>
       );
+    case 'paperclip':
+      return <svg {...common}><path d="m5.2 10.3 6.2-6.2a2 2 0 0 1 2.8 2.8L7.4 13.7a3.4 3.4 0 0 1-4.8-4.8l6.3-6.3" /></svg>;
     case 'plus':
       return <svg {...common}><path d="M8 3v10M3 8h10" /></svg>;
     case 'refresh':

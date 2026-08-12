@@ -1,6 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyStreamEventToEntries, formatRelativeTime, type DisplayEntry } from './chat-utils';
-import type { ChatStreamEvent, PlanApprovalRequest } from '../../shared/ipc';
+import {
+  applyStreamEventToEntries, formatRelativeTime, formatFileSize,
+  messagesToEntries, entriesToMessages, buildHistory,
+  type DisplayEntry,
+} from './chat-utils';
+import type { AttachmentMeta, ChatStreamEvent, MessageRow, PlanApprovalRequest } from '../../shared/ipc';
+
+const IMG_ATT: AttachmentMeta = {
+  id: 'shot-1.png', name: 'shot-1.png', size: 2048,
+  mimeType: 'image/png', kind: 'image', relPath: 'sess-1/shot-1.png',
+};
+
+const FILE_ATT: AttachmentMeta = {
+  id: 'notes.txt', name: 'notes.txt', size: 1024,
+  mimeType: 'text/plain', kind: 'file', relPath: 'sess-1/notes.txt',
+};
 
 function apply(prev: DisplayEntry[], ev: ChatStreamEvent) {
   const setPendingApproval = vi.fn();
@@ -99,5 +113,56 @@ describe('formatRelativeTime', () => {
   it('returns a month/day date for older timestamps', () => {
     const older = new Date(2026, 0, 15).getTime();
     expect(formatRelativeTime(older)).toBe('1 月 15 日');
+  });
+});
+
+describe('formatFileSize', () => {
+  it('renders bytes for small files', () => {
+    expect(formatFileSize(512)).toBe('512 B');
+  });
+
+  it('renders KB for kilobyte files', () => {
+    expect(formatFileSize(2048)).toBe('2.0 KB');
+  });
+
+  it('renders MB for large files', () => {
+    expect(formatFileSize(3_500_000)).toBe('3.3 MB');
+  });
+});
+
+describe('attachments round-trip (user entries)', () => {
+  it('messagesToEntries parses user attachments JSON', () => {
+    const rows: MessageRow[] = [
+      { sessionId: 's', position: 0, role: 'user', content: '看图', attachments: JSON.stringify([IMG_ATT, FILE_ATT]), createdAt: 1 },
+      { sessionId: 's', position: 1, role: 'user', content: '无附件', createdAt: 2 },
+    ];
+    const entries = messagesToEntries(rows);
+    expect(entries[0]).toEqual({ kind: 'user', content: '看图', attachments: [IMG_ATT, FILE_ATT] });
+    expect(entries[1]).toEqual({ kind: 'user', content: '无附件' });
+    const second = entries[1];
+    expect(second && second.kind === 'user' ? second.attachments : undefined).toBeUndefined();
+  });
+
+  it('messagesToEntries ignores broken attachments JSON', () => {
+    const rows: MessageRow[] = [
+      { sessionId: 's', position: 0, role: 'user', content: 'hi', attachments: '{broken', createdAt: 1 },
+    ];
+    const entries = messagesToEntries(rows);
+    expect(entries[0]).toEqual({ kind: 'user', content: 'hi' });
+  });
+
+  it('entriesToMessages serializes user attachments as JSON', () => {
+    const msgs = entriesToMessages([{ kind: 'user', content: '看图', attachments: [IMG_ATT] }], 's');
+    expect(JSON.parse(msgs[0]!.attachments ?? 'null')).toEqual([IMG_ATT]);
+  });
+
+  it('entriesToMessages leaves attachments undefined when absent', () => {
+    const msgs = entriesToMessages([{ kind: 'user', content: 'hi' }], 's');
+    expect(msgs[0]!.attachments).toBeUndefined();
+  });
+
+  it('buildHistory passes user attachments through', () => {
+    const history = buildHistory([{ kind: 'user', content: '看图', attachments: [IMG_ATT] }]);
+    expect(history[0]).toEqual({ role: 'user', content: '看图', attachments: [IMG_ATT] });
   });
 });

@@ -3,6 +3,26 @@ import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { ChatStream } from './ChatStream';
 import type { DisplayEntry } from '../../lib/chat-utils';
+import type { AttachmentMeta } from '../../../shared/ipc';
+
+const IMG_ATT: AttachmentMeta = {
+  id: 'shot-1.png', name: 'shot-1.png', size: 2048,
+  mimeType: 'image/png', kind: 'image', relPath: 'sess-1/shot-1.png',
+};
+
+const FILE_ATT: AttachmentMeta = {
+  id: 'notes.txt', name: 'notes.txt', size: 1024,
+  mimeType: 'text/plain', kind: 'file', relPath: 'sess-1/notes.txt',
+};
+
+function installAttachmentsApi() {
+  const readImage = vi.fn();
+  const open = vi.fn();
+  (window as unknown as { electronAPI: { attachments: { readImage: typeof readImage; open: typeof open } } }).electronAPI = {
+    attachments: { readImage, open },
+  };
+  return { readImage, open };
+}
 
 function render(ui: React.ReactElement) {
   const container = document.createElement('div');
@@ -177,5 +197,86 @@ describe('ChatStream', () => {
     );
     expect(getByText('执行计划')).not.toBeNull();
     expect(querySelector('.plan-actions')).not.toBeNull();
+  });
+
+  it('renders user image attachments as thumbnails via attachments:readImage', async () => {
+    const { readImage } = installAttachmentsApi();
+    readImage.mockResolvedValue({ dataUrl: 'data:image/png;base64,aGk=' });
+    const { querySelector, unmount } = render(
+      <ChatStream
+        entries={[{ kind: 'user', content: '看图', attachments: [IMG_ATT] }]}
+        busy={false}
+        streamId={null}
+        chatRef={null as any}
+        lastUserForRetry={null}
+        modelMissing={false}
+        onOpenSettings={vi.fn()}
+        onRetry={vi.fn()}
+        onAbort={vi.fn()}
+        onApprove={vi.fn()}
+        pendingApproval={null}
+        sessionId="sess-1"
+        workDir="/w"
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(readImage).toHaveBeenCalledWith('sess-1', '/w', 'shot-1.png');
+    const img = querySelector('.attach-thumb-img') as HTMLImageElement;
+    expect(img).toBeTruthy();
+    expect(img.src).toContain('data:image/png;base64,aGk=');
+    unmount();
+  });
+
+  it('renders user file attachments as chips and opens via attachments:open', () => {
+    const { open } = installAttachmentsApi();
+    open.mockResolvedValue(true);
+    const { querySelector, getByText, unmount } = render(
+      <ChatStream
+        entries={[{ kind: 'user', content: '看文件', attachments: [FILE_ATT] }]}
+        busy={false}
+        streamId={null}
+        chatRef={null as any}
+        lastUserForRetry={null}
+        modelMissing={false}
+        onOpenSettings={vi.fn()}
+        onRetry={vi.fn()}
+        onAbort={vi.fn()}
+        onApprove={vi.fn()}
+        pendingApproval={null}
+        sessionId="sess-1"
+        workDir="/w"
+      />,
+    );
+    const chip = querySelector('.attach-chip') as HTMLButtonElement;
+    expect(chip).toBeTruthy();
+    expect(getByText('notes.txt')).not.toBeNull();
+    act(() => {
+      chip.click();
+    });
+    expect(open).toHaveBeenCalledWith('sess-1', '/w', 'notes.txt');
+    unmount();
+  });
+
+  it('does not request thumbnails when sessionId or workDir is missing', () => {
+    const { readImage } = installAttachmentsApi();
+    const { unmount } = render(
+      <ChatStream
+        entries={[{ kind: 'user', content: '看图', attachments: [IMG_ATT] }]}
+        busy={false}
+        streamId={null}
+        chatRef={null as any}
+        lastUserForRetry={null}
+        modelMissing={false}
+        onOpenSettings={vi.fn()}
+        onRetry={vi.fn()}
+        onAbort={vi.fn()}
+        onApprove={vi.fn()}
+        pendingApproval={null}
+      />,
+    );
+    expect(readImage).not.toHaveBeenCalled();
+    unmount();
   });
 });

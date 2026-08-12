@@ -2405,6 +2405,159 @@ html[data-platform='darwin'] .sidebar-toggle {
   font-size: var(--fs-sm);
 }
 
+/* 附件：选择按钮 / 已选 chip / 消息内附件行 / 拖拽提示 */
+
+.attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-text-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard);
+}
+
+.attach-btn:hover:not(:disabled) {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+  background: var(--color-hover-overlay);
+}
+
+.attach-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.attach-bar {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  max-width: 260px;
+  min-height: 24px;
+  padding: 2px var(--space-2);
+  color: var(--color-text-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-soft);
+  font-size: var(--fs-xs);
+}
+
+button.attach-chip {
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard);
+}
+
+button.attach-chip:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+  background: var(--color-hover-overlay);
+}
+
+.attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-chip-size {
+  flex: none;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+}
+
+.attach-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  color: var(--color-text-faint);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  cursor: pointer;
+}
+
+.attach-chip-remove:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-tint);
+}
+
+/* 消息内附件行（用户消息） */
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.attach-thumb-wrap {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+
+.attach-thumb-wrap:hover {
+  border-color: var(--color-focus);
+}
+
+.attach-thumb-img {
+  display: block;
+  max-width: 180px;
+  max-height: 120px;
+  object-fit: contain;
+}
+
+.attach-thumb-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  color: var(--color-text-faint);
+}
+
+.attach-drop-overlay {
+  position: absolute;
+  z-index: 6;
+  inset: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  border: 1.5px dashed var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-tint);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+
 .slash-menu {
   position: absolute;
   right: 0;

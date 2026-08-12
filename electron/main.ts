@@ -307,6 +307,17 @@ function registerIpcHandlers(): void {
     return result.filePaths[0];
   });
 
+  // Dialog: 多选附件（路径校验交给 attachments:add）
+  ipcMain.handle('dialog:openAttachmentFiles', async (): Promise<string[] | null> => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择附件',
+      properties: ['openFile', 'multiSelections'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths;
+  });
+
   ipcMain.handle('dialog:openFile', async (_e, workDir: string): Promise<string | null> => {
     if (!mainWindow) return null;
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   ElectronAPI,
   ChatRequest,
@@ -128,6 +128,14 @@ const api: ElectronAPI = {
     selectProjectFile: () => ipcRenderer.invoke('dialog:selectProjectFile'),
     selectProjectDir: () => ipcRenderer.invoke('dialog:selectProjectDir'),
     createProjectFile: () => ipcRenderer.invoke('dialog:createProjectFile'),
+    openAttachmentFiles: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:openAttachmentFiles'),
+    getPathForFile: (file: File): string => {
+      try {
+        return webUtils.getPathForFile(file);
+      } catch {
+        return '';
+      }
+    },
   },
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),

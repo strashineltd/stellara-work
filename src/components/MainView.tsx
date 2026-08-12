@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
-  AppInfo, ApprovalRequest, ConfiguredModel, ModelListItem,
+  AppInfo, ApprovalRequest, AttachmentMeta, ConfiguredModel, ModelListItem,
   SessionSummary, Session, SkillDef, Project,
 } from '../../shared/ipc';
 import {
@@ -78,6 +78,7 @@ export function MainView(props: MainViewProps) {
   // ---- State ----
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [busy, setBusy] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
   const [planMode, setPlanMode] = useState(false);
@@ -148,6 +149,7 @@ export function MainView(props: MainViewProps) {
         }
         if (cancelled) return;
         setEntries([]);
+        setAttachments([]);
         entriesSessionRef.current = null;
         return;
       }
@@ -161,6 +163,7 @@ export function MainView(props: MainViewProps) {
       }
       if (cancelled) return;
       entriesSessionRef.current = null;
+      setAttachments([]);
       void window.electronAPI.sessions.get(activeSessionId).then(({ messages }) => {
         if (cancelled) return;
         setEntries(messagesToEntries(messages));
@@ -286,6 +289,7 @@ export function MainView(props: MainViewProps) {
 
   function doNewTask() {
     setEntries([]);
+    setAttachments([]);
     setConfirmNew(false);
     setLastUserForRetry(null);
   }
@@ -304,22 +308,33 @@ export function MainView(props: MainViewProps) {
       setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再发送任务。' }]);
       return;
     }
+    if (attachments.length > 0 && !activeWorkDir) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建项目或设置工作目录，再发送附件。' }]);
+      return;
+    }
     const userContent = input;
-    const history = [...buildHistory(entries), { role: 'user' as const, content: userContent }];
+    const sentAttachments = attachments.length > 0 ? attachments : undefined;
+    const history = [...buildHistory(entries), { role: 'user' as const, content: userContent, attachments: sentAttachments }];
     const usePlanMode = planMode;
     setLastUserForRetry(null);
 
     setEntries((prev) => [
       ...prev,
-      { kind: 'user', content: userContent },
+      { kind: 'user', content: userContent, attachments: sentAttachments },
       { kind: 'assistant', content: '' },
     ]);
     setInput('');
+    setAttachments([]);
     setBusy(true);
     setStreamId(null);
 
     try {
-      const result = await window.electronAPI.chat.start({ sessionId: activeSessionId, messages: history, planMode: usePlanMode });
+      const result = await window.electronAPI.chat.start({
+        sessionId: activeSessionId,
+        messages: history,
+        planMode: usePlanMode,
+        attachments: sentAttachments,
+      });
       setStreamId(result.streamId);
       for await (const ev of result.events) {
         setEntries((prev) => {
@@ -440,6 +455,35 @@ export function MainView(props: MainViewProps) {
     setPendingPlanApproval(null);
     setBusy(false);
     setStreamId(null);
+  }
+
+  // ---- Attachments ----
+  async function handlePickAttachmentFiles() {
+    if (!activeSessionId) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再添加附件。' }]);
+      return;
+    }
+    if (!activeWorkDir) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建项目或设置工作目录，再添加附件。' }]);
+      return;
+    }
+    try {
+      const paths = await window.electronAPI.dialog.openAttachmentFiles();
+      if (!paths || paths.length === 0) return;
+      await handleAddAttachmentPaths(paths);
+    } catch (e) {
+      setEntries((prev) => [...prev, { kind: 'error', message: `添加附件失败：${e instanceof Error ? e.message : String(e)}` }]);
+    }
+  }
+
+  async function handleAddAttachmentPaths(paths: string[]) {
+    if (!activeSessionId || !activeWorkDir || paths.length === 0) return;
+    try {
+      const { attachments: added } = await window.electronAPI.attachments.add(activeSessionId, activeWorkDir, paths);
+      setAttachments((prev) => [...prev, ...added]);
+    } catch (e) {
+      setEntries((prev) => [...prev, { kind: 'error', message: `添加附件失败：${e instanceof Error ? e.message : String(e)}` }]);
+    }
   }
 
   function handleRetry() {
@@ -665,6 +709,7 @@ export function MainView(props: MainViewProps) {
                 lastUserForRetry={lastUserForRetry}
                 modelMissing={sessionModelMissing}
                 workDir={activeWorkDir}
+                sessionId={activeSessionId ?? undefined}
                 onOpenSettings={() => onOpenSettings()}
                 onRetry={handleRetry}
                 onAbort={handleAbort}
@@ -697,6 +742,10 @@ export function MainView(props: MainViewProps) {
                 planMode={planMode}
                 slash={slash}
                 hasWorkDir={!!activeWorkDir}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
+                onPickAttachments={() => void handlePickAttachmentFiles()}
+                onAddAttachmentPaths={(paths) => void handleAddAttachmentPaths(paths)}
                 onInputChange={setInput}
                 onPlanToggle={() => setPlanMode((v) => !v)}
                 onSend={() => void handleSend()}

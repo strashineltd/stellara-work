@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
-import type { ApprovalRequest, PlanApprovalRequest } from '../../../shared/ipc';
+import { useEffect, useState } from 'react';
+import type { ApprovalRequest, AttachmentMeta, PlanApprovalRequest } from '../../../shared/ipc';
 import { MarkdownView } from '../MarkdownView';
 import { PlanCard } from '../PlanCard';
 import { ToolCallCard } from '../ToolCallCard';
@@ -9,7 +10,7 @@ import { ShellCard } from '../ShellCard';
 import { ErrorBanner } from '../ErrorBanner';
 import { ApprovalTopBar } from '../ApprovalTopBar';
 import { Icon } from '../Icon';
-import { prettyApprovalArgs, type DisplayEntry } from '../../lib/chat-utils';
+import { prettyApprovalArgs, formatFileSize, type DisplayEntry } from '../../lib/chat-utils';
 import { HoverablePath } from '../hover/HoverablePath';
 
 interface ChatStreamProps {
@@ -20,6 +21,7 @@ interface ChatStreamProps {
   lastUserForRetry: string | null;
   modelMissing: boolean;
   workDir?: string;
+  sessionId?: string;
   onOpenSettings: () => void;
   onRetry: () => void;
   onAbort: () => void;
@@ -55,7 +57,14 @@ export function ChatStream(props: ChatStreamProps) {
         <div className="messages">
           {props.entries.map((e, i) => (
             <div key={i} className="entry">
-              {e.kind === 'user' && <UserEntry content={e.content} />}
+              {e.kind === 'user' && (
+                <UserEntry
+                  content={e.content}
+                  attachments={e.attachments}
+                  sessionId={props.sessionId}
+                  workDir={props.workDir}
+                />
+              )}
               {e.kind === 'assistant' && (
                 <AssistantEntry
                   content={e.content}
@@ -155,15 +164,87 @@ function EmptyChat() {
   );
 }
 
-function UserEntry({ content }: { content: string }) {
+function UserEntry({
+  content,
+  attachments,
+  sessionId,
+  workDir,
+}: {
+  content: string;
+  attachments?: AttachmentMeta[];
+  sessionId?: string;
+  workDir?: string;
+}) {
+  function handleOpen(a: AttachmentMeta) {
+    if (!sessionId || !workDir) return;
+    void window.electronAPI.attachments.open(sessionId, workDir, a.id).catch(() => { /* ignore */ });
+  }
   return (
     <div className="message message-user">
       <div className="message-role">任务简报</div>
       <div className="message-content">
         <pre className="user-text">{content}</pre>
+        {attachments && attachments.length > 0 && (
+          <div className="attach-row">
+            {attachments.map((a) =>
+              a.kind === 'image' ? (
+                <div
+                  className="attach-thumb-wrap"
+                  key={a.id}
+                  title={a.name}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleOpen(a)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleOpen(a);
+                    }
+                  }}
+                >
+                  <AttachmentThumb att={a} sessionId={sessionId} workDir={workDir} />
+                </div>
+              ) : (
+                <button className="attach-chip" key={a.id} type="button" title={`打开 ${a.name}`} onClick={() => handleOpen(a)}>
+                  <Icon name="file" size={12} />
+                  <span className="attach-chip-name">{a.name}</span>
+                  <span className="attach-chip-size">{formatFileSize(a.size)}</span>
+                </button>
+              ),
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function AttachmentThumb({ att, sessionId, workDir }: {
+  att: AttachmentMeta;
+  sessionId?: string;
+  workDir?: string;
+}) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!sessionId || !workDir) return;
+    window.electronAPI.attachments.readImage(sessionId, workDir, att.id)
+      .then(({ dataUrl: url }) => {
+        if (!cancelled) setDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setDataUrl(null);
+      });
+    return () => { cancelled = true; };
+  }, [att.id, sessionId, workDir]);
+  if (!dataUrl) {
+    return (
+      <span className="attach-thumb attach-thumb-loading">
+        <Icon name="file" size={14} />
+      </span>
+    );
+  }
+  return <img className="attach-thumb-img" src={dataUrl} alt={att.name} />;
 }
 
 function AssistantEntry({

@@ -1,14 +1,14 @@
 /**
  * MainView 用到的纯函数工具（无 React 依赖，方便单测 + 复用）
  */
-import type { ChatMessage, ChatStreamEvent, MessageRow, ToolCall, ToolResultMeta } from '../../shared/ipc';
+import type { AttachmentMeta, ChatMessage, ChatStreamEvent, MessageRow, ToolCall, ToolResultMeta } from '../../shared/ipc';
 
 // ============================================================================
 // DisplayEntry 类型定义（也在这里导出，方便子组件 import）
 // ============================================================================
 
 export type DisplayEntry =
-  | { kind: 'user'; content: string }
+  | { kind: 'user'; content: string; attachments?: AttachmentMeta[] }
   | { kind: 'assistant'; content: string; toolCalls?: ToolCall[] }
   | { kind: 'tool_call'; id: string; name: string; args: string }
   | { kind: 'tool_result'; toolCallId?: string; name: string; ok: boolean; output: string; error?: string; meta?: ToolResultMeta }
@@ -38,6 +38,13 @@ export function formatRelativeTime(timestamp: number): string {
   if (hours < 24) return `${hours} 小时前`;
   const date = new Date(timestamp);
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日`;
+}
+
+/** 文件大小展示（B / KB / MB） */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** 把 tool approval 的 JSON args 美化显示 */
@@ -160,7 +167,11 @@ export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
   const out: DisplayEntry[] = [];
   for (const m of msgs) {
     if (m.role === 'user') {
-      out.push({ kind: 'user', content: m.content });
+      let attachments: AttachmentMeta[] | undefined;
+      try { if (m.attachments) attachments = JSON.parse(m.attachments); } catch { /* ignore */ }
+      const entry: DisplayEntry = { kind: 'user', content: m.content };
+      if (attachments && attachments.length > 0) entry.attachments = attachments;
+      out.push(entry);
     } else if (m.role === 'assistant') {
       let toolCalls: ToolCall[] | undefined;
       try { if (m.toolCalls) toolCalls = JSON.parse(m.toolCalls); } catch { /* ignore */ }
@@ -195,7 +206,9 @@ export function entriesToMessages(entries: DisplayEntry[], sessionId: string): M
   const now = Date.now();
   for (const e of entries) {
     if (e.kind === 'user') {
-      out.push({ sessionId, position: pos++, role: 'user', content: e.content, createdAt: now });
+      const row: MessageRow = { sessionId, position: pos++, role: 'user', content: e.content, createdAt: now };
+      if (e.attachments && e.attachments.length > 0) row.attachments = JSON.stringify(e.attachments);
+      out.push(row);
     } else if (e.kind === 'assistant') {
       out.push({
         sessionId,
@@ -236,7 +249,11 @@ export function entriesToMessages(entries: DisplayEntry[], sessionId: string): M
 
 export function buildHistory(entries: DisplayEntry[]): ChatMessage[] {
   return entries.flatMap<ChatMessage>((e) => {
-    if (e.kind === 'user') return [{ role: 'user', content: e.content }];
+    if (e.kind === 'user') {
+      const msg: ChatMessage = { role: 'user', content: e.content };
+      if (e.attachments && e.attachments.length > 0) msg.attachments = e.attachments;
+      return [msg];
+    }
     if (e.kind === 'assistant') {
       const msg: ChatMessage = { role: 'assistant', content: e.content };
       if (e.toolCalls && e.toolCalls.length > 0) msg.tool_calls = e.toolCalls;
