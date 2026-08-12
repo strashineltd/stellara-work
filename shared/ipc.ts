@@ -589,6 +589,21 @@ export interface ProjectFileSelection {
 }
 
 // ============================================
+// 附件相关
+// ============================================
+
+export interface AttachmentMeta {
+  /** 存储文件名（含冲突重命名的时间戳后缀），readImage/open 凭此定位附件 */
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  kind: 'image' | 'file';
+  /** 相对附件目录（{sessionId}/{name}，正向斜杠） */
+  relPath: string;
+}
+
+// ============================================
 // electronAPI 接口（preload 暴露给渲染进程）
 // ============================================
 
@@ -656,6 +671,14 @@ export interface ElectronAPI {
     readFile: (workDir: string, path: string, maxBytes?: number) => Promise<{ content: string; size: number; truncated: boolean }>;
     openPath: (workDir: string, path: string) => Promise<boolean>;
     createFile: (workDir: string, relativePath: string) => Promise<{ path: string }>;
+  };
+  attachments: {
+    /** 校验 + 复制到附件目录，返回附件元数据 */
+    add: (sessionId: string, workDir: string, filePaths: string[]) => Promise<{ attachments: AttachmentMeta[] }>;
+    /** 读取图片附件（≤5MB），返回 base64 dataUrl */
+    readImage: (sessionId: string, workDir: string, id: string) => Promise<{ dataUrl: string }>;
+    /** 用系统默认应用打开附件 */
+    open: (sessionId: string, workDir: string, id: string) => Promise<boolean>;
   };
   settings: {
     get: () => Promise<AppSettings>;

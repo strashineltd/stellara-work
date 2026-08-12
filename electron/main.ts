@@ -428,6 +428,40 @@ function registerIpcHandlers(): void {
     return createEmptyFile(workDir, relativePath);
   });
 
+  // Attachments: 校验 + 复制到 workDir/.stellara-attachments/{sessionId}/
+  ipcMain.handle('attachments:add', async (_e, sessionId: string, workDir: string, filePaths: string[]) => {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    if (!Array.isArray(filePaths) || filePaths.length === 0 || filePaths.some((p) => typeof p !== 'string')) {
+      throw new Error('请选择要上传的文件');
+    }
+    await assertWorkDirAllowed(workDir);
+    const { addAttachments } = await import('./attachments/attachments');
+    const attachments = await addAttachments(sessionId, workDir, filePaths);
+    return { attachments };
+  });
+
+  ipcMain.handle('attachments:readImage', async (_e, sessionId: string, workDir: string, id: string) => {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    if (typeof id !== 'string' || !id.trim()) throw new Error('附件无效');
+    await assertWorkDirAllowed(workDir);
+    const { readAttachmentImage } = await import('./attachments/attachments');
+    return readAttachmentImage(sessionId, workDir, id);
+  });
+
+  ipcMain.handle('attachments:open', async (_e, sessionId: string, workDir: string, id: string) => {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    if (typeof id !== 'string' || !id.trim()) throw new Error('附件无效');
+    await assertWorkDirAllowed(workDir);
+    const { openAttachment } = await import('./attachments/attachments');
+    const absPath = await openAttachment(sessionId, workDir, id);
+    const result = await shell.openPath(absPath);
+    if (result) throw new Error(`打开失败：${result}`);
+    return true;
+  });
+
   // Projects
   ipcMain.handle('projects:list', async () => {
     const { listProjects } = await import('./store/db');

@@ -151,6 +151,23 @@ export function installDevPreviewApi(): void {
       openPath: async () => true,
       createFile: async (workDir, relativePath) => ({ path: `${workDir}${sep}${relativePath.replace(/\//g, sep)}` }),
     },
+    attachments: {
+      add: async (sessionId, _workDir, filePaths) => ({
+        attachments: filePaths.map((p) => {
+          const name = p.split('/').pop()!.split('\\').pop()!;
+          return {
+            id: name,
+            name,
+            size: 0,
+            mimeType: 'application/octet-stream',
+            kind: 'file' as const,
+            relPath: `${sessionId}/${name}`,
+          };
+        }),
+      }),
+      readImage: async () => ({ dataUrl: '' }),
+      open: async () => true,
+    },
     settings: {
       get: async () => ({ theme: 'light', workspaceMode: 'sidebar' }), update: async () => {}, clearAllData: async () => {}, resetSelective: async () => {},
       openDataDir: async () => {}, openLogFile: async () => {}, collectDiagnostics: async () => emptyDiagnostics(),

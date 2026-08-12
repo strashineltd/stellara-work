@@ -185,6 +185,14 @@ const api: ElectronAPI = {
     createFile: (workDir: string, relativePath: string): Promise<{ path: string }> =>
       ipcRenderer.invoke('fs:createFile', workDir, relativePath),
   },
+  attachments: {
+    add: (sessionId: string, workDir: string, filePaths: string[]) =>
+      ipcRenderer.invoke('attachments:add', sessionId, workDir, filePaths),
+    readImage: (sessionId: string, workDir: string, id: string) =>
+      ipcRenderer.invoke('attachments:readImage', sessionId, workDir, id),
+    open: (sessionId: string, workDir: string, id: string): Promise<boolean> =>
+      ipcRenderer.invoke('attachments:open', sessionId, workDir, id),
+  },
   memory: {
     search: (query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) =>
       ipcRenderer.invoke('memory:search', query, options),
