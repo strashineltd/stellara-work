@@ -921,12 +921,13 @@ async function runAgentLoopForIpc(
     }
   };
 
-  const last = request.messages[request.messages.length - 1];
+  const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
+  const last = messages[messages.length - 1];
   if (!last || last.role !== 'user') {
     send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
     return;
   }
-  const history = request.messages.slice(0, -1);
+  const history = messages.slice(0, -1);
 
   // 附件注入：request.attachments 非空 → 在用户消息 content 前加附件说明，
   // Agent 据此用 read_file 读取 .stellara-attachments/ 内的文本附件
