@@ -917,6 +917,16 @@ async function runAgentLoopForIpc(
   }
   const history = request.messages.slice(0, -1);
 
+  // 附件注入：request.attachments 非空 → 在用户消息 content 前加附件说明，
+  // Agent 据此用 read_file 读取 .stellara-attachments/ 内的文本附件
+  let userContent = last.content;
+  if (request.attachments && request.attachments.length > 0) {
+    const attachmentLines = request.attachments.map(
+      (a) => `- ${a.name} → ${a.relPath}（${a.kind === 'image' ? '图片' : '文件'}）`,
+    );
+    userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
+  }
+
   // M4.1: 上下文压缩阈值随模型 contextWindow 自适应（默认 24K 阈值对 256K 窗口过保守）
   const { compressionForContextWindow } = await import('./agent/compress');
   const compression = compressionForContextWindow(model.contextWindow);
@@ -980,7 +990,7 @@ async function runAgentLoopForIpc(
       // MCP 工具加载失败不影响 agent 运行
     }
 
-    for await (const event of runAgentLoop(last.content, {
+    for await (const event of runAgentLoop(userContent, {
       model,
       cwd,
       history,

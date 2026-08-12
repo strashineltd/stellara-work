@@ -61,6 +61,7 @@ export function getDb(): Database.Database {
       tool_name TEXT,
       meta TEXT,
       plan_mode INTEGER DEFAULT 0,
+      attachments TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
       UNIQUE (session_id, position)
@@ -133,6 +134,14 @@ export function getDb(): Database.Database {
     _db.exec('ALTER TABLE projects ADD COLUMN entry_file TEXT');
   }
 
+  // 旧库 messages 表没有 attachments 列 → 迁移加列（存附件 JSON）
+  const messageColumns = _db
+    .prepare('PRAGMA table_info(messages)')
+    .all() as Array<{ name: string }>;
+  if (!messageColumns.some((column) => column.name === 'attachments')) {
+    _db.exec('ALTER TABLE messages ADD COLUMN attachments TEXT');
+  }
+
   // Memory OS: FTS5 全文搜索表（使用 memory_id UNINDEXED 关联，而非 rowid）
   try {
     _db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, content, tags, tokenize='unicode61')");
@@ -183,6 +192,8 @@ export interface MessageRow {
   toolName?: string;
   meta?: string;
   planMode?: number;
+  /** attachments JSON 字符串（对应 messages.attachments 列） */
+  attachments?: string;
   createdAt: number;
 }
 
@@ -221,6 +232,7 @@ function rowToMessage(row: Record<string, unknown>): MessageRow {
     toolName: (row.tool_name as string | null) ?? undefined,
     meta: (row.meta as string | null) ?? undefined,
     planMode: (row.plan_mode as number | null) ?? undefined,
+    attachments: (row.attachments as string | null) ?? undefined,
     createdAt: row.created_at as number,
   };
 }
@@ -265,8 +277,8 @@ export function getMessages(sessionId: string): MessageRow[] {
 export function appendMessage(msg: MessageRow): void {
   getDb()
     .prepare(
-      `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, attachments, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       msg.sessionId,
@@ -278,6 +290,7 @@ export function appendMessage(msg: MessageRow): void {
       msg.toolName ?? null,
       msg.meta ?? null,
       msg.planMode ?? 0,
+      msg.attachments ?? null,
       msg.createdAt,
     );
   bumpSession(msg.sessionId, msg.position + 1);
@@ -294,8 +307,8 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
   const tx = db.transaction((ms: MessageRow[]) => {
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
     const insert = db.prepare(
-      `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, attachments, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const m of ms) {
       insert.run(
@@ -308,6 +321,7 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
         m.toolName ?? null,
         m.meta ?? null,
         m.planMode ?? 0,
+        m.attachments ?? null,
         m.createdAt,
       );
     }

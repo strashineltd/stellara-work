@@ -165,6 +165,102 @@ describe('db', () => {
     expect(getSession('s1')?.messageCount).toBe(5);
   });
 
+  it('persists message attachments as JSON round-trip', () => {
+    createSession({ id: 's1', title: 'T', modelId: 'm1' });
+    const attachments = JSON.stringify([
+      { id: 'shot-1723456789.png', name: 'shot.png', size: 2048, mimeType: 'image/png', kind: 'image', relPath: 's1/shot-1723456789.png' },
+      { id: 'notes.txt', name: 'notes.txt', size: 128, mimeType: 'text/plain', kind: 'file', relPath: 's1/notes.txt' },
+    ]);
+    appendMessage({
+      sessionId: 's1', position: 0, role: 'user', content: '看下这张图',
+      attachments, createdAt: Date.now(),
+    });
+    const msgs = getMessages('s1');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.attachments).toBe(attachments);
+    expect(JSON.parse(msgs[0]?.attachments ?? 'null')).toEqual([
+      { id: 'shot-1723456789.png', name: 'shot.png', size: 2048, mimeType: 'image/png', kind: 'image', relPath: 's1/shot-1723456789.png' },
+      { id: 'notes.txt', name: 'notes.txt', size: 128, mimeType: 'text/plain', kind: 'file', relPath: 's1/notes.txt' },
+    ]);
+  });
+
+  it('saveMessages round-trips attachments JSON', () => {
+    createSession({ id: 's1', title: 'T', modelId: 'm1' });
+    const attachments = JSON.stringify([
+      { id: 'a.png', name: 'a.png', size: 10, mimeType: 'image/png', kind: 'image', relPath: 's1/a.png' },
+    ]);
+    saveMessages('s1', [
+      {
+        sessionId: 's1', position: 0, role: 'user', content: '带附件',
+        attachments, createdAt: Date.now(),
+      },
+      { sessionId: 's1', position: 1, role: 'assistant', content: '收到', createdAt: Date.now() },
+    ]);
+    const msgs = getMessages('s1');
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]?.attachments).toBe(attachments);
+    expect(msgs[1]?.attachments).toBeUndefined();
+  });
+
+  it('returns undefined attachments for legacy rows without the column value', () => {
+    createSession({ id: 's1', title: 'T', modelId: 'm1' });
+    appendMessage({ sessionId: 's1', position: 0, role: 'user', content: 'plain', createdAt: Date.now() });
+    const msgs = getMessages('s1');
+    expect(msgs[0]?.attachments).toBeUndefined();
+  });
+
+  it('migrates a legacy messages table by adding the attachments column', () => {
+    const legacyDb = new Database(dbFile);
+    legacyDb.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        work_dir TEXT,
+        project_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        message_count INTEGER DEFAULT 0
+      );
+      INSERT INTO sessions (id, title, model_id, created_at, updated_at, message_count)
+      VALUES ('legacy-session', 'Legacy', 'm1', 1, 1, 1);
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tool_calls TEXT,
+        tool_call_id TEXT,
+        tool_name TEXT,
+        meta TEXT,
+        plan_mode INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        UNIQUE (session_id, position)
+      );
+      INSERT INTO messages (session_id, position, role, content, created_at)
+      VALUES ('legacy-session', 0, 'user', 'legacy msg', 1);
+    `);
+    legacyDb.close();
+
+    expect(() => initDb()).not.toThrow();
+    const msgs = getMessages('legacy-session');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.content).toBe('legacy msg');
+    expect(msgs[0]?.attachments).toBeUndefined();
+
+    const attachments = JSON.stringify([
+      { id: 'x.png', name: 'x.png', size: 1, mimeType: 'image/png', kind: 'image', relPath: 'legacy-session/x.png' },
+    ]);
+    appendMessage({
+      sessionId: 'legacy-session', position: 1, role: 'user', content: '迁移后可存附件',
+      attachments, createdAt: 2,
+    });
+    const after = getMessages('legacy-session');
+    expect(after[1]?.attachments).toBe(attachments);
+  });
+
   it('handles tool messages with meta + toolCallId + toolName', () => {
     createSession({ id: 's1', title: 'T', modelId: 'm1' });
     appendMessage({

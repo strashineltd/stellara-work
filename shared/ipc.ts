@@ -70,6 +70,8 @@ export interface ChatMessage {
   /** tool_call_id 关联 assistant.tool_calls */
   tool_call_id?: string;
   name?: string;
+  /** 用户消息附带的附件元数据（图片/文件） */
+  attachments?: AttachmentMeta[];
 }
 
 export interface ToolCall {
@@ -89,6 +91,8 @@ export interface ChatRequest {
   planMode?: boolean;
   /** 危险工具等待用户批准的毫秒数，默认 60000（超时默认拒绝） */
   approvalTimeoutMs?: number;
+  /** 本次发送附带的附件元数据（Agent 提示词注入附件说明） */
+  attachments?: AttachmentMeta[];
 }
 
 export interface ApprovalRequest {
@@ -424,6 +428,8 @@ export interface MessageRow {
   toolName?: string;
   meta?: string;
   planMode?: number;
+  /** attachments JSON 字符串（对应 messages.attachments 列） */
+  attachments?: string;
   createdAt: number;
 }
 
