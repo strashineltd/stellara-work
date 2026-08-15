@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act, useState } from 'react';
 import { MainView } from './MainView';
-import type { AppInfo, ConfiguredModel, SessionSummary } from '../../shared/ipc';
+import type { AppInfo, AttachmentMeta, ConfiguredModel, SessionSummary } from '../../shared/ipc';
 
 const CONFIG: ConfiguredModel = {
   id: 'deepseek-v4-pro', label: 'DeepSeek-v4-Pro', baseUrl: 'https://x', model: 'd', isCustom: false, hasKey: true,
@@ -756,5 +756,91 @@ describe('MainView slash skills reload on settings change', () => {
     typeIn('/x2');
     await act(async () => {});
     expect(skillsList).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('MainView home composer attachments', () => {
+  const ADDED: AttachmentMeta[] = [
+    { id: 'att-1', name: '需求文档.md', size: 2048, mimeType: 'text/markdown', kind: 'file', relPath: 'a/att-1' },
+  ];
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+      dialog: {
+        getPathForFile: vi.fn((f: File) => `/tmp/${f.name}`),
+        openAttachmentFiles: vi.fn(),
+      },
+      attachments: { add: vi.fn().mockResolvedValue({ attachments: ADDED }) },
+    };
+  });
+
+  async function goHome(querySelectorAll: (sel: string) => NodeListOf<Element>) {
+    act(() => {
+      const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+        (el) => el.textContent && el.textContent.includes('首页'),
+      );
+      homeNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  }
+
+  function dropFileOn(picker: Element, name: string) {
+    const file = new File(['x'], name);
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
+    act(() => {
+      picker.dispatchEvent(drop);
+    });
+  }
+
+  it('adds dropped attachments from the home composer via attachments.add', async () => {
+    const { querySelector, querySelectorAll } = await renderMainView({
+      config: { ...CONFIG, workDir: 'D:/proj' },
+    });
+    await goHome(querySelectorAll);
+    const picker = querySelector('.attach-picker')!;
+    expect(picker).toBeTruthy();
+    dropFileOn(picker, 'design.png');
+    await act(async () => {});
+    expect((window as any).electronAPI.attachments.add).toHaveBeenCalledWith('a', 'D:/proj', ['/tmp/design.png']);
+    expect(querySelectorAll('.attach-chip').length).toBe(1);
+    expect(querySelector('.attach-chip')?.textContent).toContain('需求文档.md');
+  });
+
+  it('adds files picked via the home composer attach button', async () => {
+    (window as any).electronAPI.dialog.openAttachmentFiles = vi.fn().mockResolvedValue(['D:/proj/a.txt']);
+    const { querySelector, querySelectorAll } = await renderMainView({
+      config: { ...CONFIG, workDir: 'D:/proj' },
+    });
+    await goHome(querySelectorAll);
+    const btn = querySelector('.attach-btn') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    fireClick(btn);
+    await act(async () => {});
+    expect((window as any).electronAPI.attachments.add).toHaveBeenCalledWith('a', 'D:/proj', ['D:/proj/a.txt']);
+    expect(querySelectorAll('.attach-chip').length).toBe(1);
+  });
+
+  it('prompts to create a project when adding attachments without a work dir', async () => {
+    const { querySelector, container } = await renderMainView();
+    const picker = querySelector('.attach-picker')!;
+    dropFileOn(picker, 'design.png');
+    await act(async () => {});
+    expect(container.textContent).toContain('请先创建项目或设置工作目录，再添加附件。');
+    expect((window as any).electronAPI.attachments.add).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
+import type { AttachmentMeta, ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
 import { HomeDashboard } from './HomeDashboard';
 
 const CONFIG: ConfiguredModel = {
@@ -17,12 +17,22 @@ const SESSIONS: SessionSummary[] = [
   { id: 's1', title: '重做桌面端界面', modelId: 'local', projectId: 'p1', updatedAt: Date.now(), messageCount: 4 },
 ];
 
+const ATTACHMENT: AttachmentMeta = {
+  id: 'att-1', name: '需求文档.md', size: 2048,
+  mimeType: 'text/markdown', kind: 'file', relPath: 's1/需求文档.md',
+};
+
 const BASE_PROPS = {
   config: CONFIG,
   projects: PROJECTS,
   sessions: SESSIONS,
   input: '',
   busy: false,
+  attachments: [],
+  hasWorkDir: true,
+  onAttachmentsChange: vi.fn(),
+  onAddPaths: vi.fn(),
+  onPickAttachments: vi.fn(),
   onInputChange: vi.fn(),
   onSend: vi.fn(),
   onSelectSession: vi.fn(),
@@ -167,5 +177,61 @@ describe('HomeDashboard', () => {
   it('hides the banner when modelMissing is false', () => {
     const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} modelMissing={false} />);
     expect(container.textContent).not.toContain('尚未配置模型');
+  });
+
+  it('shows the composer attachment button disabled without a work dir', () => {
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} hasWorkDir={false} />);
+    const btn = container.querySelector('.attach-btn') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(true);
+    expect(container.textContent).toContain('先创建项目');
+  });
+
+  it('enables the composer attachment button when a work dir exists', () => {
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} hasWorkDir />);
+    const btn = container.querySelector('.attach-btn') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it('renders composer attachment chips and removes them via onAttachmentsChange', () => {
+    const onAttachmentsChange = vi.fn();
+    const { container } = render(
+      <HomeDashboard
+        section="home"
+        {...BASE_PROPS}
+        attachments={[ATTACHMENT]}
+        onAttachmentsChange={onAttachmentsChange}
+      />,
+    );
+    const chips = container.querySelectorAll('.attach-chip');
+    expect(chips.length).toBe(1);
+    expect(container.textContent).toContain('需求文档.md');
+    fireClick(container.querySelector('.attach-chip-remove'));
+    expect(onAttachmentsChange).toHaveBeenCalledWith([]);
+  });
+
+  it('forwards dropped files from the composer to onAddPaths', () => {
+    const onAddPaths = vi.fn();
+    (window as unknown as { electronAPI: { dialog: { getPathForFile: (f: File) => string } } }).electronAPI = {
+      dialog: { getPathForFile: (f: File) => `/tmp/${f.name}` },
+    };
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} onAddPaths={onAddPaths} />);
+    const picker = container.querySelector('.attach-picker')!;
+    const file = new File(['x'], 'design.png');
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
+    act(() => {
+      picker.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }));
+      picker.dispatchEvent(drop);
+    });
+    expect(onAddPaths).toHaveBeenCalledWith(['/tmp/design.png']);
+  });
+
+  it('opens the file picker when the composer attach button is clicked', () => {
+    const onPickAttachments = vi.fn();
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} onPickAttachments={onPickAttachments} />);
+    fireClick(container.querySelector('.attach-btn'));
+    expect(onPickAttachments).toHaveBeenCalledOnce();
   });
 });

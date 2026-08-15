@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
+import type { AttachmentMeta, ConfiguredModel, ProjectSummary, SessionSummary } from '../../shared/ipc';
 import { basename, formatRelativeTime } from '../lib/chat-utils';
 import { Icon } from './Icon';
+import { AttachmentPicker } from './attachments/AttachmentPicker';
 
 export type DashboardSection = 'home' | 'projects';
 
@@ -17,10 +18,17 @@ interface HomeDashboardProps {
   sessions: SessionSummary[];
   input: string;
   busy: boolean;
+  /** 首页 composer 已选附件 */
+  attachments: AttachmentMeta[];
+  /** 是否已有工作目录（无项目时附件按钮 disabled + 提示） */
+  hasWorkDir: boolean;
   /** 尚未配置模型（无可用 agent）时显示横幅 */
   modelMissing?: boolean;
   onOpenSettings?: () => void;
   onInputChange: (value: string) => void;
+  onAttachmentsChange: (next: AttachmentMeta[]) => void;
+  onAddPaths: (paths: string[]) => void;
+  onPickAttachments: () => void;
   onSend: () => void;
   onSelectSession: (id: string) => void;
   onOpenProject: (id: string) => void;
@@ -172,8 +180,18 @@ export function HomeDashboard(props: HomeDashboardProps) {
               }
             }}
           />
+          <AttachmentPicker
+            attachments={props.attachments}
+            onAttachmentsChange={props.onAttachmentsChange}
+            onPick={props.onPickAttachments}
+            onAddPaths={props.onAddPaths}
+            disabled={props.busy || !props.hasWorkDir}
+          />
           <div className="dashboard-composer__footer">
             <span><Icon name="folder" size={14} />{props.projectName ?? workDirName}</span>
+            {!props.hasWorkDir && (
+              <span className="attach-hint">先创建项目</span>
+            )}
             <button
               className="dashboard-send-button"
               type="button"

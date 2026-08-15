@@ -477,7 +477,15 @@ export function MainView(props: MainViewProps) {
   }
 
   async function handleAddAttachmentPaths(paths: string[]) {
-    if (!activeSessionId || !activeWorkDir || paths.length === 0) return;
+    if (paths.length === 0) return;
+    if (!activeSessionId) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再添加附件。' }]);
+      return;
+    }
+    if (!activeWorkDir) {
+      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建项目或设置工作目录，再添加附件。' }]);
+      return;
+    }
     try {
       const { attachments: added } = await window.electronAPI.attachments.add(activeSessionId, activeWorkDir, paths);
       setAttachments((prev) => [...prev, ...added]);
@@ -772,7 +780,12 @@ export function MainView(props: MainViewProps) {
               sessions={sessions}
               input={input}
               busy={busy}
+              attachments={attachments}
+              hasWorkDir={!!activeWorkDir}
               onInputChange={setInput}
+              onAttachmentsChange={setAttachments}
+              onAddPaths={(paths) => void handleAddAttachmentPaths(paths)}
+              onPickAttachments={() => void handlePickAttachmentFiles()}
               onSend={() => {
                 if (!config) {
                   setActiveSection('tasks');
