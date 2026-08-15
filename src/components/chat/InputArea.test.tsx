@@ -118,24 +118,7 @@ describe('InputArea', () => {
     expect(onLazyLoadSkills).toHaveBeenCalledOnce();
   });
 
-  it('renders an attachment pick button', () => {
-    const { querySelector } = render();
-    const btn = querySelector('.attach-btn');
-    expect(btn).toBeTruthy();
-    expect(btn!.querySelector('.app-icon')).toBeTruthy();
-  });
-
-  it('clicking the attachment button invokes onPickAttachments', () => {
-    const onPickAttachments = vi.fn();
-    const { querySelector } = render({ onPickAttachments });
-    const btn = querySelector('.attach-btn') as HTMLButtonElement;
-    act(() => {
-      btn.click();
-    });
-    expect(onPickAttachments).toHaveBeenCalledOnce();
-  });
-
-  it('renders attachment chips with name and size, and removes on x', () => {
+  it('renders attachment chips through AttachmentPicker and removes on x', () => {
     const onAttachmentsChange = vi.fn();
     const { querySelector, querySelectorAll, getByText } = render({
       attachments: [IMG_ATT, FILE_ATT],
@@ -149,39 +132,5 @@ describe('InputArea', () => {
       remove.click();
     });
     expect(onAttachmentsChange).toHaveBeenCalledWith([FILE_ATT]);
-  });
-
-  it('shows no chip list when there are no attachments', () => {
-    const { querySelectorAll } = render();
-    expect(querySelectorAll('.attach-chip').length).toBe(0);
-  });
-
-  it('extracts dropped file paths via the path bridge and forwards them', () => {
-    const onAddAttachmentPaths = vi.fn();
-    (window as unknown as { electronAPI: { dialog: { getPathForFile: (f: File) => string } } }).electronAPI = {
-      dialog: { getPathForFile: (f: File) => `/tmp/${f.name}` },
-    };
-    const { querySelector } = render({ onAddAttachmentPaths });
-    const footer = querySelector('.main-input')!;
-    const file = new File(['x'], 'design.png');
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
-    act(() => {
-      footer.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }));
-      footer.dispatchEvent(drop);
-    });
-    expect(onAddAttachmentPaths).toHaveBeenCalledWith(['/tmp/design.png']);
-  });
-
-  it('ignores drop events without extractable file paths', () => {
-    const onAddAttachmentPaths = vi.fn();
-    const { querySelector } = render({ onAddAttachmentPaths });
-    const footer = querySelector('.main-input')!;
-    const drop = new Event('drop', { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, 'dataTransfer', { value: { files: [] } });
-    act(() => {
-      footer.dispatchEvent(drop);
-    });
-    expect(onAddAttachmentPaths).not.toHaveBeenCalled();
   });
 });
