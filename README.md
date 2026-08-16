@@ -1,126 +1,154 @@
-# Stellara Work
-> 数据本地的 Codex 风格桌面 Agent（Windows / macOS） · **v0.9 内测版**
-GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型（OpenAI 兼容协议）
-**完整规划**：见 [`plan.md`](./plan.md)
+<p align="center">
+  <img src="assets/icon-512.png" width="120" alt="Stellara Work" />
+</p>
+
+<h1 align="center">Stellara Work</h1>
+
+<p align="center">
+  <strong>A local-first, Codex-style desktop agent</strong> for Windows & macOS.
+  <br />
+  Bring your own OpenAI-compatible API key — your data stays on your machine.
+</p>
+
+<p align="center">
+  <a href="https://github.com/strashineltd/stellara-work/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/strashineltd/stellara-work" /></a>
+  <img alt="Platform: Windows / macOS" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue" />
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" />
+</p>
+
 ---
-## 当前进度
-- ✅ **W1** - 后端核心闭环（agent 循环 / tools / LLM 客户端）
-- ✅ **W2** - 桌面壳 + 聊天 UI（流式聊天、计划模式 + 批准门禁、diff/shell 卡片、命令面板）
-- ✅ **W3** - 数据本地 + 体验收尾（onboarding、设置、会话存储与恢复、上下文压缩、NSIS 打包）
-- ⏳ v0.9 内测打磨中
+
+**Stellara Work** 是一款**数据本地**的 Codex 风格桌面 Agent：你自备 OpenAI 兼容的 `base_url + API key`，在桌面工作台上与 Agent 协作完成代码任务——读取文件、编辑代码、执行命令，全程可审阅、可批准。**你的密钥、会话、文件与配置永远留在本机**，Stellara Work 不会上传任何数据。
+
+*Stellara Work is a local-first, Codex-style desktop agent. Bring your own OpenAI-compatible API key, and collaborate with the agent on coding tasks — reading files, editing code, running commands — with full review and approval over every action. Your keys, sessions, files, and config stay on your machine. Stellara Work never uploads your data.*
+
 ---
-## 技术栈
-- **桌面壳**：Electron 32+（Node.js + Chromium）
-- **前端**：React 18 + TypeScript + Vite
-- **后端**：Node.js + TypeScript（主进程）
-- **LLM 客户端**：fetch + eventsource-parser（OpenAI 兼容）
-- **存储**：better-sqlite3
-- **配置**：dotenv + JSON
-- **打包**：electron-builder（Windows NSIS / macOS dmg+zip 双架构）
+
+## Features · 功能亮点
+
+- **🔒 Local-first privacy · 数据本地，隐私优先** — API keys encrypted with OS keychain (macOS) / DPAPI (Windows); sessions, files and config all stored locally. / API key 由系统钥匙串（macOS）/ DPAPI（Windows）加密，会话、文件、配置全部存于本机。
+- **🧠 Bring-your-own-model · 自带模型** — Works with any OpenAI-compatible endpoint. Presets for GLM, DeepSeek, Kimi (Moonshot), MiniMax, plus unlimited custom models. / 兼容任意 OpenAI 协议端点，内置 GLM、DeepSeek、Kimi、MiniMax 预设，支持无限自定义模型。
+- **✅ Plan mode with approval gates · 计划模式 + 批准门禁** — Every file write and shell command waits for your explicit approval. / 每次文件写入、命令执行都需你显式批准。
+- **💬 Streaming chat · 流式对话** — Live markdown rendering, diff views, and shell output cards. / 实时 Markdown 渲染、diff 视图与命令输出卡片。
+- **🗂️ Project workspaces · 项目工作区** — Point the agent at any folder; it reads, edits, and tests against your real code. / 指向任意文件夹，Agent 在真实代码上读写与验证。
+- **🧰 Skills & MCP · 技能与 MCP** — Extend the agent with custom skills and Model Context Protocol servers. / 用自定义技能与 MCP 服务器扩展 Agent 能力。
+- **🧠 Memory center · 记忆中心** — Persistent, searchable memory across sessions. / 跨会话持久、可搜索的记忆。
+- **📎 Attachments · 附件** — Drag & drop files and images into any conversation. / 任意会话中拖拽文件与图片。
+
 ---
-## 快速开始
-### 1. 装依赖
-```powershell
-# Windows PowerShell
+
+## Screenshots · 截图
+
+| Home · 首页 | Chat · 对话 | Settings · 设置 |
+|:---:|:---:|:---:|
+| ![home](assets/screenshots/home.png) | ![chat](assets/screenshots/chat.png) | ![settings](assets/screenshots/settings.png) |
+
+---
+
+## Downloads · 下载
+
+Latest release: **v0.9.0**
+
+| Platform | Installer |
+|---|---|
+| macOS (Apple Silicon) | [Stellara Work-0.9.0-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| Windows (x64) | [Stellara Work-Setup-0.9.0.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
+
+> Note: builds are currently unsigned. On macOS, right-click → Open to bypass Gatekeeper; on Windows, click "More info → Run anyway" in SmartScreen.
+>
+> 提示：当前安装包未签名。macOS 请右键 → 打开；Windows 在 SmartScreen 中选择"更多信息 → 仍要运行"。
+
+---
+
+## Quick Start · 快速开始
+
+### Prerequisites · 环境要求
+
+- Node.js 20+
+- Windows: Python 3.x + Visual Studio Build Tools (Desktop development with C++) — required only for the first `npm install` of `better-sqlite3`
+- macOS / Linux: nothing extra — `better-sqlite3` ships prebuilt binaries
+
+### 1. Install · 安装依赖
+
+```bash
 npm install
 ```
+
+On macOS/Linux you can also use `bash setup.sh` (checks Node, installs deps, runs tests).
+
+### 2. Run · 启动
+
 ```bash
-# macOS / Linux
-bash setup.sh
-# 或手动：npm install（better-sqlite3 自带 darwin prebuilds，无需编译）
-```
-> ⚠️ （仅 Windows）首次 `npm install` 会编译 `better-sqlite3`（原生模块），需要：
-> - Node.js 20+（已验证 v24.14.1）
-> - Python 3.x
-> - Visual Studio Build Tools（"使用 C++ 的桌面开发"工作负载）
-### 2. 配置模型
-**首次启动引导**（UI 推荐）：直接 `npm run dev`，在 onboarding 流程里选模型 + 填 API key。
-**手动配置**（开发期）：应用配置存 `~/.stellara/config.json`（模型列表 + 活跃模型），API key 存 `~/.stellara/.env`（仅主进程读写）：
-```json
-{
-  "activeModelId": "deepseek-v4-pro",
-  "models": [
-    {
-      "id": "deepseek-v4-pro",
-      "label": "DeepSeek-v4-Pro",
-      "baseUrl": "https://api.deepseek.com",
-      "model": "deepseek-v4-pro"
-    }
-  ]
-}
-```
-### 3. 跑起来
-```powershell
-# 开发模式（Vite HMR + Electron）
 npm run dev
-# W1 验收脚本（不打开 Electron，跑通后端 agent 循环）
-npm run verify:w1
-# 跑测试
-npm test
 ```
----
-## 跨平台
-**数据位置**：
 
-| 平台 | 数据目录 | 日志 |
-|------|----------|------|
-| Windows | `%APPDATA%\Stellara Work`（旧版 `~/.stellara`） | `%APPDATA%\Stellara Work\logs` |
-| macOS | `~/Library/Application Support/Stellara Work` | `~/Library/Logs/Stellara Work/main.log` |
+On first launch, the onboarding flow walks you through choosing a model provider and entering your API key. Your key is stored encrypted and is only ever read by the main process.
 
-**打包**：
-- `npm run package:mac` — 产出 macOS dmg/zip（x64 + arm64），只能在 macOS 上构建
-- `npm run package:win` — 在 macOS 上交叉构建 Windows NSIS 安装包；无签名证书时设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`
+首次启动时按引导选择模型并填入 API key 即可。密钥加密存储，仅主进程可读。
 
-**数据迁移**：旧 `~/.stellara` 数据（config.json + .env）在首次启动时自动迁移到当前平台的数据目录。macOS 迁移与常见问题详见 [`docs/macos-migration.md`](./docs/macos-migration.md)。
----
-## 目录结构
+### 3. Scripts · 常用脚本
+
+```bash
+npm run dev        # dev mode (Vite HMR + Electron)
+npm test           # run tests
+npm run typecheck  # type check both processes
+npm run package:mac  # build macOS dmg/zip (macOS only)
+npm run package:win  # cross-build Windows NSIS installer (works on macOS, no wine)
 ```
-stellara-work/
-├── electron/                    # Electron 主进程
-│   ├── main.ts                  # 入口 + IPC handlers
-│   ├── preload.ts               # contextBridge 暴露
-│   ├── agent/                   # Agent 循环 + Tools
-│   │   ├── loop.ts
-│   │   ├── plan.ts
-│   │   └── tools/
-│   │       ├── fs.ts            # read / write / edit
-│   │       ├── shell.ts         # run_command
-│   │       └── search.ts        # search_files
-│   ├── llm/                     # LLM 客户端
-│   │   ├── openai-compat.ts     # OpenAI 兼容协议 + SSE
-│   │   ├── endpoint.ts          # base_url 拼接
-│   │   └── presets.ts           # 4 内置 + 1 自定义
-│   └── config/                  # .env / config.json 加载
-├── src/                         # React 渲染进程
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── styles/
-├── shared/                      # 主/渲染进程共享类型
-│   └── ipc.ts                   # IPC 接口定义
-├── scripts/
-│   └── verify-w1.ts             # W1 验收脚本
-├── assets/
-│   ├── icon.jpg                 # 产品图标
-│   └── build-icons.ps1          # 多尺寸图标生成
-├── plan.md                      # 完整规划文档
-└── package.json
+
+---
+
+## Built-in Model Presets · 内置模型预设
+
+| Model | Provider | base_url |
+|---|---|---|
+| GLM-5.2 | Zhipu BigModel | `https://open.bigmodel.cn/api/paas/v4` |
+| DeepSeek-v4-Pro | DeepSeek | `https://api.deepseek.com` |
+| Kimi-K3 | Moonshot | `https://api.moonshot.cn` |
+| MiniMax-M3 | MiniMax | `https://api.minimaxi.com/v1` |
+| Custom · 自定义 | yours | any OpenAI-compatible endpoint |
+
+---
+
+## Security Model · 安全模型
+
+- `nodeIntegration: false` — the renderer cannot `require('fs')`
+- `contextIsolation: true` — renderer JS is isolated from preload
+- `sandbox: true` — the renderer runs sandboxed
+- API keys live in the main process; the renderer can never read them via IPC
+- All dangerous operations (file writes, shell commands) require explicit approval
+
+---
+
+## Architecture · 架构
+
 ```
+electron/                  # Electron main process
+├── main.ts                # entry + IPC handlers
+├── preload.ts             # contextBridge API
+├── agent/                 # agent loop, planning, tools (fs / shell / grep / git)
+├── llm/                   # OpenAI-compatible client + SSE streaming
+├── memory/                # persistent memory store
+└── config/                # encrypted key storage (safeStorage)
+src/                       # React renderer
+├── components/            # chat, plan cards, settings, onboarding, home
+├── styles/                # design tokens + workbench CSS
+└── lib/                   # renderer utilities
+shared/                    # IPC contract shared by both processes
+```
+
+Stack: Electron · React 19 · TypeScript · Vite · better-sqlite3 · CodeMirror 6
+
 ---
-## 内置模型预设
-| 模型 | 厂商 | base_url |
-|------|------|----------|
-| **GLM-5.2** | 智谱 BigModel | `https://open.bigmodel.cn/api/paas/v4` |
-| **DeepSeek-v4-Pro** | DeepSeek | `https://api.deepseek.com` |
-| **Kimi-K3** | 月之暗面 Moonshot | `https://api.moonshot.cn` |
-| **MiniMax-M3** | MiniMax | `https://api.minimaxi.com/v1` |
-| **自定义** | 用户填 | 任意 OpenAI 兼容 base_url |
+
+## Documentation · 文档
+
+- [macOS migration guide · macOS 迁移指南](docs/macos-migration.md)
+- [Contributing · 贡献指南](CONTRIBUTING.md)
+- [Changelog · 变更记录](CHANGELOG.md)
+
 ---
-## 安全模型
-- `nodeIntegration: false` - 渲染进程不能 `require('fs')`
-- `contextIsolation: true` - 渲染进程 JS 与 preload 隔离
-- `sandbox: true` - 渲染进程跑沙箱
-- API key 永远在主进程，渲染进程通过 IPC 调用拿不到 key
-- 所有危险操作（写文件、shell）走批准流程
----
-## License
-UNLICENSED · 个人项目
+
+## License · 许可证
+
+[MIT](LICENSE) © Stellara Work

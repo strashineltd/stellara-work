@@ -1,11 +1,10 @@
 {
   "name": "stellara-work",
   "version": "0.9.0",
-  "description": "数据本地的 Codex 风格桌面 Agent（Windows / macOS）（GLM-5.2 / DeepSeek-v4-Pro / Kimi-K3 / MiniMax-M3 + 自定义模型）",
+  "description": "A local-first, Codex-style desktop agent for Windows and macOS. Bring your own OpenAI-compatible API key.",
   "main": "electron/dist/electron/main.js",
   "author": "Stellara Work",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c blue,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
