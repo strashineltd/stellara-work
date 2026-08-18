@@ -1,6 +1,6 @@
 {
   "name": "stellara-work",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "A local-first, Codex-style desktop agent for Windows and macOS. Bring your own OpenAI-compatible API key.",
   "main": "electron/dist/electron/main.js",
   "author": "Stellara Work",
