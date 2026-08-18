@@ -68,5 +68,5 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --title "Stellara Work ${{ github.ref_name }}" \
             --notes "自动构建发布：macOS (arm64) 与 Windows (x64)。" \
-            dist-assets/* --clobber || \
+            dist-assets/* || \
           gh release upload "${{ github.ref_name }}" dist-assets/* --clobber
