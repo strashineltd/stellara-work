@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import type { FsNode } from '../../shared/ipc';
 import { FileTreeNode, formatSize } from './FileTreeNode';
 import { Icon } from './Icon';
+import { NewEntryMenu } from './files/NewEntryMenu';
 
 interface FileTreeModalProps {
   workDir: string;
@@ -22,13 +23,16 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadTree = useCallback(() => {
+    setTreeError(null);
     window.electronAPI.fs.listTree(workDir, 4)
-      .then((t) => { if (!cancelled) setTree(t); })
-      .catch((e) => { if (!cancelled) setTreeError(e instanceof Error ? e.message : String(e)); });
-    return () => { cancelled = true; };
+      .then((t) => setTree(t))
+      .catch((e) => setTreeError(e instanceof Error ? e.message : String(e)));
   }, [workDir]);
+
+  useEffect(() => {
+    loadTree();
+  }, [loadTree]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -73,9 +77,12 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
       >
         <div className="file-tree-header">
           <h3 id="file-tree-title">文件浏览 · {workDir}</h3>
-          <button className="btn-icon" onClick={onClose} type="button" title="关闭" aria-label="关闭文件浏览" autoFocus>
-            <Icon name="x" />
-          </button>
+          <div className="file-tree-header__actions">
+            <NewEntryMenu workDir={workDir} onCreated={loadTree} />
+            <button className="btn-icon" onClick={onClose} type="button" title="关闭" aria-label="关闭文件浏览" autoFocus>
+              <Icon name="x" />
+            </button>
+          </div>
         </div>
         <div className="file-tree-body">
           <div className="file-tree-pane">

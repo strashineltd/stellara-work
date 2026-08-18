@@ -150,6 +150,7 @@ export function installDevPreviewApi(): void {
       readFile: async () => ({ content: '// UI preview', size: 13, truncated: false }),
       openPath: async () => true,
       createFile: async (workDir, relativePath) => ({ path: `${workDir}${sep}${relativePath.replace(/\//g, sep)}` }),
+      mkdir: async (workDir, relativePath) => `${workDir}${sep}${relativePath.replace(/\//g, sep)}`,
     },
     attachments: {
       add: async (sessionId, _workDir, filePaths) => ({

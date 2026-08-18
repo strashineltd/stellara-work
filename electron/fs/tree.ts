@@ -178,3 +178,47 @@ export async function createEmptyFile(
 
   return { path: check.realPath };
 }
+
+/**
+ * 在工作目录内安全创建新目录。
+ * - 只接受相对路径（禁止绝对路径与 .. 越界）
+ * - 父目录必须已经存在
+ * - 目标已存在时抛错（mkdir 的 EEXIST），绝不覆盖
+ */
+export async function createDirectory(
+  workDir: string,
+  relativePath: string,
+): Promise<{ path: string }> {
+  const requested = relativePath.trim();
+  if (!requested) throw new Error('请输入文件夹名');
+  if (requested.length > 240) throw new Error('文件夹路径不能超过 240 个字符');
+  if (requested.includes('\0')) throw new Error('文件夹路径包含无效字符');
+  if (path.isAbsolute(requested)) throw new Error('请输入工作目录内的相对路径');
+
+  const root = path.resolve(workDir);
+  const resolved = resolvePath(requested, root);
+  if (resolved === root) throw new Error('请输入有效的文件夹名');
+
+  const check = await verifyWritePath(resolved, root);
+  if (!check.ok) throw new Error(check.error);
+
+  const parent = path.dirname(check.realPath);
+  let parentStat;
+  try {
+    parentStat = await fs.stat(parent);
+  } catch {
+    throw new Error('父目录不存在，请先选择已有目录');
+  }
+  if (!parentStat.isDirectory()) throw new Error('父路径不是目录');
+
+  try {
+    await fs.mkdir(check.realPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') throw new Error('文件夹已存在，请使用其他名称');
+    if (code === 'ENOENT') throw new Error('父目录不存在，请先选择已有目录');
+    throw error;
+  }
+
+  return { path: check.realPath };
+}

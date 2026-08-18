@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createEmptyFile, listTree, readFileContent } from './tree';
+import { createDirectory, createEmptyFile, listTree, readFileContent } from './tree';
 
 let tmpDir: string;
 
@@ -199,5 +199,35 @@ describe('createEmptyFile', () => {
   it('rejects traversal and missing parent directories', async () => {
     await expect(createEmptyFile(tmpDir, '../outside.txt')).rejects.toThrow(/超出/);
     await expect(createEmptyFile(tmpDir, 'missing/file.txt')).rejects.toThrow(/父目录不存在/);
+  });
+});
+
+describe('createDirectory', () => {
+  it('creates a directory inside an existing work directory', async () => {
+    const result = await createDirectory(tmpDir, 'new-folder');
+    expect(result.path).toBe(path.join(tmpDir, 'new-folder'));
+    expect((await fs.stat(result.path)).isDirectory()).toBe(true);
+  });
+
+  it('creates a directory in an existing nested directory', async () => {
+    await fs.mkdir(path.join(tmpDir, 'docs'));
+    const result = await createDirectory(tmpDir, 'docs/notes');
+    expect(result.path).toBe(path.join(tmpDir, 'docs', 'notes'));
+    expect((await fs.stat(result.path)).isDirectory()).toBe(true);
+  });
+
+  it('rejects an existing target', async () => {
+    await fs.mkdir(path.join(tmpDir, 'exists'));
+    await expect(createDirectory(tmpDir, 'exists')).rejects.toThrow(/已存在/);
+  });
+
+  it('rejects absolute paths', async () => {
+    const abs = path.join(tmpDir, 'evil');
+    await expect(createDirectory(tmpDir, abs)).rejects.toThrow(/相对路径/);
+  });
+
+  it('rejects traversal and missing parent directories', async () => {
+    await expect(createDirectory(tmpDir, '../outside')).rejects.toThrow(/超出/);
+    await expect(createDirectory(tmpDir, 'missing/sub')).rejects.toThrow(/父目录不存在/);
   });
 });

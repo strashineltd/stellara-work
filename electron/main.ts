@@ -436,6 +436,15 @@ function registerIpcHandlers(): void {
     return createEmptyFile(workDir, relativePath);
   });
 
+  handle('fs:mkdir', async (_e, workDir: string, relativePath: string) => {
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    if (typeof relativePath !== 'string') throw new Error('文件夹名无效');
+    await assertWorkDirAllowed(workDir);
+    const { createDirectory } = await import('./fs/tree');
+    const result = await createDirectory(workDir, relativePath);
+    return result.path;
+  });
+
   // Attachments: 校验 + 复制到 workDir/.stellara-attachments/{sessionId}/
   handle('attachments:add', async (_e, sessionId: string, workDir: string, filePaths: string[]) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');

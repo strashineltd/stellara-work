@@ -3,6 +3,7 @@ import type { FsNode } from '../../../shared/ipc';
 import { filePreviewCache } from '../../lib/file-preview-cache';
 import { FileTreeNode } from '../FileTreeNode';
 import { Icon } from '../Icon';
+import { NewEntryMenu } from './NewEntryMenu';
 
 export interface SidebarFileViewProps {
   workDir: string | null;
@@ -90,6 +91,7 @@ export function SidebarFileView({ workDir, onOpenFullScreen }: SidebarFileViewPr
         >
           <Icon name="refresh" size={14} />
         </button>
+        <NewEntryMenu workDir={workDir ?? ''} disabled={!workDir} onCreated={refresh} />
         <button
           className="btn-icon btn-icon-small"
           type="button"

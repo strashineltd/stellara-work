@@ -190,6 +190,8 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('fs:openPath', workDir, filePath),
     createFile: (workDir: string, relativePath: string): Promise<{ path: string }> =>
       ipcRenderer.invoke('fs:createFile', workDir, relativePath),
+    mkdir: (workDir: string, relativePath: string): Promise<string> =>
+      ipcRenderer.invoke('fs:mkdir', workDir, relativePath),
   },
   attachments: {
     add: (sessionId: string, workDir: string, filePaths: string[]) =>

@@ -25,6 +25,8 @@ function installApi() {
     listTree: vi.fn().mockResolvedValue(TREE),
     readFile: vi.fn().mockResolvedValue({ content: 'BODY', size: 5, truncated: false }),
     openPath: vi.fn().mockResolvedValue(true),
+    createFile: vi.fn().mockResolvedValue({ path: '/w/notes.md' }),
+    mkdir: vi.fn().mockResolvedValue('/w/docs'),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: { fs: mocks } as unknown as ElectronAPI,
@@ -62,6 +64,29 @@ function rowByName(container: HTMLElement, name: string): Element {
     if (row.textContent?.includes(name)) return row;
   }
   throw new Error(`row not found: ${name}`);
+}
+
+async function fireClick(element: Element | null) {
+  if (!element) throw new Error('Element not found for click');
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
+function fireInput(element: HTMLInputElement | null, value: string) {
+  if (!element) throw new Error('Input not found');
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function menuItem(container: HTMLElement, text: string): Element {
+  const items = container.querySelectorAll('.new-entry-menu__item');
+  for (const item of items) {
+    if (item.textContent?.includes(text)) return item;
+  }
+  throw new Error(`menu item not found: ${text}`);
 }
 
 describe('SidebarFileView', () => {
@@ -135,5 +160,79 @@ describe('SidebarFileView', () => {
     expect(mocks.listTree).toHaveBeenLastCalledWith('/w2', 4);
     expect(filePreviewCache.get('/w2', '/w2/x.ts')).toBeNull();
     expect(container.textContent).toContain('Workspace');
+  });
+
+  it('disables the new entry trigger when there is no work directory', async () => {
+    const { container } = await render(<SidebarFileView workDir={null} />);
+    const trigger = container.querySelector('.new-entry-menu__trigger') as HTMLButtonElement;
+    expect(trigger).toBeTruthy();
+    expect(trigger.disabled).toBe(true);
+  });
+
+  it('opens the new entry dropdown with file and folder options', async () => {
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+
+    await fireClick(container.querySelector('.new-entry-menu__trigger'));
+    expect(container.textContent).toContain('新建文件');
+    expect(container.textContent).toContain('新建文件夹');
+  });
+
+  it('creates a new file and refreshes the tree on success', async () => {
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+
+    await fireClick(container.querySelector('.new-entry-menu__trigger'));
+    await fireClick(menuItem(container, '新建文件'));
+    fireInput(container.querySelector('.new-entry-menu__input') as HTMLInputElement, 'notes.md');
+    await fireClick(container.querySelector('.new-entry-menu__confirm'));
+
+    expect(mocks.createFile).toHaveBeenCalledWith('/w', 'notes.md');
+    expect(mocks.listTree).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('.new-entry-menu__input')).toBeNull();
+  });
+
+  it('creates a new folder via fs.mkdir and refreshes the tree on success', async () => {
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+
+    await fireClick(container.querySelector('.new-entry-menu__trigger'));
+    await fireClick(menuItem(container, '新建文件夹'));
+    fireInput(container.querySelector('.new-entry-menu__input') as HTMLInputElement, 'docs');
+    await fireClick(container.querySelector('.new-entry-menu__confirm'));
+
+    expect(mocks.mkdir).toHaveBeenCalledWith('/w', 'docs');
+    expect(mocks.listTree).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('.new-entry-menu__input')).toBeNull();
+  });
+
+  it('shows an error and does not call the API for invalid names', async () => {
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+
+    await fireClick(container.querySelector('.new-entry-menu__trigger'));
+    await fireClick(menuItem(container, '新建文件'));
+
+    fireInput(container.querySelector('.new-entry-menu__input') as HTMLInputElement, '../evil.md');
+    await fireClick(container.querySelector('.new-entry-menu__confirm'));
+    expect(container.querySelector('.new-entry-menu__error')?.textContent).toContain('不能包含');
+    expect(mocks.createFile).not.toHaveBeenCalled();
+    expect(mocks.mkdir).not.toHaveBeenCalled();
+
+    fireInput(container.querySelector('.new-entry-menu__input') as HTMLInputElement, '   ');
+    await fireClick(container.querySelector('.new-entry-menu__confirm'));
+    expect(container.querySelector('.new-entry-menu__error')?.textContent).toContain('请输入名称');
+    expect(mocks.createFile).not.toHaveBeenCalled();
+  });
+
+  it('shows the API error and keeps the input open on failure', async () => {
+    mocks.createFile.mockRejectedValueOnce(new Error('文件已存在，请使用其他名称'));
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+
+    await fireClick(container.querySelector('.new-entry-menu__trigger'));
+    await fireClick(menuItem(container, '新建文件'));
+    fireInput(container.querySelector('.new-entry-menu__input') as HTMLInputElement, 'dup.md');
+    await fireClick(container.querySelector('.new-entry-menu__confirm'));
+
+    expect(mocks.createFile).toHaveBeenCalledWith('/w', 'dup.md');
+    expect(container.querySelector('.new-entry-menu__error')?.textContent).toContain('文件已存在');
+    expect(container.querySelector('.new-entry-menu__input')).toBeTruthy();
+    expect(mocks.listTree).toHaveBeenCalledTimes(1);
   });
 });

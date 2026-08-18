@@ -677,6 +677,7 @@ export interface ElectronAPI {
     readFile: (workDir: string, path: string, maxBytes?: number) => Promise<{ content: string; size: number; truncated: boolean }>;
     openPath: (workDir: string, path: string) => Promise<boolean>;
     createFile: (workDir: string, relativePath: string) => Promise<{ path: string }>;
+    mkdir: (workDir: string, relativePath: string) => Promise<string>;
   };
   attachments: {
     /** 校验 + 复制到附件目录，返回附件元数据 */
