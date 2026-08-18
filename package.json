@@ -134,5 +134,14 @@
   "allowScripts": {
     "better-sqlite3@13.0.2": true,
     "fsevents@2.3.3": true
+  },
+  "overrides": {
+    "fast-uri": "3.1.5",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26",
+    "brace-expansion": "2.1.4",
+    "minimatch@3": {
+      "brace-expansion": "1.1.18"
+    }
   }
 }

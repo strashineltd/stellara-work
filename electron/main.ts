@@ -10,6 +10,8 @@ import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { resolveSessionModel } from './chat/session-context';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
+import { isSafeExternalUrl } from './security/url-guard';
+import { isTrustedIpcSender } from './security/ipc-guard';
 import type {
   AppInfo,
   ModelConfig,
@@ -134,7 +136,11 @@ function createWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      shell.openExternal(url);
+    } else {
+      log.warn(`blocked window.open for unsafe url: ${url}`);
+    }
     return { action: 'deny' };
   });
 
@@ -148,8 +154,33 @@ function createWindow(): void {
 // ============================================
 
 function registerIpcHandlers(): void {
+  const rawHandle = ipcMain.handle.bind(ipcMain);
+  const rawOn = ipcMain.on.bind(ipcMain);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handle = (channel: string, listener: (...args: any[]) => any): void => {
+    rawHandle(channel, (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => {
+      if (!isTrustedIpcSender(event.sender, mainWindow?.webContents)) {
+        log.warn(`blocked ipc from untrusted sender: ${channel}`);
+        throw new Error('IPC 请求来源不受信任，已拒绝');
+      }
+      return listener(event, ...args);
+    });
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const on = (channel: string, listener: (...args: any[]) => void): void => {
+    rawOn(channel, (event: Electron.IpcMainEvent, ...args: unknown[]) => {
+      if (!isTrustedIpcSender(event.sender, mainWindow?.webContents)) {
+        log.warn(`blocked ipc event from untrusted sender: ${channel}`);
+        return;
+      }
+      listener(event, ...args);
+    });
+  };
+
   // App info
-  ipcMain.handle('app:getInfo', async (): Promise<AppInfo> => {
+  handle('app:getInfo', async (): Promise<AppInfo> => {
     const appDataPath = app.getPath('userData');
     await fs.mkdir(appDataPath, { recursive: true });
     return {
@@ -161,7 +192,7 @@ function registerIpcHandlers(): void {
   });
 
   // Models（v1，保留兼容但走 v2 数据）
-  ipcMain.handle('models:list', async (): Promise<ModelListResponse> => {
+  handle('models:list', async (): Promise<ModelListResponse> => {
     const { MODEL_PRESETS } = await import('./llm/presets');
     const { loadConfig } = await import('./config/config-v2');
     const { getKey } = await import('./config/secrets');
@@ -185,7 +216,7 @@ function registerIpcHandlers(): void {
     return { presets: MODEL_PRESETS, configured };
   });
 
-  ipcMain.handle('models:configure', async (_e, config: ModelConfig) => {
+  handle('models:configure', async (_e, config: ModelConfig) => {
     try {
       const { configureModel } = await import('./config/model-configure');
       const result = await configureModel(config);
@@ -196,7 +227,7 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('models:test', async (_e, config: ModelConfig) => {
+  handle('models:test', async (_e, config: ModelConfig) => {
     try {
       const { OpenAICompatClient } = await import('./llm/openai-compat');
       const client = new OpenAICompatClient(config);
@@ -207,7 +238,7 @@ function registerIpcHandlers(): void {
   });
 
   // Models v2
-  ipcMain.handle('models:getAll', async () => {
+  handle('models:getAll', async () => {
     const { loadConfig } = await import('./config/config-v2');
     const { listKeys } = await import('./config/secrets');
     const cfg = await loadConfig();
@@ -225,7 +256,7 @@ function registerIpcHandlers(): void {
     }));
   });
 
-  ipcMain.handle('models:remove', async (_e, modelId: string) => {
+  handle('models:remove', async (_e, modelId: string) => {
     const { removeModel } = await import('./config/config-v2');
     const { deleteKey } = await import('./config/secrets');
     await removeModel(modelId);
@@ -233,13 +264,13 @@ function registerIpcHandlers(): void {
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('models:setActive', async (_e, modelId: string) => {
+  handle('models:setActive', async (_e, modelId: string) => {
     const { setActiveModel } = await import('./config/config-v2');
     await setActiveModel(modelId);
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('models:updateWorkDir', async (_e, modelId: string, workDir: string) => {
+  handle('models:updateWorkDir', async (_e, modelId: string, workDir: string) => {
     const { loadConfig, saveConfig } = await import('./config/config-v2');
     const cfg = await loadConfig();
     const idx = cfg.models.findIndex((m) => m.id === modelId);
@@ -248,13 +279,13 @@ function registerIpcHandlers(): void {
     await saveConfig(cfg);
   });
 
-  ipcMain.handle('models:updateKey', async (_e, modelId: string, newKey: string) => {
+  handle('models:updateKey', async (_e, modelId: string, newKey: string) => {
     const { setKey } = await import('./config/secrets');
     await setKey(modelId, newKey);
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('models:updateContextWindow', async (_e, modelId: string, contextWindow: number) => {
+  handle('models:updateContextWindow', async (_e, modelId: string, contextWindow: number) => {
     const { loadConfig, saveConfig } = await import('./config/config-v2');
     const cfg = await loadConfig();
     const idx = cfg.models.findIndex((m) => m.id === modelId);
@@ -265,7 +296,7 @@ function registerIpcHandlers(): void {
   });
 
   // Chat
-  ipcMain.handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
+  handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
     const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     void runAgentLoopForIpc(request, configured, streamId);
@@ -273,14 +304,14 @@ function registerIpcHandlers(): void {
   });
 
   // P0-2: 取消任务
-  ipcMain.on('chat:abort', (_e, streamId: string) => {
+  on('chat:abort', (_e, streamId: string) => {
     if (chatStreams.abort(streamId)) {
       log.info(`[chat:abort] stream ${streamId} 已取消`);
     }
   });
 
   // P0-1: 审批响应
-  ipcMain.on('approval:respond', (_e, approvalId: string, approved: boolean) => {
+  on('approval:respond', (_e, approvalId: string, approved: boolean) => {
     if (chatStreams.respond(approvalId, approved)) {
       log.info(`[approval:respond] ${approvalId} → ${approved ? '同意' : '拒绝'}`);
     }
@@ -288,7 +319,7 @@ function registerIpcHandlers(): void {
 
   // Tools (仅开发环境，绕过 LLM 直调)
   if (isDev) {
-    ipcMain.handle('tools:invoke', async (_e, name: ToolName, args: ToolArgs): Promise<ToolResult> => {
+    handle('tools:invoke', async (_e, name: ToolName, args: ToolArgs): Promise<ToolResult> => {
       const { invokeTool } = await import('./agent/tools');
       const configured = await loadModelsConfig();
       const cwd = configured?.workDir ?? process.cwd();
@@ -297,7 +328,7 @@ function registerIpcHandlers(): void {
   }
 
   // Dialog: 选工作目录
-  ipcMain.handle('dialog:openDirectory', async (): Promise<string | null> => {
+  handle('dialog:openDirectory', async (): Promise<string | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择工作目录',
@@ -308,7 +339,7 @@ function registerIpcHandlers(): void {
   });
 
   // Dialog: 多选附件（路径校验交给 attachments:add）
-  ipcMain.handle('dialog:openAttachmentFiles', async (): Promise<string[] | null> => {
+  handle('dialog:openAttachmentFiles', async (): Promise<string[] | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择附件',
@@ -318,7 +349,7 @@ function registerIpcHandlers(): void {
     return result.filePaths;
   });
 
-  ipcMain.handle('dialog:openFile', async (_e, workDir: string): Promise<string | null> => {
+  handle('dialog:openFile', async (_e, workDir: string): Promise<string | null> => {
     if (!mainWindow) return null;
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     await assertWorkDirAllowed(workDir);
@@ -337,7 +368,7 @@ function registerIpcHandlers(): void {
     return check.realPath;
   });
 
-  ipcMain.handle('dialog:selectProjectFile', async (): Promise<ProjectFileSelection | null> => {
+  handle('dialog:selectProjectFile', async (): Promise<ProjectFileSelection | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择项目入口文件',
@@ -353,7 +384,7 @@ function registerIpcHandlers(): void {
   });
 
   // 文件夹模式：选择项目工作区目录，自动探测 README.md 作为可选入口文件
-  ipcMain.handle('dialog:selectProjectDir', async (): Promise<{ workDir: string; entryFile?: string } | null> => {
+  handle('dialog:selectProjectDir', async (): Promise<{ workDir: string; entryFile?: string } | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择项目文件夹',
@@ -373,7 +404,7 @@ function registerIpcHandlers(): void {
     return { workDir, entryFile };
   });
 
-  ipcMain.handle('dialog:createProjectFile', async (): Promise<ProjectFileSelection | null> => {
+  handle('dialog:createProjectFile', async (): Promise<ProjectFileSelection | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showSaveDialog(mainWindow, {
       title: '新建项目入口文件',
@@ -401,20 +432,20 @@ function registerIpcHandlers(): void {
   });
 
   // FS: 列目录树 / 读文件（W4）—— workDir 必须来自已配置的工作区
-  ipcMain.handle('fs:listTree', async (_e, cwd: string, maxDepth?: number) => {
+  handle('fs:listTree', async (_e, cwd: string, maxDepth?: number) => {
     await assertWorkDirAllowed(cwd);
     const { listTree } = await import('./fs/tree');
     return listTree(cwd, maxDepth);
   });
 
-  ipcMain.handle('fs:readFile', async (_e, workDir: string, filePath: string, maxBytes?: number) => {
+  handle('fs:readFile', async (_e, workDir: string, filePath: string, maxBytes?: number) => {
     await assertWorkDirAllowed(workDir);
     const { readFileContent } = await import('./fs/tree');
     return readFileContent(workDir, filePath, maxBytes);
   });
 
   // FS: 用系统默认应用打开（文件用默认 app，目录用资源管理器）
-  ipcMain.handle('fs:openPath', async (_e, workDir: string, filePath: string) => {
+  handle('fs:openPath', async (_e, workDir: string, filePath: string) => {
     await assertWorkDirAllowed(workDir);
     const { isWithinDir } = await import('./fs/path-security');
     const root = path.resolve(workDir);
@@ -431,7 +462,7 @@ function registerIpcHandlers(): void {
     return true;
   });
 
-  ipcMain.handle('fs:createFile', async (_e, workDir: string, relativePath: string) => {
+  handle('fs:createFile', async (_e, workDir: string, relativePath: string) => {
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (typeof relativePath !== 'string') throw new Error('文件名无效');
     await assertWorkDirAllowed(workDir);
@@ -440,7 +471,7 @@ function registerIpcHandlers(): void {
   });
 
   // Attachments: 校验 + 复制到 workDir/.stellara-attachments/{sessionId}/
-  ipcMain.handle('attachments:add', async (_e, sessionId: string, workDir: string, filePaths: string[]) => {
+  handle('attachments:add', async (_e, sessionId: string, workDir: string, filePaths: string[]) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (!Array.isArray(filePaths) || filePaths.length === 0 || filePaths.some((p) => typeof p !== 'string')) {
@@ -452,7 +483,7 @@ function registerIpcHandlers(): void {
     return { attachments };
   });
 
-  ipcMain.handle('attachments:readImage', async (_e, sessionId: string, workDir: string, id: string) => {
+  handle('attachments:readImage', async (_e, sessionId: string, workDir: string, id: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (typeof id !== 'string' || !id.trim()) throw new Error('附件无效');
@@ -461,7 +492,7 @@ function registerIpcHandlers(): void {
     return readAttachmentImage(sessionId, workDir, id);
   });
 
-  ipcMain.handle('attachments:open', async (_e, sessionId: string, workDir: string, id: string) => {
+  handle('attachments:open', async (_e, sessionId: string, workDir: string, id: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (typeof id !== 'string' || !id.trim()) throw new Error('附件无效');
@@ -474,7 +505,7 @@ function registerIpcHandlers(): void {
   });
 
   // Projects
-  ipcMain.handle('projects:list', async () => {
+  handle('projects:list', async () => {
     const { listProjects } = await import('./store/db');
     const projects = listProjects();
     const { listSessions } = await import('./store/db');
@@ -489,7 +520,7 @@ function registerIpcHandlers(): void {
     }));
   });
 
-  ipcMain.handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile?: string }) => {
+  handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile?: string }) => {
     if (typeof args?.name !== 'string' || !args.name.trim()) throw new Error('项目名称不能为空');
     if (typeof args?.workDir !== 'string' || !args.workDir.trim()) throw new Error('请选择项目文件夹');
     const { v4: uuid } = await import('uuid');
@@ -507,7 +538,7 @@ function registerIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle('projects:updateFile', async (_e, id: string, selection: ProjectFileSelection) => {
+  handle('projects:updateFile', async (_e, id: string, selection: ProjectFileSelection) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
     if (typeof selection?.workDir !== 'string' || typeof selection?.path !== 'string') {
       throw new Error('项目文件无效');
@@ -517,13 +548,13 @@ function registerIpcHandlers(): void {
     return updateProjectFile(id.trim(), verified.workDir, verified.path);
   });
 
-  ipcMain.handle('projects:delete', async (_e, id: string) => {
+  handle('projects:delete', async (_e, id: string) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
     const { deleteProject } = await import('./store/db');
     deleteProject(id.trim());
   });
 
-  ipcMain.handle('projects:rename', async (_e, id: string, name: string) => {
+  handle('projects:rename', async (_e, id: string, name: string) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
     if (typeof name !== 'string' || !name.trim()) throw new Error('项目名称不能为空');
     const { renameProject } = await import('./store/db');
@@ -531,7 +562,7 @@ function registerIpcHandlers(): void {
   });
 
   // Sessions
-  ipcMain.handle('sessions:list', async () => {
+  handle('sessions:list', async () => {
     const { listSessions } = await import('./store/db');
     return listSessions().map((s) => ({
       id: s.id,
@@ -544,7 +575,7 @@ function registerIpcHandlers(): void {
     }));
   });
 
-  ipcMain.handle('sessions:get', async (_e, id: string) => {
+  handle('sessions:get', async (_e, id: string) => {
     const { getSession, getMessages } = await import('./store/db');
     const session = getSession(id);
     if (!session) throw new Error(`Session 不存在: ${id}`);
@@ -552,7 +583,7 @@ function registerIpcHandlers(): void {
     return { session, messages };
   });
 
-  ipcMain.handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string; projectId?: string }) => {
+  handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string; projectId?: string }) => {
     const { v4: uuid } = await import('uuid');
     const { createSession, getProject } = await import('./store/db');
     const { getKey } = await import('./config/secrets');
@@ -578,39 +609,39 @@ function registerIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle('sessions:delete', async (_e, id: string) => {
+  handle('sessions:delete', async (_e, id: string) => {
     const { deleteSession } = await import('./store/db');
     deleteSession(id);
   });
 
-  ipcMain.handle('sessions:rename', async (_e, id: string, title: string) => {
+  handle('sessions:rename', async (_e, id: string, title: string) => {
     const { renameSession } = await import('./store/db');
     renameSession(id, title);
   });
 
-  ipcMain.handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
+  handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
     const { saveMessages } = await import('./store/db');
     saveMessages(id, messages);
   });
 
-  ipcMain.handle('sessions:appendMessage', async (_e, id: string, message: MessageRow) => {
+  handle('sessions:appendMessage', async (_e, id: string, message: MessageRow) => {
     const { appendMessage } = await import('./store/db');
     appendMessage({ ...message, sessionId: id });
   });
 
-  ipcMain.handle('sessions:move', async (_e, sessionId: string, projectId: string | null) => {
+  handle('sessions:move', async (_e, sessionId: string, projectId: string | null) => {
     const { moveSession } = await import('./store/db');
     moveSession(sessionId, projectId);
   });
 
   // Settings
-  ipcMain.handle('settings:get', async (): Promise<AppSettings> => {
+  handle('settings:get', async (): Promise<AppSettings> => {
     const { loadConfig } = await import('./config/config-v2');
     const cfg = await loadConfig();
     return cfg.app;
   });
 
-  ipcMain.handle('settings:update', async (_e, partial: Partial<AppSettings>) => {
+  handle('settings:update', async (_e, partial: Partial<AppSettings>) => {
     const { loadConfig, saveConfig } = await import('./config/config-v2');
     const cfg = await loadConfig();
     cfg.app = { ...cfg.app, ...partial };
@@ -618,13 +649,13 @@ function registerIpcHandlers(): void {
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('settings:clearAllData', async () => {
+  handle('settings:clearAllData', async () => {
     const { wipeAllData } = await import('./config/wipe-data');
     await wipeAllData();
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('settings:resetSelective', async (_e, level: 'sessions' | 'memories' | 'all') => {
+  handle('settings:resetSelective', async (_e, level: 'sessions' | 'memories' | 'all') => {
     if (level === 'all') {
       const { wipeAllData } = await import('./config/wipe-data');
       await wipeAllData();
@@ -645,21 +676,21 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('settings:openDataDir', async () => {
+  handle('settings:openDataDir', async () => {
     const { getAppDataDir } = await import('./config/data-dir');
     const dir = getAppDataDir();
     await fs.mkdir(dir, { recursive: true });
     await shell.openPath(dir);
   });
 
-  ipcMain.handle('settings:openLogFile', async (_e, name: 'main' | 'renderer') => {
+  handle('settings:openLogFile', async (_e, name: 'main' | 'renderer') => {
     const logPath = name === 'main'
       ? path.join(app.getPath('logs'), 'main.log')
       : path.join(app.getPath('logs'), 'renderer.log');
     await shell.openPath(logPath);
   });
 
-  ipcMain.handle('settings:collectDiagnostics', async () => {
+  handle('settings:collectDiagnostics', async () => {
     const { loadConfig } = await import('./config/config-v2');
     const { listSessions, countAllMessages } = await import('./store/db');
     const { listKeys } = await import('./config/secrets');
@@ -718,20 +749,20 @@ function registerIpcHandlers(): void {
     return check.realPath;
   }
 
-  ipcMain.handle('skills:list', async (_e, workDir: string) => {
+  handle('skills:list', async (_e, workDir: string) => {
     // 安全：只允许读取已授权项目工作目录内的 skills/
     await assertWorkDirAllowed(workDir);
     const { loadSkills } = await import('./agent/skills');
     return loadSkills(workDir);
   });
 
-  ipcMain.handle('skills:listDetailed', async (_e, workDir: string) => {
+  handle('skills:listDetailed', async (_e, workDir: string) => {
     await assertWorkDirAllowed(workDir);
     const { loadSkillsWithErrors } = await import('./agent/skills');
     return loadSkillsWithErrors(workDir);
   });
 
-  ipcMain.handle('skills:create', async (_e, workDir: string, input: { name: string; description: string; prompt: string }) => {
+  handle('skills:create', async (_e, workDir: string, input: { name: string; description: string; prompt: string }) => {
     await assertWorkDirAllowed(workDir);
     const { buildSkillMarkdown, sanitizeSkillName } = await import('./agent/skills');
     const name = sanitizeSkillName(input.name);
@@ -753,7 +784,7 @@ function registerIpcHandlers(): void {
     return { file };
   });
 
-  ipcMain.handle('skills:update', async (_e, workDir: string, file: string, patch: { name?: string; description?: string; prompt?: string; enabled?: boolean }) => {
+  handle('skills:update', async (_e, workDir: string, file: string, patch: { name?: string; description?: string; prompt?: string; enabled?: boolean }) => {
     await assertWorkDirAllowed(workDir);
     if (path.isAbsolute(file)) throw new Error('技能文件需为相对路径');
     if (!file.endsWith('.md')) throw new Error('旧格式技能仅支持删除');
@@ -764,7 +795,7 @@ function registerIpcHandlers(): void {
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('skills:delete', async (_e, workDir: string, file: string) => {
+  handle('skills:delete', async (_e, workDir: string, file: string) => {
     await assertWorkDirAllowed(workDir);
     if (path.isAbsolute(file)) throw new Error('技能文件需为相对路径');
     const resolved = await assertSkillFile(workDir, file, 'existing');
@@ -773,66 +804,66 @@ function registerIpcHandlers(): void {
   });
 
   // MCP 服务器管理
-  ipcMain.handle('mcp:list', async (): Promise<McpServerConfig[]> => {
+  handle('mcp:list', async (): Promise<McpServerConfig[]> => {
     const { mcpManager } = await import('./mcp/mcp-manager');
     return mcpManager.listServers();
   });
 
-  ipcMain.handle('mcp:add', async (_e, cfg: McpServerConfig) => {
+  handle('mcp:add', async (_e, cfg: McpServerConfig) => {
     const { mcpManager } = await import('./mcp/mcp-manager');
     await mcpManager.addServer(cfg);
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('mcp:update', async (_e, id: string, patch: Partial<McpServerConfig>) => {
+  handle('mcp:update', async (_e, id: string, patch: Partial<McpServerConfig>) => {
     const { mcpManager } = await import('./mcp/mcp-manager');
     await mcpManager.updateServer(id, patch);
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('mcp:remove', async (_e, id: string) => {
+  handle('mcp:remove', async (_e, id: string) => {
     const { mcpManager } = await import('./mcp/mcp-manager');
     await mcpManager.removeServer(id);
     broadcastSettingsChanged();
   });
 
-  ipcMain.handle('mcp:test', async (_e, cfg: McpServerConfig) => {
+  handle('mcp:test', async (_e, cfg: McpServerConfig) => {
     const { mcpManager } = await import('./mcp/mcp-manager');
     return mcpManager.testConnection(cfg);
   });
 
   // Memory OS
-  ipcMain.handle('memory:search', async (_e, query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => {
+  handle('memory:search', async (_e, query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => {
     const { searchMemories } = await import('./memory/memory-store');
     return searchMemories({ query, scope: options?.scope, kind: options?.kind, limit: options?.limit });
   });
 
-  ipcMain.handle('memory:list', async (_e, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) => {
+  handle('memory:list', async (_e, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) => {
     const { listMemories } = await import('./memory/memory-store');
     return listMemories({ scope: options?.scope, kind: options?.kind, limit: options?.limit, offset: options?.offset });
   });
 
-  ipcMain.handle('memory:save', async (_e, memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) => {
+  handle('memory:save', async (_e, memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) => {
     const { saveMemory } = await import('./memory/memory-store');
     return saveMemory(memory);
   });
 
-  ipcMain.handle('memory:update', async (_e, id: string, patch: { content?: string; importance?: number; tags?: string[] }) => {
+  handle('memory:update', async (_e, id: string, patch: { content?: string; importance?: number; tags?: string[] }) => {
     const { updateMemory } = await import('./memory/memory-store');
     updateMemory(id, patch);
   });
 
-  ipcMain.handle('memory:delete', async (_e, id: string) => {
+  handle('memory:delete', async (_e, id: string) => {
     const { deleteMemory } = await import('./memory/memory-store');
     deleteMemory(id);
   });
 
-  ipcMain.handle('memory:stats', async () => {
+  handle('memory:stats', async () => {
     const { getMemoryStats } = await import('./memory/memory-store');
     return getMemoryStats();
   });
 
-  ipcMain.handle('memory:exportSingle', async (_e, id: string): Promise<{ path: string } | null> => {
+  handle('memory:exportSingle', async (_e, id: string): Promise<{ path: string } | null> => {
     const { listMemories } = await import('./memory/memory-store');
     const { memoryToMarkdown, exportFileName } = await import('./memory/memory-md');
     const all = listMemories({ limit: 1000 });
@@ -849,7 +880,7 @@ function registerIpcHandlers(): void {
     return { path: result.filePath };
   });
 
-  ipcMain.handle('memory:exportAll', async (): Promise<{ path: string; count: number } | null> => {
+  handle('memory:exportAll', async (): Promise<{ path: string; count: number } | null> => {
     const { listMemories } = await import('./memory/memory-store');
     const { memoriesToExport, exportAllFileName } = await import('./memory/memory-md');
     const all = listMemories({ limit: 1000 });
@@ -864,7 +895,7 @@ function registerIpcHandlers(): void {
     return { path: result.filePath, count: all.length };
   });
 
-  ipcMain.handle('memory:copyMd', async (_e, id: string): Promise<string> => {
+  handle('memory:copyMd', async (_e, id: string): Promise<string> => {
     const { listMemories } = await import('./memory/memory-store');
     const { memoryToMarkdown } = await import('./memory/memory-md');
     const memory = listMemories({ limit: 1000 }).find((m) => m.id === id);
@@ -1350,6 +1381,10 @@ app.on('web-contents-created', (_e, contents) => {
   contents.on('will-navigate', (event, url) => {
     if (isDev && url.startsWith(RENDERER_DEV_URL)) return;
     event.preventDefault();
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      shell.openExternal(url);
+    } else {
+      log.warn(`blocked navigation to unsafe url: ${url}`);
+    }
   });
 });

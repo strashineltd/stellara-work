@@ -144,7 +144,9 @@ export async function addAttachments(sessionId: string, workDir: string, filePat
 }
 
 /**
- * 解析附件绝对路径：sessionId/id 均经 sanitize，resolve 后必须仍在附件根目录内。
+ * 解析附件绝对路径：sessionId/id 均经 sanitize，resolve 后必须仍在附件根目录内，
+ * 且已存在路径的 realpath 也必须落在根目录内（防 symlink 指向外部文件）。
+ * 返回真实路径供后续读取/打开。
  */
 async function resolveAttachmentPath(sessionId: string, workDir: string, id: string): Promise<string> {
   const root = attachmentRoot(workDir);
@@ -154,7 +156,11 @@ async function resolveAttachmentPath(sessionId: string, workDir: string, id: str
   if (!isWithinDir(resolved, root)) {
     throw new Error(`附件路径越界：${resolved}`);
   }
-  return resolved;
+  const check = await verifyExistingPath(resolved, root);
+  if (!check.ok) {
+    throw new Error(check.error);
+  }
+  return check.realPath;
 }
 
 export async function readAttachmentImage(sessionId: string, workDir: string, id: string): Promise<{ dataUrl: string }> {
@@ -176,9 +182,5 @@ export async function readAttachmentImage(sessionId: string, workDir: string, id
  * 返回附件目录内的绝对路径（由 main handler 调用 shell.openPath）。
  */
 export async function openAttachment(sessionId: string, workDir: string, id: string): Promise<string> {
-  const root = attachmentRoot(workDir);
-  const filePath = await resolveAttachmentPath(sessionId, workDir, id);
-  const check = await verifyExistingPath(filePath, root);
-  if (!check.ok) throw new Error(check.error);
-  return check.realPath;
+  return resolveAttachmentPath(sessionId, workDir, id);
 }

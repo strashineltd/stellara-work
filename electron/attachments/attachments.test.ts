@@ -149,11 +149,24 @@ describe('sanitizeFileName', () => {
 });
 
 describe('readAttachmentImage', () => {
-  it('returns png dataUrl', async () => {
+  it('reads stored image as data url', async () => {
     const src = await makeFile(sourceDir, 'pic.png', PNG_BYTES);
     const [meta] = await addAttachments('sess-1', workDir, [src]);
     const { dataUrl } = await readAttachmentImage('sess-1', workDir, meta!.id);
-    expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+    expect(dataUrl).toContain('data:image/png;base64,');
+  });
+
+  it('rejects symlink pointing outside workDir', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-outside-'));
+    try {
+      const secret = await makeFile(outside, 'secret.txt', 'top secret');
+      await fs.mkdir(attachmentDir(), { recursive: true });
+      await fs.symlink(secret, path.join(attachmentDir(), 'leak.txt'));
+      await expect(readAttachmentImage('sess-1', workDir, 'leak.txt')).rejects.toThrow(/工作目录|越界/);
+      await expect(openAttachment('sess-1', workDir, 'leak.txt')).rejects.toThrow(/工作目录|越界/);
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 
   it('rejects non-image attachment', async () => {

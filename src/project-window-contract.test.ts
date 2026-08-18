@@ -39,10 +39,10 @@ describe('project window cross-layer contract', () => {
     expect(preload).toContain("ipcRenderer.invoke('fs:createFile', workDir, relativePath)");
     expect(preload).toContain("ipcRenderer.invoke('dialog:selectProjectFile')");
     expect(preload).toContain("ipcRenderer.invoke('dialog:createProjectFile')");
-    expect(main).toContain("ipcMain.handle('dialog:openFile'");
-    expect(main).toContain("ipcMain.handle('fs:createFile'");
-    expect(main).toContain("ipcMain.handle('dialog:selectProjectFile'");
-    expect(main).toContain("ipcMain.handle('dialog:createProjectFile'");
+    expect(main).toContain("handle('dialog:openFile'");
+    expect(main).toContain("handle('fs:createFile'");
+    expect(main).toContain("handle('dialog:selectProjectFile'");
+    expect(main).toContain("handle('dialog:createProjectFile'");
     expect(tree).toContain("fs.open(check.realPath, 'wx')");
   });
 
