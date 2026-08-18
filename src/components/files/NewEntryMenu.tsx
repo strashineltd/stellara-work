@@ -123,7 +123,10 @@ export function NewEntryMenu({ workDir, disabled, onCreated }: NewEntryMenuProps
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void submit();
-                if (e.key === 'Escape') close();
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  close();
+                }
               }}
             />
             <button
