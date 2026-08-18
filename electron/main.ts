@@ -368,31 +368,24 @@ function registerIpcHandlers(): void {
     return check.realPath;
   });
 
-  handle('dialog:selectProjectFile', async (): Promise<ProjectFileSelection | null> => {
+  // 统一入口选择：文件或文件夹均可。
+  // 选中文件 → workDir = 文件所在目录，entryFile = 该文件；
+  // 选中文件夹 → workDir = 该文件夹，entryFile = 自动探测 README.md（无则留空）
+  handle('dialog:selectProjectDir', async (): Promise<{ workDir: string; entryFile?: string } | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择项目入口文件',
-      properties: ['openFile'],
+      title: '选择项目文件夹或文件',
+      properties: ['openFile', 'openDirectory'],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
 
     const selected = await fs.realpath(path.resolve(result.filePaths[0]!));
     const stat = await fs.stat(selected);
-    if (!stat.isFile()) throw new Error('选择的路径不是文件');
-    const workDir = await grantWorkDir(path.dirname(selected));
-    return { path: selected, workDir };
-  });
-
-  // 文件夹模式：选择项目工作区目录，自动探测 README.md 作为可选入口文件
-  handle('dialog:selectProjectDir', async (): Promise<{ workDir: string; entryFile?: string } | null> => {
-    if (!mainWindow) return null;
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择项目文件夹',
-      properties: ['openDirectory'],
-    });
-    if (result.canceled || result.filePaths.length === 0) return null;
-
-    const workDir = await grantWorkDir(result.filePaths[0]!);
+    if (stat.isFile()) {
+      const workDir = await grantWorkDir(path.dirname(selected));
+      return { workDir, entryFile: selected };
+    }
+    const workDir = await grantWorkDir(selected);
     let entryFile: string | undefined;
     const readmePath = path.join(workDir, 'README.md');
     try {
@@ -402,33 +395,6 @@ function registerIpcHandlers(): void {
       // 无 README.md → 入口文件留空
     }
     return { workDir, entryFile };
-  });
-
-  handle('dialog:createProjectFile', async (): Promise<ProjectFileSelection | null> => {
-    if (!mainWindow) return null;
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: '新建项目入口文件',
-      defaultPath: 'README.md',
-      buttonLabel: '新建文件',
-    });
-    if (result.canceled || !result.filePath) return null;
-
-    const requested = path.resolve(result.filePath);
-    const realParent = await fs.realpath(path.dirname(requested));
-    const filePath = path.join(realParent, path.basename(requested));
-    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
-    try {
-      handle = await fs.open(filePath, 'wx');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new Error('文件已存在，请更换名称');
-      }
-      throw error;
-    } finally {
-      await handle?.close();
-    }
-    const workDir = await grantWorkDir(realParent);
-    return { path: filePath, workDir };
   });
 
   // FS: 列目录树 / 读文件（W4）—— workDir 必须来自已配置的工作区

@@ -13,6 +13,7 @@ describe('project window cross-layer contract', () => {
   const onboarding = readFileSync(resolve(__dirname, 'components/Onboarding.tsx'), 'utf-8');
   const settings = readFileSync(resolve(__dirname, 'components/settings/SettingsModelsPanel.tsx'), 'utf-8');
   const dataDir = readFileSync(resolve(__dirname, '../electron/config/data-dir.ts'), 'utf-8');
+  const preview = readFileSync(resolve(__dirname, 'dev-preview.ts'), 'utf-8');
 
   it('keeps the project work directory in sidebar summaries and newly created state', () => {
     expect(shared).toMatch(/interface ProjectSummary[\s\S]*?workDir\?: string;/);
@@ -37,13 +38,25 @@ describe('project window cross-layer contract', () => {
   it('uses explicit native project-file grants and exclusive file creation', () => {
     expect(preload).toContain("ipcRenderer.invoke('dialog:openFile', workDir)");
     expect(preload).toContain("ipcRenderer.invoke('fs:createFile', workDir, relativePath)");
-    expect(preload).toContain("ipcRenderer.invoke('dialog:selectProjectFile')");
-    expect(preload).toContain("ipcRenderer.invoke('dialog:createProjectFile')");
     expect(main).toContain("handle('dialog:openFile'");
     expect(main).toContain("handle('fs:createFile'");
-    expect(main).toContain("handle('dialog:selectProjectFile'");
-    expect(main).toContain("handle('dialog:createProjectFile'");
     expect(tree).toContain("fs.open(check.realPath, 'wx')");
+  });
+
+  it('merges the project entry picker into a single selectProjectDir channel', () => {
+    expect(shared).toContain('selectProjectDir:');
+    expect(shared).not.toContain('selectProjectFile:');
+    expect(shared).not.toContain('createProjectFile:');
+    expect(preload).toContain("ipcRenderer.invoke('dialog:selectProjectDir')");
+    expect(preload).not.toContain("ipcRenderer.invoke('dialog:selectProjectFile')");
+    expect(preload).not.toContain("ipcRenderer.invoke('dialog:createProjectFile')");
+    expect(main).toContain("handle('dialog:selectProjectDir'");
+    expect(main).not.toContain("handle('dialog:selectProjectFile'");
+    expect(main).not.toContain("handle('dialog:createProjectFile'");
+    expect(main).toContain("properties: ['openFile', 'openDirectory']");
+    expect(preview).toContain('selectProjectDir');
+    expect(preview).not.toContain('selectProjectFile');
+    expect(preview).not.toContain('createProjectFile');
   });
 
   it('keeps model setup independent from projects and uses standard app storage', () => {

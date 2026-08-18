@@ -648,12 +648,8 @@ export interface ElectronAPI {
     openDirectory: () => Promise<string | null>;
     /** 在已授权工作目录内选择单个文件（或 null 取消） */
     openFile: (workDir: string) => Promise<string | null>;
-    /** 用户显式选择任意项目入口文件，并返回其规范化路径和父目录 */
-    selectProjectFile: () => Promise<ProjectFileSelection | null>;
-    /** 文件夹模式：选择项目工作区目录（自动探测 README.md 作为可选入口文件） */
+    /** 统一入口选择：文件（父目录为工作区）或文件夹（自动探测 README.md 作为可选入口文件） */
     selectProjectDir: () => Promise<{ workDir: string; entryFile?: string } | null>;
-    /** 通过系统保存窗口安全新建项目入口文件（禁止覆盖） */
-    createProjectFile: () => Promise<ProjectFileSelection | null>;
     /** 多选任意附件文件，返回绝对路径列表（或 null 取消）；校验由 attachments:add 完成 */
     openAttachmentFiles: () => Promise<string[] | null>;
     /** 拖拽 drop 的 File → 磁盘绝对路径（webUtils.getPathForFile；非本地文件返回 ''） */

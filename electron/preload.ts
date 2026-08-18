@@ -125,9 +125,7 @@ const api: ElectronAPI = {
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
     openFile: (workDir: string): Promise<string | null> => ipcRenderer.invoke('dialog:openFile', workDir),
-    selectProjectFile: () => ipcRenderer.invoke('dialog:selectProjectFile'),
     selectProjectDir: () => ipcRenderer.invoke('dialog:selectProjectDir'),
-    createProjectFile: () => ipcRenderer.invoke('dialog:createProjectFile'),
     openAttachmentFiles: (): Promise<string[] | null> => ipcRenderer.invoke('dialog:openAttachmentFiles'),
     getPathForFile: (file: File): string => {
       try {

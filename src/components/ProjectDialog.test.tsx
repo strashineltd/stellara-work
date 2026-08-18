@@ -13,17 +13,23 @@ const PROJECT: ProjectSummary = {
   sessionCount: 2,
 };
 
+const FILE_PICK = { workDir: 'D:\\Stellara Work', entryFile: 'D:\\Stellara Work\\README.md' };
+const DIR_PICK = { workDir: 'D:/workspace/folder-project', entryFile: 'D:/workspace/folder-project/README.md' };
+
 function installApi(overrides?: Partial<ElectronAPI['dialog']>) {
-  const openFile = vi.fn().mockResolvedValue('D:\\Stellara Work\\README.md');
-  const selectProjectFile = vi.fn().mockResolvedValue({ path: 'D:\\Stellara Work\\README.md', workDir: 'D:\\Stellara Work' });
-  const createProjectFile = vi.fn().mockResolvedValue({ path: 'D:\\Stellara Work\\notes.md', workDir: 'D:\\Stellara Work' });
-  const selectProjectDir = vi.fn().mockResolvedValue({ workDir: 'D:/workspace/folder-project', entryFile: 'D:/workspace/folder-project/README.md' });
+  const selectProjectDir = vi.fn().mockResolvedValue(DIR_PICK);
   const createFile = vi.fn().mockResolvedValue({ path: 'D:\\Stellara Work\\notes.md' });
   const openPath = vi.fn().mockResolvedValue(true);
   Object.defineProperty(window, 'electronAPI', {
     configurable: true,
     value: {
-      dialog: { openFile, openDirectory: vi.fn(), selectProjectFile, createProjectFile, selectProjectDir, ...overrides },
+      dialog: {
+        openDirectory: vi.fn(),
+        openFile: vi.fn(),
+        openAttachmentFiles: vi.fn(),
+        selectProjectDir,
+        ...overrides,
+      },
       fs: {
         listTree: vi.fn(),
         readFile: vi.fn(),
@@ -32,7 +38,7 @@ function installApi(overrides?: Partial<ElectronAPI['dialog']>) {
       },
     } as unknown as ElectronAPI,
   });
-  return { openFile, selectProjectFile, createProjectFile, selectProjectDir, createFile, openPath };
+  return { selectProjectDir, createFile, openPath };
 }
 
 function renderDialog(props?: Partial<React.ComponentProps<typeof ProjectDialog>>) {
@@ -82,15 +88,16 @@ describe('ProjectDialog', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders a compact accessible project window with the name field first', () => {
+  it('renders a compact accessible project window with a single entry picker', () => {
     installApi();
     const { container } = renderDialog();
     const dialog = container.querySelector('[role="dialog"]');
     const name = container.querySelector('#project-dialog-name') as HTMLInputElement;
     expect(dialog?.getAttribute('aria-modal')).toBe('true');
     expect(name.value).toBe('桌面端产品');
-    expect(buttonByText(container, '选择文件')).toBeTruthy();
-    expect(buttonByText(container, '新建文件')).toBeTruthy();
+    expect(buttonByText(container, '选择文件夹或文件')).toBeTruthy();
+    expect(buttonByText(container, '新建文件')).toBeNull();
+    expect(container.textContent).toContain('可同时选择文件夹或文件');
   });
 
   it('renders creation setup before a project exists', () => {
@@ -120,15 +127,16 @@ describe('ProjectDialog', () => {
   });
 
   it('creates the project only after the final create action', async () => {
-    const api = installApi();
+    const selectProjectDir = vi.fn().mockResolvedValue(FILE_PICK);
+    installApi({ selectProjectDir });
     const onCreate = vi.fn().mockResolvedValue(undefined);
     const { container } = renderDialog({ mode: 'create', project: undefined, onCreate });
     fireInput(container.querySelector('#project-dialog-name'), '桌面工具');
     await act(async () => {
-      fireClick(buttonByText(container, '选择文件'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
-    expect(api.selectProjectFile).toHaveBeenCalledOnce();
+    expect(selectProjectDir).toHaveBeenCalledOnce();
     expect(onCreate).not.toHaveBeenCalled();
     await act(async () => {
       fireClick(buttonByText(container, '创建项目'));
@@ -148,7 +156,7 @@ describe('ProjectDialog', () => {
     const name = container.querySelector('#project-dialog-name') as HTMLInputElement;
     fireInput(name, '桌面工具');
     await act(async () => {
-      fireClick(buttonByText(container, '选择文件'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
     await act(async () => {
@@ -173,14 +181,15 @@ describe('ProjectDialog', () => {
     expect(container.querySelector('[role="dialog"]')).toBeTruthy();
   });
 
-  it('selects and explicitly opens an existing file', async () => {
-    const api = installApi();
+  it('selects a file through the unified picker and opens its folder', async () => {
+    const selectProjectDir = vi.fn().mockResolvedValue(FILE_PICK);
+    const api = installApi({ selectProjectDir });
     const { container } = renderDialog();
     await act(async () => {
-      fireClick(buttonByText(container, '选择文件'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
-    expect(api.selectProjectFile).toHaveBeenCalledOnce();
+    expect(selectProjectDir).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('Stellara Work');
     await act(async () => {
       fireClick(buttonByText(container, '打开文件夹'));
@@ -189,38 +198,41 @@ describe('ProjectDialog', () => {
     expect(api.openPath).toHaveBeenCalledWith('D:\\Stellara Work', 'D:\\Stellara Work');
   });
 
-  it('creates a new file through the native save flow', async () => {
-    const api = installApi();
-    const { container } = renderDialog();
+  it('persists a picked entry file for existing projects', async () => {
+    installApi({ selectProjectDir: vi.fn().mockResolvedValue(FILE_PICK) });
+    const onUpdateFile = vi.fn().mockResolvedValue(PROJECT);
+    const { container } = renderDialog({ onUpdateFile });
     await act(async () => {
-      fireClick(buttonByText(container, '新建文件'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
-    expect(api.createProjectFile).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain('已新建 notes.md');
+    expect(onUpdateFile).toHaveBeenCalledOnce();
+    expect(onUpdateFile).toHaveBeenCalledWith('project-1', {
+      path: 'D:\\Stellara Work\\README.md',
+      workDir: 'D:\\Stellara Work',
+    });
   });
 
-  it('announces file errors and closes with Escape', async () => {
-    installApi({ createProjectFile: vi.fn().mockRejectedValue(new Error('文件已存在')) });
+  it('announces picker errors and closes with Escape', async () => {
+    installApi({ selectProjectDir: vi.fn().mockRejectedValue(new Error('无法访问')) });
     const onClose = vi.fn();
     const { container } = renderDialog({ onClose });
     await act(async () => {
-      fireClick(buttonByText(container, '新建文件'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('文件已存在');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('无法访问');
     act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('selects a folder as the project workspace and auto-fills README', async () => {
+  it('selects a folder through the unified picker and auto-fills README', async () => {
     const api = installApi();
     const onCreate = vi.fn().mockResolvedValue(undefined);
     const { container } = renderDialog({ mode: 'create', project: undefined, onCreate });
     fireInput(container.querySelector('#project-dialog-name'), '文件夹项目');
-    expect(buttonByText(container, '选择文件夹')).toBeTruthy();
     await act(async () => {
-      fireClick(buttonByText(container, '选择文件夹'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
     expect(api.selectProjectDir).toHaveBeenCalledOnce();
@@ -243,7 +255,7 @@ describe('ProjectDialog', () => {
     const { container } = renderDialog({ mode: 'create', project: undefined, onCreate });
     fireInput(container.querySelector('#project-dialog-name'), '纯文件夹');
     await act(async () => {
-      fireClick(buttonByText(container, '选择文件夹'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
     expect(selectProjectDir).toHaveBeenCalledOnce();
@@ -260,7 +272,7 @@ describe('ProjectDialog', () => {
     });
   });
 
-  it('shows the open-folder button next to the folder picker, disabled until a folder is chosen', async () => {
+  it('shows the open-folder button next to the entry picker, disabled until a folder is chosen', async () => {
     const api = installApi();
     const { container } = renderDialog({ mode: 'create', project: undefined, workDir: '' });
     const openBtn = buttonByText(container, '打开文件夹') as HTMLButtonElement | null;
@@ -269,7 +281,7 @@ describe('ProjectDialog', () => {
 
     api.selectProjectDir.mockResolvedValue({ workDir: 'D:/workspace/folder-project', entryFile: 'README.md' });
     await act(async () => {
-      fireClick(buttonByText(container, '选择文件夹'));
+      fireClick(buttonByText(container, '选择文件夹或文件'));
       await Promise.resolve();
     });
     const openBtn2 = buttonByText(container, '打开文件夹') as HTMLButtonElement | null;
