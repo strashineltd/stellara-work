@@ -30,7 +30,8 @@ export type PresetModelId =
   | 'minimax-m3'
   | 'qwen3.8-max'
   | 'custom'
-  | 'custom-anthropic';
+  | 'custom-anthropic'
+  | 'custom-chat-completions';
 
 export interface ModelPreset {
   id: PresetModelId;
@@ -41,14 +42,14 @@ export interface ModelPreset {
   /** 模型上下文窗口（token 数），默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
   contextWindow?: number;
   // v0.9.2 新增：Responses API 相关（可选，兼容旧代码）
-  /** 协议类型：responses（默认）或 anthropic */
-  wireApi?: 'responses' | 'anthropic';
+  /** 协议类型：responses（默认）、anthropic 或 chat-completions */
+  wireApi?: 'responses' | 'anthropic' | 'chat-completions';
   /** Responses 兼容状态 */
   compatibility?: 'verified' | 'unverified' | 'incompatible';
   /** 最大输出 token */
   maxOutputTokens?: number;
   /** reasoning effort */
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
 }
 
 export interface ModelConfig extends ModelPreset {

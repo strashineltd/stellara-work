@@ -311,6 +311,7 @@ function registerIpcHandlers(): void {
     } else if (configured.wireApi === 'responses') {
       void runResponsesLoopForIpc(request, configured, streamId);
     } else {
+      // chat-completions 或未指定（默认 chat-completions）
       void runAgentLoopForIpc(request, configured, streamId);
     }
 

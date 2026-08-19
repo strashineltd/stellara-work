@@ -11,8 +11,8 @@ import type { ModelPreset } from '../../shared/ipc';
  */
 
 export interface ModelPresetWithCapability extends ModelPreset {
-  /** 协议类型：responses 或 anthropic */
-  wireApi: 'responses' | 'anthropic';
+  /** 协议类型：responses、anthropic 或 chat-completions */
+  wireApi: 'responses' | 'anthropic' | 'chat-completions';
   /** Responses 兼容状态 */
   compatibility: 'verified' | 'unverified' | 'incompatible';
   /** 是否可执行（verified 时可执行） */
@@ -20,7 +20,7 @@ export interface ModelPresetWithCapability extends ModelPreset {
   /** 最大输出 token */
   maxOutputTokens?: number;
   /** reasoning effort */
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max';
 }
 
 export const MODEL_PRESETS: ModelPresetWithCapability[] = [
@@ -88,9 +88,10 @@ export const MODEL_PRESETS: ModelPresetWithCapability[] = [
     baseUrl: 'https://api.moonshot.cn',
     model: 'kimi-k3',
     isCustom: false,
-    wireApi: 'responses',
-    compatibility: 'incompatible',
-    executable: false,
+    wireApi: 'chat-completions',
+    compatibility: 'verified',
+    executable: true,
+    maxOutputTokens: 65536,
   },
   {
     id: 'minimax-m3',
@@ -120,6 +121,16 @@ export const MODEL_PRESETS: ModelPresetWithCapability[] = [
     model: '',
     isCustom: true,
     wireApi: 'anthropic',
+    compatibility: 'unverified',
+    executable: false,
+  },
+  {
+    id: 'custom-chat-completions',
+    label: '自定义模型（Chat Completions）',
+    baseUrl: '',
+    model: '',
+    isCustom: true,
+    wireApi: 'chat-completions',
     compatibility: 'unverified',
     executable: false,
   },
