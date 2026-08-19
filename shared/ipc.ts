@@ -340,6 +340,36 @@ export interface TaskCompleteArgs {
 export interface SubagentDef {
   id: string;
   task: string;
+  /** 角色：research（研究）、build（构建）、verify（验证） */
+  role?: 'research' | 'build' | 'verify';
+  /** 模型 ID（不指定时继承主模型） */
+  modelId?: string;
+  /** 是否只读（research/verify 默认 true） */
+  readOnly?: boolean;
+  /** 文件范围（build 角色必须声明，用于冲突检测） */
+  fileScopes?: string[];
+  /** 期望输出描述 */
+  expectedOutput?: string;
+}
+
+/** 子代理上下文结果（子→父） */
+export interface SubagentContextResult {
+  /** 基于的 workspace revision */
+  basedOnRevision: number;
+  /** 结论 */
+  conclusions: string[];
+  /** 读取的文件 */
+  filesRead: Array<{ path: string; hash?: string }>;
+  /** 修改的文件 */
+  filesChanged: string[];
+  /** 验证证据 */
+  verification: VerificationEvidence[];
+  /** 提出的决策 */
+  decisionsProposed: Array<{ description: string; reason: string; relatedFiles?: string[] }>;
+  /** 未解决的问题 */
+  unresolved: string[];
+  /** 用量 */
+  usage: { promptTokens: number; completionTokens: number };
 }
 
 /** 单个子代理执行结果（汇总报告用） */
