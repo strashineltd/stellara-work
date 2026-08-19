@@ -2,6 +2,39 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] - 2026-08-19
+
+### Added · 新增
+
+- **Responses API**: native support for OpenAI Responses API; replaces Chat Completions as the primary protocol
+- **Context Hub**: unified context management with checkpoints, verification evidence, and stale detection
+- **Subagent coordinator**: session-scoped subagent management with role-based concurrency (research/build/verify)
+- **Responses Agent Loop**: new agent loop using ResponseItem[] and function_call_output
+- **Tool execution context**: tools now track session/revision/plan step for audit
+- **Model presets**: DeepSeek-V4-Flash, Qwen3.8-Max (pending verification)
+- **UI enhancements**: Responses API badges, compatibility status, context checkpoint section, task gate, subagent roles
+
+### Changed · 变更
+
+- All model calls now use `POST {baseUrl}/responses` instead of `/chat/completions`
+- Tool results use `function_call_output` instead of `tool_call_id`
+- Context events are now tracked with sequence/revision numbers
+- Subagent coordination moved from global runner to session-scoped coordinator
+- Model settings now show Responses API verification status
+
+### Security · 安全
+
+- External URL allowlist (http/https/mailto) prevents file:// and other protocol abuse
+- IPC sender validation on all handlers
+- Tool execution context with revision tracking for audit trail
+- `store: false` fixed in all requests (no server-side session storage)
+
+### Migration · 迁移
+
+- Existing model configurations are automatically migrated to v2 schema
+- GLM-5.2, Kimi-K3, MiniMax-M3 configurations preserved but marked incompatible (no Responses API)
+- Custom models require Function Calling verification to be enabled
+
 ## [0.9.0] - 2026-08-15
 
 ### Added · 新增

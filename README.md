@@ -21,7 +21,7 @@
 
 ---
 
-**Stellara Work** is a **local-first** desktop agent that runs on your machine like a personal Codex. Bring your own OpenAI-compatible API key (`base_url + api_key`) and collaborate with the agent on coding tasks — reading files, editing code, running commands — with full review and approval over every action.
+**Stellara Work** is a **local-first** desktop agent that runs on your machine like a personal Codex. Bring your own API key and collaborate with the agent on coding tasks — reading files, editing code, running commands — with full review and approval over every action.
 
 Your API key, sessions, files, and configuration **never leave your machine**. Stellara Work does not upload any data to external servers.
 
@@ -32,7 +32,7 @@ Your API key, sessions, files, and configuration **never leave your machine**. S
 | | Feature | Description |
 |---|---|---|
 | 🔒 | **Local-first privacy** | API keys encrypted via OS keychain (macOS) / DPAPI (Windows); all data stored locally |
-| 🧠 | **Bring your own model** | Works with any OpenAI-compatible endpoint; built-in presets for GLM, DeepSeek, Kimi, MiniMax; unlimited custom models |
+| 🧠 | **Responses API** | Native support for OpenAI Responses API; built-in presets for DeepSeek, Qwen; unlimited custom models |
 | ✅ | **Plan mode with approval gates** | Every file write and shell command waits for your explicit approval |
 | 💬 | **Streaming chat** | Real-time markdown rendering, diff views, and shell output cards |
 | 🗂️ | **Project workspaces** | Point the agent at any folder; it reads, edits, and tests against your real code |
@@ -41,6 +41,8 @@ Your API key, sessions, files, and configuration **never leave your machine**. S
 | 📎 | **Attachments** | Drag & drop files and images into any conversation |
 | 📂 | **File manager** | Sidebar file tree with new file/folder creation |
 | 🎨 | **Design system** | Consistent UI tokens and workbench styling across all views |
+| 🔄 | **Context Hub** | Unified context management with checkpoints, verification evidence, and stale detection |
+| 👥 | **Subagent coordinator** | Session-scoped subagent management with role-based concurrency and conflict detection |
 
 ---
 
@@ -103,13 +105,15 @@ npm run package:win  # build Windows NSIS installer
 
 ## Built-in Model Presets
 
-| Model | Provider | base_url |
-|---|---|---|
-| GLM-5.2 | Zhipu BigModel | `https://open.bigmodel.cn/api/paas/v4` |
-| DeepSeek-v4-Pro | DeepSeek | `https://api.deepseek.com` |
-| Kimi-K3 | Moonshot | `https://api.moonshot.cn` |
-| MiniMax-M3 | MiniMax | `https://api.minimaxi.com/v1` |
-| Custom | yours | any OpenAI-compatible endpoint |
+| Model | Provider | Responses API | Status |
+|---|---|---|---|
+| DeepSeek-V4-Pro | DeepSeek | ✅ Verified | Available |
+| DeepSeek-V4-Flash | DeepSeek | ✅ Verified | Available |
+| Qwen3.8-Max | Alibaba Cloud | ⏳ Pending | Pending verification |
+| GLM-5.3 | Zhipu BigModel | ⏳ Pending | Pending verification |
+| Custom | yours | Any Responses API endpoint | Requires verification |
+
+> **Note:** GLM-5.2, Kimi-K3, and MiniMax-M3 configurations are preserved but marked as incompatible (no Responses API support). Custom endpoints must pass Function Calling verification to be enabled.
 
 ---
 
@@ -121,6 +125,8 @@ npm run package:win  # build Windows NSIS installer
 - External URLs restricted to `http/https/mailto` protocols
 - IPC sender validation on all handlers
 - All dangerous operations (file writes, shell commands) require explicit approval
+- `store: false` fixed in all requests (no server-side session storage)
+- Tool execution context with revision tracking for audit
 
 ---
 
@@ -130,8 +136,9 @@ npm run package:win  # build Windows NSIS installer
 electron/                  # Electron main process
 ├── main.ts                # entry + IPC handlers
 ├── preload.ts             # contextBridge API
-├── agent/                 # agent loop, planning, tools (fs / shell / grep / git)
-├── llm/                   # OpenAI-compatible client + SSE streaming
+├── agent/                 # Responses API agent loop, planning, tools
+├── context/               # Context Hub (unified state management)
+├── llm/                   # Responses API client + SSE streaming
 ├── memory/                # persistent memory store
 └── config/                # encrypted key storage (safeStorage)
 src/                       # React renderer
