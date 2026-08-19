@@ -305,10 +305,17 @@ function registerIpcHandlers(): void {
     const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    // 自动检测协议（对于自定义模型）
+    let wireApi = configured.wireApi;
+    if (!wireApi) {
+      const { inferWireApiFromUrl } = await import('../shared/ipc');
+      wireApi = inferWireApiFromUrl(configured.baseUrl);
+    }
+
     // 渐进式集成：根据 wireApi 选择 loop
-    if (configured.wireApi === 'anthropic') {
+    if (wireApi === 'anthropic') {
       void runAnthropicLoopForIpc(request, configured, streamId);
-    } else if (configured.wireApi === 'responses') {
+    } else if (wireApi === 'responses') {
       void runResponsesLoopForIpc(request, configured, streamId);
     } else {
       // chat-completions 或未指定（默认 chat-completions）

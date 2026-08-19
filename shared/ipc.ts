@@ -29,9 +29,7 @@ export type PresetModelId =
   | 'kimi-k3'
   | 'minimax-m3'
   | 'qwen3.8-max'
-  | 'custom'
-  | 'custom-anthropic'
-  | 'custom-chat-completions';
+  | 'custom';
 
 export interface ModelPreset {
   id: PresetModelId;
@@ -793,6 +791,26 @@ export interface ToolExecutionContext {
   planStepId?: string;
   /** 工具调用 ID（用于关联 function_call_output） */
   toolCallId: string;
+}
+
+// ============================================
+// 协议自动检测（v0.9.2）
+// ============================================
+
+/**
+ * 根据 baseUrl 自动推断 wireApi 协议类型
+ *
+ * 规则：
+ * - 包含 /responses → 'responses'
+ * - 包含 /v1/messages 或 /anthropic → 'anthropic'
+ * - 其他 → 'chat-completions'
+ */
+export function inferWireApiFromUrl(baseUrl: string): 'responses' | 'anthropic' | 'chat-completions' {
+  if (!baseUrl) return 'chat-completions';
+  const lower = baseUrl.toLowerCase();
+  if (lower.includes('/responses')) return 'responses';
+  if (lower.includes('/v1/messages') || lower.includes('/anthropic')) return 'anthropic';
+  return 'chat-completions';
 }
 
 // ============================================
