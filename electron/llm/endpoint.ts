@@ -8,6 +8,8 @@
  * - MiniMax：https://api.minimaxi.com/v1（带 /v1）
  *
  * 这个函数统一处理这三种情况。
+ *
+ * 注意：v0.9.2 使用 Responses API，此函数仅用于旧版兼容。
  */
 export function buildChatCompletionsUrl(baseUrl: string): string {
   if (!baseUrl) {
