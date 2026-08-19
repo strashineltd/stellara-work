@@ -453,3 +453,390 @@ export function checkpoint(): void {
 }
 
 export { uuid };
+
+// ============================================
+// Context Hub 数据库表（v0.9.2）
+// ============================================
+
+import type { ContextEventEnvelope, VerificationEvidence, ContextCheckpoint } from '../../shared/ipc';
+
+/**
+ * 初始化 Context Hub 相关表（幂等）
+ */
+export function initContextTables(): void {
+  const db = getDb();
+  db.exec(`
+    -- Responses Items 存储
+    CREATE TABLE IF NOT EXISTS response_items (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      context_revision INTEGER NOT NULL,
+      workspace_revision INTEGER NOT NULL,
+      item_type TEXT NOT NULL,          -- 'message' | 'reasoning' | 'function_call' | 'function_call_output'
+      item_data TEXT NOT NULL,          -- JSON 序列化的 ResponseItem
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_response_items_session ON response_items(session_id, sequence);
+
+    -- Context Events 存储
+    CREATE TABLE IF NOT EXISTS context_events (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      context_revision INTEGER NOT NULL,
+      workspace_revision INTEGER NOT NULL,
+      source_agent_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data TEXT,                  -- JSON 序列化的事件附加数据
+      created_at TEXT NOT NULL,         -- ISO 时间戳
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_events_session ON context_events(session_id, sequence);
+
+    -- Context Checkpoints 存储
+    CREATE TABLE IF NOT EXISTS context_checkpoints (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      context_revision INTEGER NOT NULL,
+      workspace_revision INTEGER NOT NULL,
+      objective TEXT NOT NULL,
+      constraints TEXT NOT NULL,        -- JSON 数组
+      decisions TEXT NOT NULL,          -- JSON 数组
+      files_changed TEXT NOT NULL,      -- JSON 数组
+      verification TEXT NOT NULL,       -- JSON 数组
+      failures TEXT NOT NULL,           -- JSON 数组
+      plan_state TEXT NOT NULL,         -- JSON 数组
+      pending_work TEXT NOT NULL,       -- JSON 数组
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON context_checkpoints(session_id, context_revision);
+
+    -- Verification Evidence 存储
+    CREATE TABLE IF NOT EXISTS verification_evidence (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      kind TEXT NOT NULL,               -- 'file_reread' | 'typecheck' | 'test' | 'build' | 'manual'
+      command TEXT,
+      related_files TEXT NOT NULL,      -- JSON 数组
+      plan_step_ids TEXT NOT NULL,      -- JSON 数组
+      workspace_revision INTEGER NOT NULL,
+      ok INTEGER NOT NULL,              -- 0 或 1
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      stale INTEGER DEFAULT 0,          -- 1 表示已过期
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_session ON verification_evidence(session_id, workspace_revision);
+
+    -- Subagent Runs 存储
+    CREATE TABLE IF NOT EXISTS subagent_runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      parent_agent_id TEXT NOT NULL,
+      role TEXT NOT NULL,               -- 'research' | 'build' | 'verify'
+      model_id TEXT,
+      task TEXT NOT NULL,
+      status TEXT NOT NULL,             -- 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+      context_revision INTEGER NOT NULL,
+      workspace_revision INTEGER NOT NULL,
+      result_data TEXT,                 -- JSON 序列化的 SubagentContextResult
+      created_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_subagent_session ON subagent_runs(session_id, status);
+  `);
+}
+
+/**
+ * 插入 Context Event（单写者串行队列）
+ */
+export function insertContextEvent(event: ContextEventEnvelope): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO context_events (id, session_id, sequence, context_revision, workspace_revision, source_agent_id, event_type, event_data, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.id,
+    event.sessionId,
+    event.sequence,
+    event.contextRevision,
+    event.workspaceRevision,
+    event.sourceAgentId,
+    event.event,
+    event.data ? JSON.stringify(event.data) : null,
+    event.createdAt,
+  );
+}
+
+/**
+ * 查询 session 的 Context Events（按 sequence 排序）
+ */
+export function getContextEventsBySession(sessionId: string, limit?: number): ContextEventEnvelope[] {
+  const db = getDb();
+  const query = limit
+    ? 'SELECT * FROM context_events WHERE session_id = ? ORDER BY sequence DESC LIMIT ?'
+    : 'SELECT * FROM context_events WHERE session_id = ? ORDER BY sequence ASC';
+  const rows = limit
+    ? db.prepare(query).all(sessionId, limit) as Record<string, unknown>[]
+    : db.prepare(query).all(sessionId) as Record<string, unknown>[];
+
+  // 如果用了 limit（倒序），再反转为正序
+  const ordered = limit ? rows.reverse() : rows;
+
+  return ordered.map(row => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    sequence: row.sequence as number,
+    contextRevision: row.context_revision as number,
+    workspaceRevision: row.workspace_revision as number,
+    sourceAgentId: row.source_agent_id as string,
+    event: row.event_type as ContextEventEnvelope['event'],
+    data: row.event_data ? JSON.parse(row.event_data as string) : undefined,
+    createdAt: row.created_at as string,
+  }));
+}
+
+/**
+ * 获取 session 的最大 sequence
+ */
+export function getMaxSequence(sessionId: string): number {
+  const db = getDb();
+  const row = db.prepare('SELECT MAX(sequence) as max_seq FROM context_events WHERE session_id = ?').get(sessionId) as { max_seq: number | null } | undefined;
+  return row?.max_seq ?? 0;
+}
+
+/**
+ * 插入 Response Item
+ */
+export function insertResponseItem(item: {
+  id: string;
+  sessionId: string;
+  sequence: number;
+  contextRevision: number;
+  workspaceRevision: number;
+  itemType: string;
+  itemData: unknown;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO response_items (id, session_id, sequence, context_revision, workspace_revision, item_type, item_data, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    item.id,
+    item.sessionId,
+    item.sequence,
+    item.contextRevision,
+    item.workspaceRevision,
+    item.itemType,
+    JSON.stringify(item.itemData),
+    Date.now(),
+  );
+}
+
+/**
+ * 查询 session 的 Response Items（按 sequence 排序）
+ */
+export function getResponseItemsBySession(sessionId: string): Array<{
+  id: string;
+  sessionId: string;
+  sequence: number;
+  contextRevision: number;
+  workspaceRevision: number;
+  itemType: string;
+  itemData: unknown;
+}> {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM response_items WHERE session_id = ? ORDER BY sequence ASC').all(sessionId) as Record<string, unknown>[];
+  return rows.map(row => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    sequence: row.sequence as number,
+    contextRevision: row.context_revision as number,
+    workspaceRevision: row.workspace_revision as number,
+    itemType: row.item_type as string,
+    itemData: JSON.parse(row.item_data as string),
+  }));
+}
+
+/**
+ * 插入 Verification Evidence
+ */
+export function insertVerificationEvidence(evidence: VerificationEvidence & { sessionId: string }): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO verification_evidence (id, session_id, kind, command, related_files, plan_step_ids, workspace_revision, ok, summary, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    evidence.id,
+    evidence.sessionId,
+    evidence.kind,
+    evidence.command ?? null,
+    JSON.stringify(evidence.relatedFiles),
+    JSON.stringify(evidence.planStepIds),
+    evidence.workspaceRevision,
+    evidence.ok ? 1 : 0,
+    evidence.summary,
+    evidence.createdAt,
+  );
+}
+
+/**
+ * 查询 session 的 Verification Evidence
+ */
+export function getVerificationEvidenceBySession(sessionId: string): Array<VerificationEvidence & { stale: boolean }> {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM verification_evidence WHERE session_id = ? ORDER BY created_at DESC').all(sessionId) as Record<string, unknown>[];
+  return rows.map(row => ({
+    id: row.id as string,
+    kind: row.kind as VerificationEvidence['kind'],
+    command: (row.command as string | null) ?? undefined,
+    relatedFiles: JSON.parse(row.related_files as string),
+    planStepIds: JSON.parse(row.plan_step_ids as string),
+    workspaceRevision: row.workspace_revision as number,
+    ok: row.ok === 1,
+    summary: row.summary as string,
+    createdAt: row.created_at as string,
+    stale: row.stale === 1,
+  }));
+}
+
+/**
+ * 标记 Evidence 为 stale（文件修改后调用）
+ */
+export function markEvidenceStale(sessionId: string, workspaceRevision: number): number {
+  const db = getDb();
+  const result = db.prepare(
+    'UPDATE verification_evidence SET stale = 1 WHERE session_id = ? AND workspace_revision < ?',
+  ).run(sessionId, workspaceRevision);
+  return result.changes;
+}
+
+/**
+ * 插入 Context Checkpoint
+ */
+export function insertContextCheckpoint(checkpoint: ContextCheckpoint): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO context_checkpoints (id, session_id, context_revision, workspace_revision, objective, constraints, decisions, files_changed, verification, failures, plan_state, pending_work, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    checkpoint.id,
+    checkpoint.sessionId,
+    checkpoint.contextRevision,
+    checkpoint.workspaceRevision,
+    checkpoint.objective,
+    JSON.stringify(checkpoint.constraints),
+    JSON.stringify(checkpoint.decisions),
+    JSON.stringify(checkpoint.filesChanged),
+    JSON.stringify(checkpoint.verification),
+    JSON.stringify(checkpoint.failures),
+    JSON.stringify(checkpoint.planState),
+    JSON.stringify(checkpoint.pendingWork),
+    checkpoint.createdAt,
+  );
+}
+
+/**
+ * 获取 session 最新的 Checkpoint
+ */
+export function getLatestCheckpoint(sessionId: string): ContextCheckpoint | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM context_checkpoints WHERE session_id = ? ORDER BY context_revision DESC LIMIT 1').get(sessionId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    contextRevision: row.context_revision as number,
+    workspaceRevision: row.workspace_revision as number,
+    objective: row.objective as string,
+    constraints: JSON.parse(row.constraints as string),
+    decisions: JSON.parse(row.decisions as string),
+    filesChanged: JSON.parse(row.files_changed as string),
+    verification: JSON.parse(row.verification as string),
+    failures: JSON.parse(row.failures as string),
+    planState: JSON.parse(row.plan_state as string),
+    pendingWork: JSON.parse(row.pending_work as string),
+    createdAt: row.created_at as string,
+  };
+}
+
+/**
+ * 插入 Subagent Run
+ */
+export function insertSubagentRun(run: {
+  id: string;
+  sessionId: string;
+  parentAgentId: string;
+  role: 'research' | 'build' | 'verify';
+  modelId?: string;
+  task: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  contextRevision: number;
+  workspaceRevision: number;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO subagent_runs (id, session_id, parent_agent_id, role, model_id, task, status, context_revision, workspace_revision, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    run.id,
+    run.sessionId,
+    run.parentAgentId,
+    run.role,
+    run.modelId ?? null,
+    run.task,
+    run.status,
+    run.contextRevision,
+    run.workspaceRevision,
+    new Date().toISOString(),
+  );
+}
+
+/**
+ * 更新 Subagent Run 状态
+ */
+export function updateSubagentRun(id: string, status: string, resultData?: unknown): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE subagent_runs SET status = ?, result_data = ?, completed_at = ? WHERE id = ?
+  `).run(status, resultData ? JSON.stringify(resultData) : null, new Date().toISOString(), id);
+}
+
+/**
+ * 查询 session 的 Subagent Runs
+ */
+export function getSubagentRunsBySession(sessionId: string): Array<{
+  id: string;
+  sessionId: string;
+  parentAgentId: string;
+  role: string;
+  modelId?: string;
+  task: string;
+  status: string;
+  contextRevision: number;
+  workspaceRevision: number;
+  resultData?: unknown;
+  createdAt: string;
+  completedAt?: string;
+}> {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM subagent_runs WHERE session_id = ? ORDER BY created_at DESC').all(sessionId) as Record<string, unknown>[];
+  return rows.map(row => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    parentAgentId: row.parent_agent_id as string,
+    role: row.role as string,
+    modelId: (row.model_id as string | null) ?? undefined,
+    task: row.task as string,
+    status: row.status as string,
+    contextRevision: row.context_revision as number,
+    workspaceRevision: row.workspace_revision as number,
+    resultData: row.result_data ? JSON.parse(row.result_data as string) : undefined,
+    createdAt: row.created_at as string,
+    completedAt: (row.completed_at as string | null) ?? undefined,
+  }));
+}
