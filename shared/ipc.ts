@@ -152,7 +152,10 @@ export interface ChatStreamEvent {
     | 'context_compacted'
     | 'file_revision_changed'
     | 'evidence_stale'
-    | 'subagent_conflict';
+    | 'subagent_conflict'
+    // Context Hub 事件
+    | 'context_revision'
+    | 'context_usage';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };

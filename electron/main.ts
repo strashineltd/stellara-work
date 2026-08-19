@@ -5,8 +5,11 @@ import log from 'electron-log/main';
 import { loadEnv, getEnvPath } from './config/env';
 import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
+import { runResponsesLoop } from './agent/responses-loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { setSubagentRunner } from './agent/tools/dispatch-subagents';
+import { SubagentCoordinator } from './agent/subagent-coordinator';
+import { ContextHub } from './context/context-hub';
 import { resolveSessionModel } from './chat/session-context';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
@@ -299,7 +302,14 @@ function registerIpcHandlers(): void {
   handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
     const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    void runAgentLoopForIpc(request, configured, streamId);
+
+    // 渐进式集成：根据 wireApi 选择 loop
+    if (configured.wireApi === 'responses') {
+      void runResponsesLoopForIpc(request, configured, streamId);
+    } else {
+      void runAgentLoopForIpc(request, configured, streamId);
+    }
+
     return { streamId };
   });
 
@@ -916,6 +926,164 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
   throw new Error(`工作目录不在已配置的工作区内：${workDir}`);
 }
 
+/**
+ * Responses API Agent Loop 的 IPC 包装器
+ *
+ * 渐进式集成：保留旧 runAgentLoopForIpc，新增此函数。
+ * 通过模型的 wireApi 配置选择使用哪个 loop。
+ */
+async function runResponsesLoopForIpc(
+  request: ChatRequest,
+  model: ModelConfig,
+  streamId: string,
+): Promise<void> {
+  const send = (event: ChatStreamEvent) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('chat-stream', { streamId, event });
+    }
+  };
+
+  const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user') {
+    send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
+    return;
+  }
+
+  // 附件注入
+  let userContent = last.content;
+  if (request.attachments && request.attachments.length > 0) {
+    const attachmentLines = request.attachments.map(
+      (a) => `- ${a.name} → ${a.relPath}（${a.kind === 'image' ? '图片' : '文件'}）`,
+    );
+    userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
+  }
+
+  // 创建 ContextHub 和 SubagentCoordinator
+  const contextHub = new ContextHub(
+    request.sessionId,
+    model.workDir || '.',
+    model.contextWindow || 256000,
+    model.maxOutputTokens || 16384,
+  );
+
+  const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
+
+  // 监听 context events 并广播到 Renderer
+  contextHub.onEvent((event) => {
+    send({
+      type: 'context_revision',
+      contextRevision: event.contextRevision,
+      workspaceRevision: event.workspaceRevision,
+    });
+  });
+
+  // 创建 AbortController
+  const ctrl = chatStreams.start(streamId);
+  let terminalEventSent = false;
+  let taskCompleted = false;
+  let taskFailed = false;
+
+  // macOS：阻止系统休眠
+  let powerSaveId: number | null = null;
+  if (process.platform === 'darwin') {
+    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+  }
+
+  try {
+    const cwd = model.workDir!;
+
+    // 加载 skills
+    let skills: import('../shared/ipc').SkillDef[] = [];
+    try {
+      const { loadSkills } = await import('./agent/skills');
+      skills = await loadSkills(cwd);
+    } catch {
+      // skills 加载失败不影响 agent 运行
+    }
+
+    // 加载 MCP 工具
+    let extraTools: import('../shared/ipc').OpenAITool[] = [];
+    try {
+      const { mcpManager } = await import('./mcp/mcp-manager');
+      extraTools = await mcpManager.getEnabledTools();
+    } catch {
+      // MCP 工具加载失败不影响 agent 运行
+    }
+
+    // 设置子代理执行器
+    coordinator.setRunner(async (task, id, signal) => {
+      const result = await runOneSubagent(task, id, model, cwd, send, signal);
+      return { summary: result.summary, ok: result.ok };
+    });
+
+    // 运行 Responses Loop
+    for await (const event of runResponsesLoop(userContent, {
+      model,
+      cwd,
+      sessionId: request.sessionId,
+      contextHub,
+      planMode: request.planMode ?? false,
+      platform: { platform: process.platform, arch: process.arch },
+      skills,
+      extraTools: extraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
+      signal: ctrl.signal,
+      onApproval: async (toolCall) => {
+        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        send({
+          type: 'approval_required',
+          approval: { id: approvalId, toolName: toolCall.function.name, args: toolCall.function.arguments, toolCallId: toolCall.id },
+        });
+        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
+        const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
+        return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
+      },
+    })) {
+      if (ctrl.signal.aborted) break;
+      send(event);
+      if (event.type === 'task_complete') taskCompleted = true;
+      if (event.type === 'error') taskFailed = true;
+      if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
+    }
+
+    // 任务结束通知
+    const windowActive = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused();
+    if (!windowActive && !ctrl.signal.aborted && (taskCompleted || taskFailed)) {
+      if (process.platform === 'darwin') {
+        app.dock?.bounce(taskFailed ? 'critical' : 'informational');
+      }
+      notifyTaskEnd(
+        { completed: taskCompleted, failed: taskFailed, aborted: false },
+        () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      );
+    }
+  } catch (err) {
+    if (!ctrl.signal.aborted) {
+      send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    }
+  } finally {
+    // 清理资源
+    coordinator.dispose();
+    contextHub.dispose();
+    chatStreams.cleanup(streamId);
+    if (!terminalEventSent) send({ type: 'done' });
+
+    // macOS：恢复系统休眠
+    if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {
+      powerSaveBlocker.stop(powerSaveId);
+    }
+
+    // 异步提取记忆
+    void extractMemoriesFromSession(request, model).catch(() => {});
+  }
+}
+
 async function runAgentLoopForIpc(
   request: ChatRequest,
   model: ModelConfig,
@@ -1105,6 +1273,7 @@ async function runOneSubagent(
   model: ModelConfig,
   cwd: string,
   parentSend: (event: ChatStreamEvent) => void,
+  signal?: AbortSignal,
 ): Promise<{ summary: string; ok: boolean }> {
   const streamId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const ctrl = chatStreams.start(streamId);
@@ -1123,7 +1292,7 @@ async function runOneSubagent(
       maxToolCalls: 100,
       requireApprovalAfterLimit: true,
       rolePrompt: '你是子代理，专注完成分配的任务。完成后用简洁报告总结成果（改了哪些文件、结果如何）。',
-      signal: ctrl.signal,
+      signal: signal || ctrl.signal,
       onApproval: async (toolCall) => {
         // 复用主会话审批机制：approvalId 带 sub-{defId}- 前缀，渲染层据此标注为子代理审批
         const approvalId = `sub-${defId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
