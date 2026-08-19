@@ -244,16 +244,16 @@ export class ContextHub {
     const softThreshold = usableInputBudget * 0.75;
     const hardThreshold = usableInputBudget * 0.90;
 
-    // 简化估算：基于 responseItems 数量
+    // 简化估算：基于 responseItems 数量（每个 item 约 100 tokens）
     const currentInputTokens = this.context?.responseItems.length * 100 || 0;
-    const inputUsageRatio = usableInputBudget > 0 ? currentInputTokens / usableInputBudget : 0;
+    const inputUsageRatio = usableInputBudget > 0 ? currentInputTokens / usableInputBudget : 1;
 
     return {
       inputUsageRatio,
       softThreshold,
       hardThreshold,
-      nearLimit: usableInputBudget > 0 && currentInputTokens >= softThreshold,
-      hardLimited: usableInputBudget > 0 && currentInputTokens >= hardThreshold,
+      nearLimit: usableInputBudget <= 0 || currentInputTokens >= softThreshold,
+      hardLimited: usableInputBudget <= 0 || currentInputTokens >= hardThreshold,
       currentInputTokens,
       usableInputBudget,
       lastCompactedAt: this.context?.usage?.lastCompactedAt,

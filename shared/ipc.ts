@@ -44,6 +44,10 @@ export interface ModelPreset {
   wireApi?: 'responses';
   /** Responses 兼容状态 */
   compatibility?: 'verified' | 'unverified' | 'incompatible';
+  /** 最大输出 token */
+  maxOutputTokens?: number;
+  /** reasoning effort */
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export interface ModelConfig extends ModelPreset {

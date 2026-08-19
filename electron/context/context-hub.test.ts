@@ -234,7 +234,8 @@ describe('ContextHub', () => {
   });
 
   it('isHardLimited 和 isNearLimit', async () => {
-    const hub = new ContextHub('sess-001', '/tmp/work', 1000, 100);
+    // 使用足够大的 context window（至少 4100 + maxOutputTokens + reserves）
+    const hub = new ContextHub('sess-001', '/tmp/work', 32000, 4000);
 
     // 初始状态未超限
     expect(hub.isHardLimited()).toBe(false);
