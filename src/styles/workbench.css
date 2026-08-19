@@ -6283,3 +6283,28 @@ button.attach-chip:hover {
 .file-hover-preview__truncated { padding: var(--space-2) var(--space-3); color: var(--color-warning); font-size: var(--fs-xxs); border-top: 1px solid var(--color-border); }
 .hoverable-path { color: var(--color-accent); border-bottom: 1px dotted var(--color-accent-tint); cursor: pointer; border-radius: 2px; }
 .hoverable-path:hover { background: var(--color-accent-soft); }
+
+/* Checkpoint Section */
+.checkpoint-info { padding: var(--space-2) 0; }
+.checkpoint-objective { color: var(--color-text-strong); font-size: var(--fs-sm); }
+.checkpoint-time { color: var(--color-text-faint); font-size: var(--fs-xs); margin-top: var(--space-1); }
+.checkpoint-label { color: var(--color-text-soft); font-size: var(--fs-xs); font-weight: 500; margin-top: var(--space-2); }
+.checkpoint-file, .checkpoint-evidence { color: var(--color-text-faint); font-size: var(--fs-xs); font-family: var(--font-mono); }
+.checkpoint-unverified ul, .checkpoint-stale ul { margin: var(--space-1) 0 0 var(--space-3); padding: 0; }
+
+/* Task Gate */
+.task-gate { margin-top: var(--space-2); padding: var(--space-2); border-radius: var(--radius-sm); }
+.task-gate.ok { background: var(--color-success-bg, #e6f7e6); }
+.task-gate.blocked { background: var(--color-warning-bg, #fff7e6); }
+.task-gate-status { font-size: var(--fs-sm); font-weight: 500; }
+.task-gate.ok .task-gate-status { color: var(--color-success-text, #1a7a1a); }
+.task-gate.blocked .task-gate-status { color: var(--color-warning-text, #7a6a1a); }
+.task-gate-reasons { margin: var(--space-1) 0 0 var(--space-3); padding: 0; font-size: var(--fs-xs); color: var(--color-text-faint); }
+
+/* Subagent Role */
+.subagent-role { display: inline-flex; padding: 1px 4px; font-size: var(--fs-xxs); font-weight: 500; border-radius: var(--radius-sm); background: var(--color-bg-soft); color: var(--color-text-faint); }
+.subagent-role.research { background: #e6f0ff; color: #1a5a9a; }
+.subagent-role.build { background: #fff0e6; color: #9a5a1a; }
+.subagent-role.verify { background: #e6ffe6; color: #1a9a1a; }
+.subagent-model, .subagent-revision { color: var(--color-text-faint); font-size: var(--fs-xxs); }
+.subagent-card-meta { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-1); }

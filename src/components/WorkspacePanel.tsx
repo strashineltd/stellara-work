@@ -51,10 +51,18 @@ export interface ContextStats {
 export interface SubagentInfo {
   id: string;
   task: string;
-  status: 'queued' | 'running' | 'done' | 'failed';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   lastTool?: string;
   elapsedMs?: number;
   summary?: string;
+  /** 角色：research、build、verify */
+  role?: 'research' | 'build' | 'verify';
+  /** 模型 ID */
+  modelId?: string;
+  /** 上下文版本 */
+  contextRevision?: number;
+  /** 工作区版本 */
+  workspaceRevision?: number;
 }
 
 /** 工具名 → 中文（spec 3.1；未映射的显示原名） */
@@ -171,6 +179,12 @@ export function WorkspacePanel({
       <GoalSection goal={goal} stepStatus={stepStatus} onStepToggle={onStepToggle} />
       <ProgressSection progress={progress} goal={goal} stepStatus={stepStatus} />
       <ContextStatsSection contextStats={contextStats} contextWindow={contextWindow} />
+      <ContextCheckpointSection
+        checkpoint={null}
+        unverifiedFiles={[]}
+        staleEvidence={[]}
+        taskGate={undefined}
+      />
       <SubagentsSection subagents={subagents} />
       <DeliverablesSection deliverables={deliverables} />
       <MemoryInjectSection memoryContext={memoryContext} />
@@ -360,6 +374,69 @@ function ContextStatsSection({ contextStats, contextWindow }: { contextStats: Co
   );
 }
 
+/** Context Checkpoint Section（v0.9.2） */
+function ContextCheckpointSection({
+  checkpoint,
+  unverifiedFiles,
+  staleEvidence,
+  taskGate,
+}: {
+  checkpoint?: { id: string; objective: string; createdAt: string } | null;
+  unverifiedFiles?: string[];
+  staleEvidence?: Array<{ id: string; summary: string }>;
+  taskGate?: { ok: boolean; reasons: string[] };
+}) {
+  return (
+    <details className="workspace-section">
+      <summary className="workspace-section-header">
+        <span>上下文检查点</span>
+      </summary>
+      {checkpoint ? (
+        <div className="checkpoint-info">
+          <div className="checkpoint-objective">{checkpoint.objective}</div>
+          <div className="checkpoint-time">{new Date(checkpoint.createdAt).toLocaleString()}</div>
+        </div>
+      ) : (
+        <div className="empty-hint">暂无检查点</div>
+      )}
+      {unverifiedFiles && unverifiedFiles.length > 0 && (
+        <div className="checkpoint-unverified">
+          <div className="checkpoint-label">未验证文件：</div>
+          <ul>
+            {unverifiedFiles.map((f, i) => (
+              <li key={i} className="checkpoint-file">{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {staleEvidence && staleEvidence.length > 0 && (
+        <div className="checkpoint-stale">
+          <div className="checkpoint-label">过期证据：</div>
+          <ul>
+            {staleEvidence.map((e, i) => (
+              <li key={i} className="checkpoint-evidence">{e.summary}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {taskGate && (
+        <div className={`task-gate ${taskGate.ok ? 'ok' : 'blocked'}`}>
+          <div className="task-gate-status">
+            {taskGate.ok ? '✓ 任务可完成' : '✗ 任务阻塞'}
+          </div>
+          {!taskGate.ok && taskGate.reasons.length > 0 && (
+            <ul className="task-gate-reasons">
+              {taskGate.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
 function SubagentsSection({ subagents }: { subagents?: SubagentInfo[] }) {
   if (!subagents || subagents.length === 0) return null;
   return (
@@ -381,6 +458,13 @@ const SUBAGENT_BADGES: Record<SubagentInfo['status'], string> = {
   running: '执行中',
   done: '完成',
   failed: '失败',
+  cancelled: '已取消',
+};
+
+const SUBAGENT_ROLE_LABELS: Record<string, string> = {
+  research: '研究',
+  build: '构建',
+  verify: '验证',
 };
 
 function SubagentCard({ info }: { info: SubagentInfo }) {
@@ -396,15 +480,26 @@ function SubagentCard({ info }: { info: SubagentInfo }) {
         title={info.summary ? '点击展开摘要' : undefined}
       >
         <span className="subagent-id">{info.id}</span>
+        {info.role && (
+          <span className={`subagent-role ${info.role}`}>
+            {SUBAGENT_ROLE_LABELS[info.role] || info.role}
+          </span>
+        )}
         <span className={`subagent-badge ${info.status}`}>{SUBAGENT_BADGES[info.status]}</span>
       </button>
       {info.task && <div className="subagent-task">{info.task}</div>}
       <div className="subagent-card-meta">
+        {info.modelId && (
+          <span className="subagent-model">模型：{info.modelId}</span>
+        )}
         {info.lastTool && (
           <span className="subagent-tool">最近工具：{toolLabel(info.lastTool)}</span>
         )}
         {info.elapsedMs != null && (
           <span className="subagent-time">{(info.elapsedMs / 1000).toFixed(1)}s</span>
+        )}
+        {info.contextRevision != null && (
+          <span className="subagent-revision">rev:{info.contextRevision}</span>
         )}
       </div>
       {expanded && info.summary && (
