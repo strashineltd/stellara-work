@@ -134,7 +134,13 @@ export interface ChatStreamEvent {
     | 'subagent_start'
     | 'subagent_progress'
     | 'subagent_done'
-    | 'subagent_summary';
+    | 'subagent_summary'
+    // Responses API 新增事件类型
+    | 'context_checkpoint'
+    | 'context_compacted'
+    | 'file_revision_changed'
+    | 'evidence_stale'
+    | 'subagent_conflict';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };
@@ -172,6 +178,17 @@ export interface ChatStreamEvent {
   subagentSummary?: string;
   subagentElapsedMs?: number;
   subagentResults?: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
+  // Responses API 新增：上下文版本和证据字段
+  /** 当前上下文版本（Context Hub 递增） */
+  contextRevision?: number;
+  /** 当前工作区版本（文件修改时递增） */
+  workspaceRevision?: number;
+  /** 关联的验证证据 ID 列表 */
+  evidenceIds?: string[];
+  /** 关联的 Plan step ID 列表 */
+  planStepIds?: string[];
+  /** 子代理关联的上下文版本（stale 检查用） */
+  subagentContextRevision?: number;
 }
 
 /** 错误类型 — 用于分类 + 引导文案 */
@@ -607,6 +624,108 @@ export interface AttachmentMeta {
   kind: 'image' | 'file';
   /** 相对附件目录（{sessionId}/{name}，正向斜杠） */
   relPath: string;
+}
+
+// ============================================
+// Context Hub 相关（Responses API）
+// ============================================
+
+/** 验证证据类型 */
+export type VerificationKind = 'file_reread' | 'typecheck' | 'test' | 'build' | 'manual';
+
+/** 验证证据 */
+export interface VerificationEvidence {
+  id: string;
+  kind: VerificationKind;
+  command?: string;
+  relatedFiles: string[];
+  planStepIds: string[];
+  workspaceRevision: number;
+  ok: boolean;
+  summary: string;
+  createdAt: string;
+}
+
+/** Context Checkpoint（压缩后保存的结构化状态） */
+export interface ContextCheckpoint {
+  id: string;
+  sessionId: string;
+  contextRevision: number;
+  workspaceRevision: number;
+  objective: string;
+  constraints: string[];
+  decisions: string[];
+  filesChanged: string[];
+  verification: string[];
+  failures: string[];
+  planState: { id: string; description: string; status: string }[];
+  pendingWork: string[];
+  createdAt: string;
+}
+
+/** Context 事件类型 */
+export type ContextEventType =
+  | 'user_message_added'
+  | 'plan_created'
+  | 'plan_step_changed'
+  | 'tool_call_started'
+  | 'tool_call_completed'
+  | 'approval_requested'
+  | 'approval_resolved'
+  | 'file_read'
+  | 'file_modified'
+  | 'command_completed'
+  | 'verification_completed'
+  | 'subagent_started'
+  | 'subagent_completed'
+  | 'memory_injected'
+  | 'context_compacted'
+  | 'checkpoint_created';
+
+/** Context 事件信封 */
+export interface ContextEventEnvelope {
+  id: string;
+  sessionId: string;
+  sequence: number;
+  contextRevision: number;
+  workspaceRevision: number;
+  sourceAgentId: string;
+  createdAt: string;
+  event: ContextEventType;
+  /** 事件附加数据（序列化存储） */
+  data?: unknown;
+}
+
+/** Context 使用量统计 */
+export interface ContextUsage {
+  /** 输入 token 使用百分比（0-1） */
+  inputUsageRatio: number;
+  /** 软阈值百分比 */
+  softThreshold: number;
+  /** 硬阈值百分比 */
+  hardThreshold: number;
+  /** 当前是否达到软阈值 */
+  nearLimit: boolean;
+  /** 当前是否达到硬阈值 */
+  hardLimited: boolean;
+  /** 当前输入 token 数 */
+  currentInputTokens: number;
+  /** 可用输入预算 */
+  usableInputBudget: number;
+  /** 上次压缩时间 */
+  lastCompactedAt?: string;
+}
+
+/** 文件修改证据 */
+export interface FileModificationEvidence {
+  filePath: string;
+  toolCallId?: string;
+  agentId: string;
+  planStepId?: string;
+  workspaceRevision: number;
+  /** 文件内容哈希 */
+  contentHash?: string;
+  createdAt: string;
 }
 
 // ============================================
