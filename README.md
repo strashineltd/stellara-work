@@ -5,8 +5,7 @@
 <h1 align="center">Stellara Work</h1>
 
 <p align="center">
-  <strong>A local-first, Codex-style desktop agent</strong> for Windows & macOS.
-  <br />
+  <strong>A local-first, Codex-style desktop agent</strong> for Windows & macOS.<br/>
   Bring your own OpenAI-compatible API key — your data stays on your machine.
 </p>
 
@@ -16,59 +15,65 @@
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" />
 </p>
 
----
-
-**Stellara Work** 是一款**数据本地**的 Codex 风格桌面 Agent：你自备 OpenAI 兼容的 `base_url + API key`，在桌面工作台上与 Agent 协作完成代码任务——读取文件、编辑代码、执行命令，全程可审阅、可批准。**你的密钥、会话、文件与配置永远留在本机**，Stellara Work 不会上传任何数据。
-
-*Stellara Work is a local-first, Codex-style desktop agent. Bring your own OpenAI-compatible API key, and collaborate with the agent on coding tasks — reading files, editing code, running commands — with full review and approval over every action. Your keys, sessions, files, and config stay on your machine. Stellara Work never uploads your data.*
+<p align="center">
+  <a href="docs/i18n/README_zh-CN.md">简体中文</a> · <a href="docs/i18n/README_zh-TW.md">繁體中文</a> · <a href="docs/i18n/README_ru.md">Русский</a> · <a href="docs/i18n/README_fr.md">Français</a> · <a href="docs/i18n/README_de.md">Deutsch</a> · <a href="docs/i18n/README_es.md">Español</a> · <a href="docs/i18n/README_pt-BR.md">Português</a> · <a href="docs/i18n/README_ja.md">日本語</a> · <a href="docs/i18n/README_ko.md">한국어</a> · <a href="docs/i18n/README_ar.md">العربية</a>
+</p>
 
 ---
 
-## Features · 功能亮点
+**Stellara Work** is a **local-first** desktop agent that runs on your machine like a personal Codex. Bring your own OpenAI-compatible API key (`base_url + api_key`) and collaborate with the agent on coding tasks — reading files, editing code, running commands — with full review and approval over every action.
 
-- **🔒 Local-first privacy · 数据本地，隐私优先** — API keys encrypted with OS keychain (macOS) / DPAPI (Windows); sessions, files and config all stored locally. / API key 由系统钥匙串（macOS）/ DPAPI（Windows）加密，会话、文件、配置全部存于本机。
-- **🧠 Bring-your-own-model · 自带模型** — Works with any OpenAI-compatible endpoint. Presets for GLM, DeepSeek, Kimi (Moonshot), MiniMax, plus unlimited custom models. / 兼容任意 OpenAI 协议端点，内置 GLM、DeepSeek、Kimi、MiniMax 预设，支持无限自定义模型。
-- **✅ Plan mode with approval gates · 计划模式 + 批准门禁** — Every file write and shell command waits for your explicit approval. / 每次文件写入、命令执行都需你显式批准。
-- **💬 Streaming chat · 流式对话** — Live markdown rendering, diff views, and shell output cards. / 实时 Markdown 渲染、diff 视图与命令输出卡片。
-- **🗂️ Project workspaces · 项目工作区** — Point the agent at any folder; it reads, edits, and tests against your real code. / 指向任意文件夹，Agent 在真实代码上读写与验证。
-- **🧰 Skills & MCP · 技能与 MCP** — Extend the agent with custom skills and Model Context Protocol servers. / 用自定义技能与 MCP 服务器扩展 Agent 能力。
-- **🧠 Memory center · 记忆中心** — Persistent, searchable memory across sessions. / 跨会话持久、可搜索的记忆。
-- **📎 Attachments · 附件** — Drag & drop files and images into any conversation. / 任意会话中拖拽文件与图片。
+Your API key, sessions, files, and configuration **never leave your machine**. Stellara Work does not upload any data to external servers.
 
 ---
 
-## Screenshots · 截图
+## Features
 
-| Home · 首页 | Chat · 对话 | Settings · 设置 |
+| | Feature | Description |
+|---|---|---|
+| 🔒 | **Local-first privacy** | API keys encrypted via OS keychain (macOS) / DPAPI (Windows); all data stored locally |
+| 🧠 | **Bring your own model** | Works with any OpenAI-compatible endpoint; built-in presets for GLM, DeepSeek, Kimi, MiniMax; unlimited custom models |
+| ✅ | **Plan mode with approval gates** | Every file write and shell command waits for your explicit approval |
+| 💬 | **Streaming chat** | Real-time markdown rendering, diff views, and shell output cards |
+| 🗂️ | **Project workspaces** | Point the agent at any folder; it reads, edits, and tests against your real code |
+| 🧰 | **Skills & MCP** | Extend the agent with custom skills and Model Context Protocol servers |
+| 🧠 | **Memory center** | Persistent, searchable cross-session memory |
+| 📎 | **Attachments** | Drag & drop files and images into any conversation |
+| 📂 | **File manager** | Sidebar file tree with new file/folder creation |
+| 🎨 | **Design system** | Consistent UI tokens and workbench styling across all views |
+
+---
+
+## Screenshots
+
+| Home | Chat | Settings |
 |:---:|:---:|:---:|
 | ![home](assets/screenshots/home.png) | ![chat](assets/screenshots/chat.png) | ![settings](assets/screenshots/settings.png) |
 
 ---
 
-## Downloads · 下载
+## Downloads
 
-Latest release: **v0.9.0**
+**Latest release: v0.9.1**
 
 | Platform | Installer |
 |---|---|
-| macOS (Apple Silicon) | [Stellara Work-0.9.0-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
-| Windows (x64) | [Stellara Work-Setup-0.9.0.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Apple Silicon) | [Stellara Work-0.9.1-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| Windows (x64) | [Stellara Work-Setup-0.9.1.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
 
-> Note: builds are currently unsigned. On macOS, right-click → Open to bypass Gatekeeper; on Windows, click "More info → Run anyway" in SmartScreen.
->
-> 提示：当前安装包未签名。macOS 请右键 → 打开；Windows 在 SmartScreen 中选择"更多信息 → 仍要运行"。
+> **Note:** Builds are currently unsigned. On macOS, right-click → Open to bypass Gatekeeper. On Windows, click "More info → Run anyway" in SmartScreen.
 
 ---
 
-## Quick Start · 快速开始
+## Quick Start
 
-### Prerequisites · 环境要求
+### Prerequisites
 
 - Node.js 20+
 - Windows: Python 3.x + Visual Studio Build Tools (Desktop development with C++) — required only for the first `npm install` of `better-sqlite3`
 - macOS / Linux: nothing extra — `better-sqlite3` ships prebuilt binaries
 
-### 1. Install · 安装依赖
+### 1. Install dependencies
 
 ```bash
 npm install
@@ -76,29 +81,27 @@ npm install
 
 On macOS/Linux you can also use `bash setup.sh` (checks Node, installs deps, runs tests).
 
-### 2. Run · 启动
+### 2. Run
 
 ```bash
 npm run dev
 ```
 
-On first launch, the onboarding flow walks you through choosing a model provider and entering your API key. Your key is stored encrypted and is only ever read by the main process.
+On first launch, the onboarding flow walks you through choosing a model provider and entering your API key. Your key is stored encrypted and is only read by the main process.
 
-首次启动时按引导选择模型并填入 API key 即可。密钥加密存储，仅主进程可读。
-
-### 3. Scripts · 常用脚本
+### 3. Scripts
 
 ```bash
-npm run dev        # dev mode (Vite HMR + Electron)
-npm test           # run tests
-npm run typecheck  # type check both processes
+npm run dev          # dev mode (Vite HMR + Electron)
+npm test             # run tests
+npm run typecheck    # type check both processes
 npm run package:mac  # build macOS dmg/zip (macOS only)
-npm run package:win  # cross-build Windows NSIS installer (works on macOS, no wine)
+npm run package:win  # build Windows NSIS installer
 ```
 
 ---
 
-## Built-in Model Presets · 内置模型预设
+## Built-in Model Presets
 
 | Model | Provider | base_url |
 |---|---|---|
@@ -106,21 +109,22 @@ npm run package:win  # cross-build Windows NSIS installer (works on macOS, no wi
 | DeepSeek-v4-Pro | DeepSeek | `https://api.deepseek.com` |
 | Kimi-K3 | Moonshot | `https://api.moonshot.cn` |
 | MiniMax-M3 | MiniMax | `https://api.minimaxi.com/v1` |
-| Custom · 自定义 | yours | any OpenAI-compatible endpoint |
+| Custom | yours | any OpenAI-compatible endpoint |
 
 ---
 
-## Security Model · 安全模型
+## Security Model
 
-- `nodeIntegration: false` — the renderer cannot `require('fs')`
+- `nodeIntegration: false` — renderer cannot `require('fs')`
 - `contextIsolation: true` — renderer JS is isolated from preload
-- `sandbox: true` — the renderer runs sandboxed
-- API keys live in the main process; the renderer can never read them via IPC
+- `sandbox: true` — renderer runs sandboxed
+- External URLs restricted to `http/https/mailto` protocols
+- IPC sender validation on all handlers
 - All dangerous operations (file writes, shell commands) require explicit approval
 
 ---
 
-## Architecture · 架构
+## Architecture
 
 ```
 electron/                  # Electron main process
@@ -141,14 +145,14 @@ Stack: Electron · React 19 · TypeScript · Vite · better-sqlite3 · CodeMirro
 
 ---
 
-## Documentation · 文档
+## Documentation
 
-- [macOS migration guide · macOS 迁移指南](docs/macos-migration.md)
-- [Contributing · 贡献指南](CONTRIBUTING.md)
-- [Changelog · 变更记录](CHANGELOG.md)
+- [macOS migration guide](docs/macos-migration.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 
-## License · 许可证
+## License
 
 [MIT](LICENSE) © Stellara Work
