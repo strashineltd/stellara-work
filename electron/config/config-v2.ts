@@ -179,13 +179,30 @@ export async function migrateFromV1(): Promise<boolean> {
   } catch {
     // ignore
   }
+
+  // 根据模型 ID 确定兼容性
+  const modelId = old.id as string;
+  let compatibility: ModelEntry['compatibility'] = 'unverified';
+  if (modelId.startsWith('deepseek')) {
+    // DeepSeek 已知支持 Responses，标记为待复验
+    compatibility = 'unverified';
+  } else if (modelId.startsWith('glm') || modelId.startsWith('kimi') || modelId.startsWith('minimax')) {
+    // GLM/Kimi/MiniMax 暂不支持 Responses，标记为不兼容
+    compatibility = 'incompatible';
+  } else {
+    // 自定义模型，待验证
+    compatibility = 'unverified';
+  }
+
   const entry: ModelEntry = {
-    id: old.id as string,
+    id: modelId,
     label: old.label as string,
     baseUrl: old.baseUrl as string,
     model: old.model as string,
     workDir: old.workDir as string | undefined,
     createdAt: new Date().toISOString(),
+    wireApi: 'responses',
+    compatibility,
   };
   await setKey(entry.id, old.apiKey as string);
   const newCfg: AppConfig = {

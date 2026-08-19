@@ -126,6 +126,8 @@ describe('config-v2', () => {
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
       workDir: 'D:\\work',
+      wireApi: 'responses',
+      compatibility: 'unverified',
     });
     expect((cfg.models[0] as unknown as Record<string, unknown>).apiKey).toBeUndefined();
     // .env 应该有 key
@@ -133,6 +135,40 @@ describe('config-v2', () => {
     // 旧文件备份
     const backup = await fs.readFile(path.join(tmpDir, 'config.json.bak'), 'utf-8');
     expect(backup).toContain('sk-old-key');
+  });
+
+  it('migrateFromV1 marks GLM as incompatible', async () => {
+    const old = {
+      id: 'glm-5.2',
+      label: 'GLM-5.2',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      model: 'glm-5.2',
+      apiKey: 'sk-glm-key',
+      isCustom: false,
+    };
+    await fs.writeFile(path.join(tmpDir, 'config.json'), JSON.stringify(old, null, 2));
+    const migrated = await migrateFromV1();
+    expect(migrated).toBe(true);
+    const cfg = await loadConfig();
+    expect(cfg.models[0]?.compatibility).toBe('incompatible');
+    expect(cfg.models[0]?.wireApi).toBe('responses');
+  });
+
+  it('migrateFromV1 marks custom model as unverified', async () => {
+    const old = {
+      id: 'custom-1',
+      label: 'My Model',
+      baseUrl: 'https://example.com/v1',
+      model: 'my-model',
+      apiKey: 'sk-custom',
+      isCustom: true,
+    };
+    await fs.writeFile(path.join(tmpDir, 'config.json'), JSON.stringify(old, null, 2));
+    const migrated = await migrateFromV1();
+    expect(migrated).toBe(true);
+    const cfg = await loadConfig();
+    expect(cfg.models[0]?.compatibility).toBe('unverified');
+    expect(cfg.models[0]?.wireApi).toBe('responses');
   });
 
   it('migrateFromV1 returns false if no old config', async () => {
