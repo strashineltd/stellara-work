@@ -6,6 +6,8 @@ import { loadEnv, getEnvPath } from './config/env';
 import { loadModelsConfig } from './config/models';
 import { runAgentLoop } from './agent/loop';
 import { runResponsesLoop } from './agent/responses-loop';
+import { AnthropicClient } from './llm/anthropic';
+import { getSystemPrompt } from './agent/plan';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { SubagentCoordinator } from './agent/subagent-coordinator';
@@ -304,7 +306,9 @@ function registerIpcHandlers(): void {
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // 渐进式集成：根据 wireApi 选择 loop
-    if (configured.wireApi === 'responses') {
+    if (configured.wireApi === 'anthropic') {
+      void runAnthropicLoopForIpc(request, configured, streamId);
+    } else if (configured.wireApi === 'responses') {
       void runResponsesLoopForIpc(request, configured, streamId);
     } else {
       void runAgentLoopForIpc(request, configured, streamId);
@@ -928,10 +932,136 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
 
 /**
  * Responses API Agent Loop 的 IPC 包装器
- *
- * 渐进式集成：保留旧 runAgentLoopForIpc，新增此函数。
- * 通过模型的 wireApi 配置选择使用哪个 loop。
+  *
+  * 渐进式集成：保留旧 runAgentLoopForIpc，新增此函数。
+  * 通过模型的 wireApi 配置选择使用哪个 loop。
  */
+
+/**
+ * Anthropic Messages API Agent Loop 的 IPC 包装器
+ *
+ * 用于自定义模型选择 Anthropic 格式时使用。
+ */
+async function runAnthropicLoopForIpc(
+  request: ChatRequest,
+  model: ModelConfig,
+  streamId: string,
+): Promise<void> {
+  const send = (event: ChatStreamEvent) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('chat-stream', { streamId, event });
+    }
+  };
+
+  const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user') {
+    send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
+    return;
+  }
+
+  // 附件注入
+  let userContent = last.content;
+  if (request.attachments && request.attachments.length > 0) {
+    const attachmentLines = request.attachments.map(
+      (a) => `- ${a.name} → ${a.relPath}（${a.kind === 'image' ? '图片' : '文件'}）`,
+    );
+    userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
+  }
+
+  // 创建 Anthropic 客户端
+  const client = new AnthropicClient({
+    baseUrl: model.baseUrl,
+    apiKey: model.apiKey,
+    model: model.model,
+  });
+
+  // 创建 AbortController
+  const ctrl = chatStreams.start(streamId);
+  let terminalEventSent = false;
+  let taskCompleted = false;
+  let taskFailed = false;
+
+  // macOS：阻止系统休眠
+  let powerSaveId: number | null = null;
+  if (process.platform === 'darwin') {
+    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
+  }
+
+  try {
+    const cwd = model.workDir!;
+
+    // 加载 skills
+    let skills: import('../shared/ipc').SkillDef[] = [];
+    try {
+      const { loadSkills } = await import('./agent/skills');
+      skills = await loadSkills(cwd);
+    } catch {
+      // skills 加载失败不影响 agent 运行
+    }
+
+    // 构建 Anthropic 请求
+    const systemPrompt = getSystemPrompt(false, { platform: process.platform, arch: process.arch }, skills);
+    const anthropicRequest: import('./llm/anthropic').AnthropicRequest = {
+      model: model.model,
+      max_tokens: model.maxOutputTokens || 4096,
+      messages: [{ role: 'user', content: userContent }],
+      system: systemPrompt,
+      stream: true,
+    };
+
+    // 运行 Anthropic Loop
+    for await (const event of client.createStream(anthropicRequest, ctrl.signal)) {
+      if (ctrl.signal.aborted) break;
+
+      // 处理流式事件
+      if (event.type === 'content_block_delta' && event.delta?.text) {
+        send({ type: 'content', content: event.delta.text });
+      } else if (event.type === 'message_stop') {
+        send({ type: 'done' });
+        terminalEventSent = true;
+      } else if (event.type === 'error') {
+        send({ type: 'error', error: event.error?.message || '未知错误' });
+        terminalEventSent = true;
+      }
+    }
+
+    // 任务结束通知
+    const windowActive = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused();
+    if (!windowActive && !ctrl.signal.aborted && (taskCompleted || taskFailed)) {
+      if (process.platform === 'darwin') {
+        app.dock?.bounce(taskFailed ? 'critical' : 'informational');
+      }
+      notifyTaskEnd(
+        { completed: taskCompleted, failed: taskFailed, aborted: false },
+        () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        },
+      );
+    }
+  } catch (err) {
+    if (!ctrl.signal.aborted) {
+      send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    }
+  } finally {
+    // 清理资源
+    chatStreams.cleanup(streamId);
+    if (!terminalEventSent) send({ type: 'done' });
+
+    // macOS：恢复系统休眠
+    if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {
+      powerSaveBlocker.stop(powerSaveId);
+    }
+
+    // 异步提取记忆
+    void extractMemoriesFromSession(request, model).catch(() => {});
+  }
+}
+
 async function runResponsesLoopForIpc(
   request: ChatRequest,
   model: ModelConfig,

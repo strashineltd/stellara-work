@@ -11,8 +11,8 @@ import type { ModelPreset } from '../../shared/ipc';
  */
 
 export interface ModelPresetWithCapability extends ModelPreset {
-  /** 协议类型 */
-  wireApi: 'responses';
+  /** 协议类型：responses 或 anthropic */
+  wireApi: 'responses' | 'anthropic';
   /** Responses 兼容状态 */
   compatibility: 'verified' | 'unverified' | 'incompatible';
   /** 是否可执行（verified 时可执行） */
@@ -106,6 +106,16 @@ export const MODEL_PRESETS: ModelPresetWithCapability[] = [
     model: '',
     isCustom: true,
     wireApi: 'responses',
+    compatibility: 'unverified',
+    executable: false,
+  },
+  {
+    id: 'custom-anthropic',
+    label: '自定义模型（Anthropic Messages）',
+    baseUrl: '',
+    model: '',
+    isCustom: true,
+    wireApi: 'anthropic',
     compatibility: 'unverified',
     executable: false,
   },
