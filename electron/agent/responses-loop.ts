@@ -12,7 +12,7 @@
  */
 
 import log from 'electron-log/main';
-import type { ModelConfig, ChatStreamEvent, ToolCall, ToolName, SkillDef, ErrorKind } from '../../shared/ipc';
+import type { ModelConfig, ChatStreamEvent, ToolCall, ToolName, ToolExecutionContext, SkillDef, ErrorKind } from '../../shared/ipc';
 import type {
   CreateResponseRequest,
   ResponseItem,
@@ -93,6 +93,7 @@ export async function* runResponsesLoop(
   const {
     model,
     cwd,
+    sessionId,
     contextHub,
     planMode: initialPlanMode = false,
     maxIterations = MAX_ITERATIONS_DEFAULT,
@@ -344,7 +345,18 @@ export async function* runResponsesLoop(
       // 执行工具
       try {
         const args = JSON.parse(fc.arguments);
-        const result = await invokeTool(fc.name as ToolName, args, cwd);
+
+        // 创建工具执行上下文
+        const toolContext: ToolExecutionContext = {
+          sessionId,
+          agentId: 'main',
+          contextRevision: contextHub.getRevision(),
+          workspaceRevision: contextHub.getWorkspaceRevision(),
+          toolCallId: fc.call_id,
+          planStepId: contextHub.getContext().plan.steps.find(s => s.status === 'in_progress')?.id,
+        };
+
+        const result = await invokeTool(fc.name as ToolName, args, cwd, toolContext);
 
         toolResults.push({
           type: 'function_call_output',

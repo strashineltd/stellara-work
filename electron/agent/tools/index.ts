@@ -1,4 +1,4 @@
-import type { OpenAITool, ToolName, ToolArgs, ToolResult, RunCommandArgs, DispatchSubagentsArgs } from '../../../shared/ipc';
+import type { OpenAITool, ToolName, ToolArgs, ToolResult, ToolExecutionContext, RunCommandArgs, DispatchSubagentsArgs } from '../../../shared/ipc';
 import { readFile, writeFile, editFile, fsTools } from './fs';
 import { runCommand, shellTools } from './shell';
 import { searchFiles, searchTools } from './search';
@@ -10,6 +10,7 @@ import { taskComplete, taskCompleteTools } from './task-complete';
 import { gitStatus, gitDiff, gitLog, gitTools } from './git';
 import { memorySearch, memorySave, memoryTools } from './memory';
 import { dispatchSubagents, dispatchSubagentsTools } from './dispatch-subagents';
+import { mcpManager } from '../../mcp/mcp-manager';
 
 export { fsTools, shellTools, searchTools, grepTools, searchSymbolTools, listFilesTools, webFetchTools, taskCompleteTools, gitTools, memoryTools, dispatchSubagentsTools };
 
@@ -42,6 +43,21 @@ export const planModeTools: OpenAITool[] = [
 ];
 
 export async function invokeTool(
+  name: ToolName,
+  args: ToolArgs,
+  cwd: string,
+  _context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  // MCP 桥接：mcp__ 开头的工具名路由到 mcpManager.callTool
+  if (typeof name === 'string' && name.startsWith('mcp__')) {
+    return mcpManager.callTool(name, args as Record<string, unknown>);
+  }
+
+  const result = await invokeToolInternal(name, args, cwd);
+  return result;
+}
+
+async function invokeToolInternal(
   name: ToolName,
   args: ToolArgs,
   cwd: string,
@@ -80,19 +96,12 @@ export async function invokeTool(
     case 'git_log':
       return gitLog(args as Record<string, unknown>, cwd);
     case 'memory_search':
-      return memorySearch(args as { query: string; scope?: string; kind?: string; limit?: number }, cwd);
+      return memorySearch(args as { query: string; limit?: number }, cwd);
     case 'memory_save':
-      return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[] }, cwd);
+      return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd);
     case 'dispatch_subagents':
       return dispatchSubagents(args as DispatchSubagentsArgs, cwd);
-    default: {
-      const rawName = name as string;
-      if (rawName.startsWith('mcp__')) {
-        const { mcpManager } = await import('../../mcp/mcp-manager');
-        return mcpManager.callTool(name, args as Record<string, unknown>);
-      }
-      const exhaustive: never = name;
-      throw new Error(`未知 tool：${exhaustive}`);
-    }
+    default:
+      return { ok: false, output: '', error: `未知工具: ${name}` };
   }
 }

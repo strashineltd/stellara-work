@@ -741,6 +741,26 @@ export interface FileModificationEvidence {
 }
 
 // ============================================
+// 工具执行上下文（v0.9.2）
+// ============================================
+
+/** 工具执行上下文（关联 agent/session/revision/plan step） */
+export interface ToolExecutionContext {
+  /** 当前会话 ID */
+  sessionId: string;
+  /** 当前 agent ID（main 或子代理 ID） */
+  agentId: string;
+  /** 当前上下文版本 */
+  contextRevision: number;
+  /** 当前工作区版本 */
+  workspaceRevision: number;
+  /** 关联的 Plan step ID */
+  planStepId?: string;
+  /** 工具调用 ID（用于关联 function_call_output） */
+  toolCallId: string;
+}
+
+// ============================================
 // electronAPI 接口（preload 暴露给渲染进程）
 // ============================================
 

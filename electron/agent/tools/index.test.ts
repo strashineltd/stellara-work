@@ -30,7 +30,8 @@ describe('invokeTool mcp bridge', () => {
 
   it('still throws for unknown non-mcp tool names', async () => {
     const name = 'nonexistent_tool' as unknown as ToolName;
-    await expect(invokeTool(name, {}, '/work')).rejects.toThrow('未知 tool');
-    expect(mockCallTool).not.toHaveBeenCalled();
+    const result = await invokeTool(name, {}, '/work');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('未知工具');
   });
 });
