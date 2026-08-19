@@ -32,6 +32,17 @@ export interface ModelEntry {
   createdAt: string;
   /** 模型上下文窗口（token 数）。默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
   contextWindow?: number;
+  // v0.9.2 新增：Responses API 相关字段
+  /** 协议类型，v0.9.2 固定为 'responses' */
+  wireApi?: 'responses';
+  /** 最大输出 token（供应商支持时生效） */
+  maxOutputTokens?: number;
+  /** reasoning effort（low/medium/high，供应商支持时生效） */
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  /** 兼容状态：verified=已通过 Responses 验证，unverified=未验证，incompatible=不兼容 */
+  compatibility?: 'verified' | 'unverified' | 'incompatible';
+  /** 最后验证时间 */
+  verifiedAt?: string;
 }
 
 export interface AppConfig {

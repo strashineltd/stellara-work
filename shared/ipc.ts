@@ -23,9 +23,12 @@ export type { ContextWindowValue } from './context-window';
 
 export type PresetModelId =
   | 'glm-5.2'
+  | 'glm-5.3'
   | 'deepseek-v4-pro'
+  | 'deepseek-v4-flash'
   | 'kimi-k3'
   | 'minimax-m3'
+  | 'qwen3.8-max'
   | 'custom';
 
 export interface ModelPreset {
@@ -36,6 +39,11 @@ export interface ModelPreset {
   isCustom: boolean;
   /** 模型上下文窗口（token 数），默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
   contextWindow?: number;
+  // v0.9.2 新增：Responses API 相关（可选，兼容旧代码）
+  /** 协议类型 */
+  wireApi?: 'responses';
+  /** Responses 兼容状态 */
+  compatibility?: 'verified' | 'unverified' | 'incompatible';
 }
 
 export interface ModelConfig extends ModelPreset {
