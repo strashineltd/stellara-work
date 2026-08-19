@@ -200,7 +200,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
                   <input
                     id="add-model-base-url"
                     type="text"
-                    placeholder="任意 OpenAI 兼容 endpoint"
+                    placeholder="任意 Responses API endpoint"
                     value={addBaseUrl}
                     onChange={(e) => setAddBaseUrl(e.target.value)}
                   />

@@ -695,6 +695,45 @@ kbd {
   font-weight: 650;
 }
 
+.model-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.model-card-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-soft);
+  color: var(--color-text-faint);
+}
+
+.model-card-badge.verified {
+  background: var(--color-success-bg, #e6f7e6);
+  color: var(--color-success-text, #1a7a1a);
+}
+
+.model-card-badge.unverified {
+  background: var(--color-warning-bg, #fff7e6);
+  color: var(--color-warning-text, #7a6a1a);
+}
+
+.model-card.incompatible {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-card-status {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+
 .model-card-base,
 .model-card-model {
   overflow: hidden;

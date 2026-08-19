@@ -162,7 +162,7 @@ function WelcomePage({ onStart, onSkip }: { onStart: () => void; onSkip: () => v
             </span>
             <div>
               <div className="t">模型自由</div>
-              <div className="d">支持 GLM·DeepSeek·Kimi·MiniMax 与任意 OpenAI 兼容模型。</div>
+              <div className="d">支持 DeepSeek·Qwen 与任意 Responses API 模型。</div>
             </div>
           </div>
           <div className="value-point">
@@ -232,7 +232,7 @@ function PickPage({
                 {p.label}
               </span>
               <span className="model-card-base">
-                {p.isCustom ? 'OpenAI 兼容' : '中文模型'}
+                {p.isCustom ? 'Responses API' : '中文模型'}
               </span>
             </button>
           ))}
@@ -307,7 +307,7 @@ function ConnectionPage({
               id="ob-base-url"
               className="input"
               type="text"
-              placeholder="任意 OpenAI 兼容端点"
+              placeholder="任意 Responses API endpoint"
               value={baseUrl}
               onChange={(e) => onBaseUrlChange(e.target.value)}
             />
