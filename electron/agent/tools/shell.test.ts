@@ -88,7 +88,11 @@ describe('runCommand', () => {
     }
   });
 
-  it('allows macOS dev commands in whitelist (POSIX)', async () => {
+  // macOS 专属开发命令：白名单接受性是静态代码（ALLOWED_COMMANDS_POSIX），
+  // 实际执行验证只在 darwin 上有意义。非 darwin CI（ubuntu）上工具缺失/冷启动
+  // 耗时不可控（例如 Swift 工具链首次启动可达数秒），会拖垮 5s 测试超时。
+  // 注：不能用 it.skipIf —— vitest 4.1.10 下 skipIf(false) 不注册测试（回归 bug）。
+  (process.platform !== 'darwin' ? it.skip : it)('allows macOS dev commands in whitelist (POSIX)', async () => {
     for (const cmd of [
       'swift --version',
       'xcrun --version',
