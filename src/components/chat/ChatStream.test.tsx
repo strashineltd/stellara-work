@@ -280,3 +280,94 @@ describe('ChatStream', () => {
     unmount();
   });
 });
+
+function renderEntries(entries: DisplayEntry[], extra: Partial<React.ComponentProps<typeof ChatStream>> = {}) {
+  return render(
+    <ChatStream
+      entries={entries}
+      busy={false}
+      streamId={null}
+      chatRef={null as any}
+      lastUserForRetry={null}
+      modelMissing={false}
+      onOpenSettings={vi.fn()}
+      onRetry={vi.fn()}
+      onAbort={vi.fn()}
+      onApprove={vi.fn()}
+      pendingApproval={null}
+      {...extra}
+    />,
+  );
+}
+
+describe('ChatStream live entry classes', () => {
+  it('renders a discrete live wrapper when presentation matches the session', () => {
+    const { querySelector } = renderEntries(
+      [{
+        kind: 'user',
+        content: 'hi',
+        presentation: { key: 'live:a:1', sessionId: 'a', enter: 'discrete' },
+      }],
+      { sessionId: 'a' },
+    );
+    const wrapper = querySelector('.entry') as HTMLElement;
+    expect(wrapper.className).toBe('entry entry--live');
+    expect(wrapper.getAttribute('data-entry-key')).toBe('live:a:1');
+  });
+
+  it('renders a status live wrapper for status motion', () => {
+    const { querySelector } = renderEntries(
+      [{
+        kind: 'verify',
+        phase: 'post_edit',
+        presentation: { key: 'live:a:2', sessionId: 'a', enter: 'status' },
+      }],
+      { sessionId: 'a' },
+    );
+    const wrapper = querySelector('.entry') as HTMLElement;
+    expect(wrapper.className).toBe('entry entry--status-live');
+    expect(wrapper.getAttribute('data-entry-key')).toBe('live:a:2');
+  });
+
+  it('keeps the wrapper static when presentation belongs to another session', () => {
+    const { querySelector } = renderEntries(
+      [{
+        kind: 'user',
+        content: 'hi',
+        presentation: { key: 'live:b:1', sessionId: 'b', enter: 'discrete' },
+      }],
+      { sessionId: 'a' },
+    );
+    const wrapper = querySelector('.entry') as HTMLElement;
+    expect(wrapper.className).toBe('entry');
+    expect(wrapper.getAttribute('data-entry-key')).toBe('live:b:1');
+  });
+
+  it('falls back to a detached stable key without presentation', () => {
+    const { querySelector } = renderEntries(
+      [{ kind: 'assistant', content: 'x' }],
+      { sessionId: 'a' },
+    );
+    const wrapper = querySelector('.entry') as HTMLElement;
+    expect(wrapper.className).toBe('entry');
+    expect(wrapper.getAttribute('data-entry-key')).toBe('detached:a:0:assistant');
+  });
+
+  it('keeps the thinking status text visible and announced while the assistant is busy', () => {
+    const { getByText } = renderEntries(
+      [{ kind: 'assistant', content: '' }],
+      { busy: true },
+    );
+    const thinking = getByText('正在分析任务…');
+    expect(thinking).not.toBeNull();
+    expect(thinking?.hasAttribute('aria-hidden')).toBe(false);
+    expect(thinking?.getAttribute('role')).toBe('status');
+  });
+
+  it('announces the model-missing warning with role=alert and one-shot entry motion', () => {
+    const { querySelector } = renderEntries([], { modelMissing: true });
+    const banner = querySelector('.model-missing-banner');
+    expect(banner?.getAttribute('role')).toBe('alert');
+    expect(banner?.classList.contains('motion-feedback-enter')).toBe(true);
+  });
+});

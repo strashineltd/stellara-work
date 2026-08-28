@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FsNode } from '../../shared/ipc';
 import { Icon } from './Icon';
+import { usePresence } from '../hooks/usePresence';
+import { presenceRootProps, restoreFocusTarget, type MotionPresence } from '../lib/presence-ui';
 
 export interface FileTreeNodeProps {
   node: FsNode;
@@ -12,6 +14,40 @@ export interface FileTreeNodeProps {
   onSelect: (path: string) => void;
   /** Optional compact marker displayed at the end of a row. */
   badge?: (node: FsNode) => string | undefined;
+}
+
+type ContextMenuState = {
+  open: boolean;
+  x: number;
+  y: number;
+  side: 'bottom';
+  path: string;
+};
+
+const POINTER_FOCUS_TARGET = [
+  'a[href]',
+  'area[href]',
+  'button',
+  'input:not([type="hidden"])',
+  'select',
+  'textarea',
+  'iframe',
+  'summary',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getPointerFocusTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const candidate = target.closest<HTMLElement>(POINTER_FOCUS_TARGET);
+  if (
+    !candidate?.isConnected
+    || candidate.matches(':disabled, [aria-disabled="true"]')
+    || candidate.closest('[inert], [aria-hidden="true"]')
+  ) {
+    return null;
+  }
+  return candidate;
 }
 
 /**
@@ -31,13 +67,59 @@ export function FileTreeNode({
   const isDir = node.type === 'dir';
   const isOpen = expanded.has(node.path);
   const isSelected = selected === node.path;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const menuPresence = usePresence(menu?.open === true, 120);
+  const menuOpenRef = useRef(false);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const menuOpen = menu?.open === true;
+
+  function closeMenu(restoreFocus = true): boolean {
+    if (!menuOpenRef.current) return false;
+    menuOpenRef.current = false;
+    if (restoreFocus) restoreFocusTarget(rowRef.current);
+    setMenu((current) => (current?.open ? { ...current, open: false } : current));
+    return true;
+  }
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.context-menu')) return;
+      closeMenu(getPointerFocusTarget(e.target) === null);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMenu(true);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (menuPresence.mounted || !menu || menu.open) return;
+    setMenu(null);
+    menuOpenRef.current = false;
+  }, [menu, menuPresence.mounted]);
 
   function handleContextMenu(e: React.MouseEvent) {
     e.preventDefault();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-    setMenuOpen(true);
+    menuOpenRef.current = true;
+    setMenu({ open: true, x: e.clientX, y: e.clientY, side: 'bottom', path: node.path });
+  }
+
+  function handleRowAction() {
+    if (isDir) onToggle(node.path);
+    else onSelect(node.path);
+  }
+
+  function handleRowKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    handleRowAction();
   }
 
   const nodeBadge = badge?.(node);
@@ -45,12 +127,12 @@ export function FileTreeNode({
   return (
     <li>
       <div
+        ref={rowRef}
         className={`ftree-row ${isSelected ? 'selected' : ''}`}
         style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={() => {
-          if (isDir) onToggle(node.path);
-          else onSelect(node.path);
-        }}
+        tabIndex={0}
+        onClick={handleRowAction}
+        onKeyDown={handleRowKeyDown}
         onContextMenu={handleContextMenu}
         title={node.path}
       >
@@ -81,34 +163,32 @@ export function FileTreeNode({
           ))}
         </ul>
       )}
-      {menuOpen && menuPos && (
+      {menuPresence.mounted && menu && (
         <ContextMenu
-          x={menuPos.x}
-          y={menuPos.y}
+          x={menu.x}
+          y={menu.y}
           isDir={isDir}
-          path={node.path}
+          path={menu.path}
           workDir={workDir}
-          onClose={() => { setMenuOpen(false); setMenuPos(null); }}
+          side={menu.side}
+          presence={menuPresence}
+          onClose={closeMenu}
         />
       )}
     </li>
   );
 }
 
-function ContextMenu({ x, y, isDir, path, onClose, workDir }: {
-  x: number; y: number; isDir: boolean; path: string; onClose: () => void; workDir: string;
+function ContextMenu({ x, y, isDir, path, onClose, workDir, side, presence }: {
+  x: number;
+  y: number;
+  isDir: boolean;
+  path: string;
+  onClose: (restoreFocus?: boolean) => boolean;
+  workDir: string;
+  side: 'bottom';
+  presence: MotionPresence;
 }) {
-  useEffect(() => {
-    const onClick = () => onClose();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('click', onClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('click', onClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
-
   async function copyPath() {
     try {
       await navigator.clipboard.writeText(path);
@@ -127,13 +207,16 @@ function ContextMenu({ x, y, isDir, path, onClose, workDir }: {
     <ul
       className="context-menu"
       style={{ position: 'fixed', top: y, left: x }}
+      data-motion="menu"
+      data-side={side}
+      {...presenceRootProps(presence)}
       onClick={(e) => e.stopPropagation()}
     >
-      <li onClick={() => { void copyPath(); onClose(); }}>
+      <li onClick={() => { if (!onClose(true)) return; void copyPath(); }}>
         <Icon name="copy" size={14} />
         <span>复制路径</span>
       </li>
-      <li onClick={() => { void openInExplorer(); onClose(); }}>
+      <li onClick={() => { if (!onClose(true)) return; void openInExplorer(); }}>
         <Icon name="folder" size={14} />
         <span>{isDir ? '在资源管理器打开' : '在默认应用打开'}</span>
       </li>

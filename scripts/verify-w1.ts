@@ -18,7 +18,9 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { config as loadDotenv } from 'dotenv';
-import { runAgentLoop } from '../electron/agent/loop';
+import { runResponsesLoop } from '../electron/agent/responses-loop';
+import { runAnthropicAgentLoop } from '../electron/agent/anthropic-loop';
+import { ContextHub } from '../electron/context/context-hub';
 import { invokeTool } from '../electron/agent/tools';
 import { findPreset } from '../electron/llm/presets';
 import { loadModelsConfig } from '../electron/config/models';
@@ -54,6 +56,7 @@ async function main() {
       model: process.env.STELLARA_MODEL_NAME ?? preset.model,
       apiKey,
       isCustom: preset.isCustom,
+      wireApi: preset.wireApi,
     };
   }
 
@@ -119,7 +122,11 @@ async function main() {
 
   let content = '';
   let toolCalls = 0;
-  for await (const event of runAgentLoop(task, { model, cwd })) {
+  const contextHub = new ContextHub('verify-w1-cli', cwd, model.contextWindow ?? 256000, model.maxOutputTokens ?? 16384, { persist: false });
+  const loop = model.wireApi === 'anthropic'
+    ? runAnthropicAgentLoop(task, { model, cwd, sessionId: 'verify-w1-cli', contextHub })
+    : runResponsesLoop(task, { model, cwd, sessionId: 'verify-w1-cli', contextHub });
+  for await (const event of loop) {
     if (event.type === 'content' && event.content) {
       content += event.content;
       process.stdout.write(event.content);
@@ -137,6 +144,7 @@ async function main() {
       console.log('\n  [done]');
     }
   }
+  contextHub.dispose();
 
   console.log('');
   console.log('▶ W1 验收总结');

@@ -27,8 +27,8 @@ describe('project window cross-layer contract', () => {
   });
 
   it('opens project setup before persistence and keeps existing project rows as toggles', () => {
-    expect(mainView).toContain('onProjectCreate={() => setCreateProjectOpen(true)}');
-    expect(mainView).toContain('onCreateProject={() => setCreateProjectOpen(true)}');
+    expect(mainView).toContain('onProjectCreate={openCreateProject}');
+    expect(mainView).toContain('onCreateProject={openCreateProject}');
     expect(mainView).toMatch(/mode="create"[\s\S]*?onCreate=\{handleCreateProject\}/);
     expect(mainView).not.toContain("projects.create({ name: '新项目'");
     expect(sidebar).toContain('className="project-toggle-button"');

@@ -94,4 +94,21 @@ describe('SettingsMcpSection args 引号解析', () => {
       args: ['-y', 'two words'],
     }));
   });
+
+  it('announces MCP test success with role=status and failure with role=alert', async () => {
+    mocks.mcpTest.mockResolvedValue({ ok: true, toolCount: 3 });
+    const { container } = await render(<SettingsMcpSection onChanged={vi.fn()} />);
+    await fireClick(container.querySelector('.settings-mcp-add-trigger'));
+    await fireClick(container.querySelector('.settings-mcp-test'));
+    let result = container.querySelector('.settings-mcp-test-result');
+    expect(result?.getAttribute('role')).toBe('status');
+    expect(result?.classList.contains('motion-feedback-enter')).toBe(true);
+    expect(result?.textContent).toContain('连接成功');
+
+    mocks.mcpTest.mockResolvedValue({ ok: false, error: 'Connection refused' });
+    await fireClick(container.querySelector('.settings-mcp-test'));
+    result = container.querySelector('.settings-mcp-test-result');
+    expect(result?.getAttribute('role')).toBe('alert');
+    expect(result?.textContent).toContain('连接失败');
+  });
 });

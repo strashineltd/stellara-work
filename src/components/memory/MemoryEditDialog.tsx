@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Memory } from '../../../shared/ipc';
+import { presenceRootProps, type PresenceMotionProps } from '../../lib/presence-ui';
 import { Icon } from '../Icon';
 
-interface MemoryEditDialogProps {
+interface MemoryEditDialogProps extends PresenceMotionProps {
   memory?: Memory;
-  onSave: (data: { content: string; kind: string; scope: string; importance: number; tags: string[] }) => void;
+  onSave: (data: { content: string; kind: string; scope: string; importance: number; tags: string[] }) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -28,50 +29,113 @@ function starCount(importance: number): number {
   return Math.max(1, Math.round(importance * 5));
 }
 
-export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogProps) {
+export function MemoryEditDialog({ memory, onSave, onClose, presence }: MemoryEditDialogProps) {
   const [content, setContent] = useState(memory?.content ?? '');
   const [kind, setKind] = useState(memory?.kind ?? 'fact');
   const [scope, setScope] = useState(memory?.scope ?? 'personal');
   const [importance, setImportance] = useState(memory?.importance ?? 0.5);
   const [tagsInput, setTagsInput] = useState(memory?.tags?.join(', ') ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const contentRef = useRef<HTMLTextAreaElement>(null);
+  const initializedRef = useRef(false);
+  const memoryIdRef = useRef(memory?.id ?? null);
+  const operationGenerationRef = useRef(0);
+  const savingRef = useRef(false);
+  const focusAfterResetRef = useRef(false);
+  const memoryId = memory?.id ?? null;
+  const presenceState = presence?.state;
+  const isClosing = presenceState === 'closing';
 
-  useEffect(() => {
-    contentRef.current?.focus();
+  useLayoutEffect(() => {
+    const freshOpenMount = !initializedRef.current && !isClosing;
+    const memoryChanged = memoryIdRef.current !== memoryId;
+    initializedRef.current = true;
+    memoryIdRef.current = memoryId;
+    if (isClosing) {
+      operationGenerationRef.current += 1;
+      focusAfterResetRef.current = false;
+      return;
+    }
+    if (!freshOpenMount && !memoryChanged && presenceState !== 'entering') return;
+
+    operationGenerationRef.current += 1;
+    savingRef.current = false;
+    focusAfterResetRef.current = true;
+    setContent(memory?.content ?? '');
+    setKind(memory?.kind ?? 'fact');
+    setScope(memory?.scope ?? 'personal');
+    setImportance(memory?.importance ?? 0.5);
+    setTagsInput(memory?.tags?.join(', ') ?? '');
+    setSaving(false);
+    setSaveError(null);
+  }, [isClosing, memory?.content, memory?.importance, memory?.kind, memory?.scope, memory?.tags, memoryId, presenceState]);
+
+  useLayoutEffect(() => {
+    if (!focusAfterResetRef.current || !contentRef.current) return;
+    focusAfterResetRef.current = false;
+    contentRef.current.focus({ preventScroll: true });
+  });
+
+  useLayoutEffect(() => () => {
+    operationGenerationRef.current += 1;
+    savingRef.current = false;
+    focusAfterResetRef.current = false;
   }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !isClosing) onClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [isClosing, onClose]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (isClosing || savingRef.current || !content.trim()) return;
     const tags = tagsInput
       .split(',')
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    onSave({ content: content.trim(), kind, scope, importance, tags });
+    const operationGeneration = ++operationGenerationRef.current;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave({ content: content.trim(), kind, scope, importance, tags });
+    } catch (error) {
+      if (operationGenerationRef.current !== operationGeneration) return;
+      const reason = error instanceof Error && error.message ? `：${error.message}` : '';
+      setSaveError(`保存失败${reason}`);
+    } finally {
+      if (operationGenerationRef.current === operationGeneration) {
+        savingRef.current = false;
+        setSaving(false);
+      }
+    }
   }
 
   const isEdit = !!memory;
   const litStars = starCount(importance);
 
+  function handleClose() {
+    if (!isClosing) onClose();
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" {...presenceRootProps(presence)} onClick={handleClose}>
       <div
         className="modal memory-dialog"
         role="dialog"
+        aria-modal="true"
         aria-label={isEdit ? '编辑记忆' : '新建记忆'}
+        aria-busy={saving || undefined}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="memory-dialog__header">
           <h3 className="memory-dialog__title">{isEdit ? '编辑记忆' : '新建记忆'}</h3>
-          <button className="memory-dialog__close" type="button" onClick={onClose} aria-label="关闭">
+          <button className="memory-dialog__close" type="button" onClick={handleClose} aria-label="关闭">
             <Icon name="x" size={16} />
           </button>
         </div>
@@ -123,7 +187,10 @@ export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogPr
                   className={`memory-star${n <= litStars ? ' on' : ''}`}
                   type="button"
                   aria-label={`${n} 星`}
-                  onClick={() => setImportance(n / 5)}
+                  onClick={() => {
+                    if (!isClosing && !savingRef.current) setImportance(n / 5);
+                  }}
+                  disabled={isClosing || saving}
                 >
                   ★
                 </button>
@@ -140,11 +207,12 @@ export function MemoryEditDialog({ memory, onSave, onClose }: MemoryEditDialogPr
               placeholder="tag1, tag2, tag3"
             />
           </label>
+          {saveError && <p className="memory-dialog__error" role="alert">{saveError}</p>}
           <div className="memory-dialog__actions">
-            <button className="btn btn-ghost" type="button" onClick={onClose}>
+            <button className="btn btn-ghost" type="button" onClick={handleClose}>
               取消
             </button>
-            <button className="btn btn-primary" type="submit" disabled={!content.trim()}>
+            <button className="btn btn-primary" type="submit" disabled={isClosing || saving || !content.trim()}>
               {isEdit ? '保存' : '创建'}
             </button>
           </div>

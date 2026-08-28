@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ThemeName } from '../../shared/ipc';
 import { Icon, type IconName } from './Icon';
 import { SettingsModelsPanel } from './settings/SettingsModelsPanel';
@@ -7,6 +7,7 @@ import { SettingsAppPanel } from './settings/SettingsAppPanel';
 import { SettingsSkillsPanel } from './settings/SettingsSkillsPanel';
 import { SettingsShortcutsPanel } from './settings/SettingsShortcutsPanel';
 import { resolveTheme } from '../lib/theme';
+import { presenceRootProps, type PresenceMotionProps } from '../lib/presence-ui';
 
 export const SETTINGS_TABS = [
   { id: 'models', label: '模型' },
@@ -17,6 +18,13 @@ export const SETTINGS_TABS = [
 ] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number]['id'];
+export type OpenSettings = (tab?: SettingsTab, returnFocus?: HTMLElement | null) => void;
+
+export interface SettingsPanelProps extends PresenceMotionProps {
+  initialTab?: SettingsTab;
+  focusRequest?: number;
+  onClose: () => void;
+}
 
 const TAB_ICONS: Record<SettingsTab, IconName> = {
   models: 'settings',
@@ -31,24 +39,45 @@ const TAB_ICONS: Record<SettingsTab, IconName> = {
  * 各 panel 挂载时自行加载数据；模型变更后由主进程广播 settings-changed，
  * 本面板监听并递增 refreshKey，让已挂载的 panel 重新拉取数据。
  */
-export function SettingsPanel({ initialTab = 'models', onClose }: { initialTab?: SettingsTab; onClose: () => void }) {
-  const [tab, setTab] = useState<SettingsTab>(
-    SETTINGS_TABS.some((t) => t.id === initialTab) ? (initialTab as SettingsTab) : 'models',
-  );
+export function SettingsPanel({ initialTab = 'models', focusRequest = 0, onClose, presence }: SettingsPanelProps) {
+  const requestedTab = SETTINGS_TABS.some((item) => item.id === initialTab) ? initialTab : 'models';
+  const [tab, setTab] = useState<SettingsTab>(requestedTab);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [theme, setTheme] = useState<ThemeName>('light');
+  const [theme, setTheme] = useState<ThemeName>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+  const navRef = useRef<HTMLElement>(null);
+  const closing = presence?.state === 'closing';
+
+  useLayoutEffect(() => {
+    if (closing) return;
+    setTab(requestedTab);
+    navRef.current
+      ?.querySelector<HTMLButtonElement>(`.settings-nav__item[data-tab="${requestedTab}"]`)
+      ?.focus({ preventScroll: true });
+  }, [closing, focusRequest, requestedTab]);
 
   useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && presence?.state !== 'closing') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, presence?.state]);
+
+  useEffect(() => {
+    let active = true;
     void window.electronAPI.app.getInfo().then((info) => {
-      document.documentElement.dataset.platform = info.platform;
+      if (active) document.documentElement.dataset.platform = info.platform;
     });
+    return () => { active = false; };
   }, []);
 
   // 主题写到 documentElement.dataset.theme（global.css 用 [data-theme="dark"] 选择器）
   useEffect(() => {
+    let active = true;
     void window.electronAPI.settings.get().then((st) => {
-      if (st.theme) setTheme(st.theme);
+      if (active && st.theme) setTheme(st.theme);
     });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -68,17 +97,29 @@ export function SettingsPanel({ initialTab = 'models', onClose }: { initialTab?:
 
   // 其他窗口（主窗口等）改了模型/主题等配置 → 主进程广播 settings-changed → 刷新当前面板 + 同步主题
   useEffect(() => {
-    return window.electronAPI.app.onSettingsChanged(() => {
+    let active = true;
+    const unsubscribe = window.electronAPI.app.onSettingsChanged(() => {
+      if (!active) return;
       setRefreshKey((k) => k + 1);
       // 主题可能被主窗口或面板内其他 panel 修改：广播时重新读取，保证深浅色实时同步
       void window.electronAPI.settings.get().then((st) => {
-        if (st.theme) setTheme(st.theme);
+        if (active && st.theme) setTheme(st.theme);
       });
     });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div
+      className="modal-backdrop"
+      {...presenceRootProps(presence)}
+      onClick={() => {
+        if (presence?.state !== 'closing') onClose();
+      }}
+    >
       <div
         className="modal settings-modal"
         role="dialog"
@@ -86,7 +127,7 @@ export function SettingsPanel({ initialTab = 'models', onClose }: { initialTab?:
         aria-label="设置"
         onClick={(e) => e.stopPropagation()}
       >
-        <nav className="settings-nav" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+        <nav ref={navRef} className="settings-nav" role="tablist" aria-label="设置分类" aria-orientation="vertical">
           {SETTINGS_TABS.map((item) => (
             <button
               key={item.id}
@@ -111,21 +152,28 @@ export function SettingsPanel({ initialTab = 'models', onClose }: { initialTab?:
           role="tabpanel"
           aria-labelledby={`settings-tab-${tab}`}
         >
-          {tab === 'models' && (
-            <SettingsModelsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
-          )}
-          {tab === 'sessions' && (
-            <SettingsSessionsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
-          )}
-          {tab === 'app' && (
-            <SettingsAppPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
-          )}
-          {tab === 'skills' && (
-            <SettingsSkillsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
-          )}
-          {tab === 'shortcuts' && (
-            <SettingsShortcutsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
-          )}
+          <div
+            key={tab}
+            className="settings-tab-content"
+            data-motion="settings-content-enter"
+            data-tab={tab}
+          >
+            {tab === 'models' && (
+              <SettingsModelsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+            )}
+            {tab === 'sessions' && (
+              <SettingsSessionsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+            )}
+            {tab === 'app' && (
+              <SettingsAppPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+            )}
+            {tab === 'skills' && (
+              <SettingsSkillsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+            )}
+            {tab === 'shortcuts' && (
+              <SettingsShortcutsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+            )}
+          </div>
         </main>
       </div>
     </div>

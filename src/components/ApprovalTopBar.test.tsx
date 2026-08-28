@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { ApprovalTopBar } from './ApprovalTopBar';
 import type { ApprovalRequest } from '../../shared/ipc';
 
@@ -136,5 +136,67 @@ describe('ApprovalTopBar', () => {
       <ApprovalTopBar request={REQ} onApprove={vi.fn()} onReject={vi.fn()} />,
     );
     expect(getByText('需要确认')).toBeTruthy();
+  });
+
+  it('announces the approval bar with alertdialog semantics', () => {
+    const { querySelector } = render(
+      <ApprovalTopBar request={REQ} onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    const bar = querySelector('.approval-top-bar');
+    expect(bar?.getAttribute('role')).toBe('alertdialog');
+    expect(bar?.getAttribute('aria-label')).toBe('确认敏感操作');
+  });
+
+  it('marks the newly mounted approval bar with the one-shot status-enter class', () => {
+    const { querySelector } = render(
+      <ApprovalTopBar request={REQ} onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    expect(querySelector('.approval-top-bar')?.classList.contains('motion-feedback-enter')).toBe(true);
+  });
+
+  it('approves, fires the callback and removes the bar immediately in the same act', () => {
+    const onApprove = vi.fn();
+    function Harness() {
+      const [request, setRequest] = useState<ApprovalRequest | null>(REQ);
+      if (!request) return null;
+      return (
+        <ApprovalTopBar
+          request={request}
+          onApprove={() => {
+            onApprove();
+            setRequest(null);
+          }}
+          onReject={vi.fn()}
+        />
+      );
+    }
+    const { container, querySelector } = render(<Harness />);
+    expect(querySelector('.approval-top-bar')).not.toBeNull();
+    fireClick(getByRole(container, 'button', /允许|approve/i));
+    expect(onApprove).toHaveBeenCalledOnce();
+    expect(querySelector('.approval-top-bar')).toBeNull();
+  });
+
+  it('rejects, fires the callback and removes the bar immediately in the same act', () => {
+    const onReject = vi.fn();
+    function Harness() {
+      const [request, setRequest] = useState<ApprovalRequest | null>(REQ);
+      if (!request) return null;
+      return (
+        <ApprovalTopBar
+          request={request}
+          onApprove={vi.fn()}
+          onReject={() => {
+            onReject();
+            setRequest(null);
+          }}
+        />
+      );
+    }
+    const { container, querySelector } = render(<Harness />);
+    expect(querySelector('.approval-top-bar')).not.toBeNull();
+    fireClick(getByRole(container, 'button', /拒绝|reject/i));
+    expect(onReject).toHaveBeenCalledOnce();
+    expect(querySelector('.approval-top-bar')).toBeNull();
   });
 });

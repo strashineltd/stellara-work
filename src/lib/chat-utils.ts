@@ -7,7 +7,15 @@ import type { AttachmentMeta, ChatMessage, ChatStreamEvent, MessageRow, ToolCall
 // DisplayEntry 类型定义（也在这里导出，方便子组件 import）
 // ============================================================================
 
-export type DisplayEntry =
+export type EntryEnterMotion = 'discrete' | 'status';
+
+export interface EntryPresentation {
+  key: string;
+  sessionId: string | null;
+  enter?: EntryEnterMotion;
+}
+
+export type DisplayEntry = (
   | { kind: 'user'; content: string; attachments?: AttachmentMeta[] }
   | { kind: 'assistant'; content: string; toolCalls?: ToolCall[] }
   | { kind: 'tool_call'; id: string; name: string; args: string }
@@ -17,7 +25,10 @@ export type DisplayEntry =
   | { kind: 'report'; summary: string; files: Array<{ path: string; kind: 'write' | 'edit' }>; commands: Array<{ command: string; exitCode: number; ok: boolean }> }
   | { kind: 'plan'; steps: Array<{ description: string; status: string }> }
   | { kind: 'verify'; phase: string; target?: string }
-  | { kind: 'subagent_summary'; results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> };
+  | { kind: 'subagent_summary'; results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> }
+) & { presentation?: EntryPresentation };
+
+export type PresentEntry = (entry: DisplayEntry, enter: EntryEnterMotion) => DisplayEntry;
 
 // ============================================================================
 // 字符串工具
@@ -69,6 +80,7 @@ export function applyStreamEventToEntries(
   ev: ChatStreamEvent,
   setPendingApproval: (req: import('../../shared/ipc').ApprovalRequest | null) => void,
   setPendingPlanApproval?: (req: import('../../shared/ipc').PlanApprovalRequest | null) => void,
+  presentEntry: PresentEntry = (entry) => entry,
 ): DisplayEntry[] | null {
   // approval_required 不动 entries，只弹 modal
   if (ev.type === 'approval_required' && ev.approval) {
@@ -88,17 +100,17 @@ export function applyStreamEventToEntries(
     return copy;
   }
   if (ev.type === 'tool_call' && ev.toolCall) {
-    copy.push({
+    copy.push(presentEntry({
       kind: 'tool_call',
       id: ev.toolCall.id,
       name: ev.toolCall.function.name,
       args: ev.toolCall.function.arguments,
-    });
+    }, 'discrete'));
     return copy;
   }
   if (ev.type === 'tool_result' && ev.toolResult) {
     const r = ev.toolResult.result as { ok?: boolean; output?: string; error?: string; meta?: ToolResultMeta };
-    copy.push({
+    copy.push(presentEntry({
       kind: 'tool_result',
       toolCallId: ev.toolResult.toolCallId,
       name: ev.toolResult.name,
@@ -106,37 +118,34 @@ export function applyStreamEventToEntries(
       output: r?.output ?? '',
       error: r?.error,
       meta: r?.meta,
-    });
+    }, 'discrete'));
     return copy;
   }
   if (ev.type === 'error' && ev.error) {
     const errorEntry: DisplayEntry = { kind: 'error', message: ev.error, meta: ev.errorMeta };
     const last = copy[copy.length - 1];
     if (last && last.kind === 'assistant' && last.content === '' && !last.toolCalls) {
-      copy[copy.length - 1] = errorEntry;
-    } else if (last && last.kind === 'assistant') {
-      copy[copy.length - 1] = { ...last, content: last.content + `\n\n[连接错误] ${ev.error}` };
-      copy.push(errorEntry);
+      copy[copy.length - 1] = presentEntry(errorEntry, 'status');
     } else {
-      copy.push(errorEntry);
+      copy.push(presentEntry(errorEntry, 'status'));
     }
     return copy;
   }
   if (ev.type === 'summary') {
-    copy.push({
+    copy.push(presentEntry({
       kind: 'summary',
       tokensBefore: ev.tokensBefore ?? 0,
       tokensAfter: ev.tokensAfter ?? 0,
       compressedCount: ev.compressedCount ?? 0,
       summary: ev.summary ?? '',
-    });
+    }, 'discrete'));
     return copy;
   }
   if (ev.type === 'plan' && ev.plan) {
-    copy.push({
+    copy.push(presentEntry({
       kind: 'plan',
       steps: ev.plan.map((s) => ({ description: s, status: 'pending' })),
-    });
+    }, 'discrete'));
     return copy;
   }
   if (ev.type === 'plan_progress' && ev.planSteps) {
@@ -149,11 +158,11 @@ export function applyStreamEventToEntries(
     return copy;
   }
   if (ev.type === 'verify') {
-    copy.push({ kind: 'verify', phase: ev.phase ?? 'post_edit', target: ev.target });
+    copy.push(presentEntry({ kind: 'verify', phase: ev.phase ?? 'post_edit', target: ev.target }, 'status'));
     return copy;
   }
   if (ev.type === 'subagent_summary' && ev.subagentResults) {
-    copy.push({ kind: 'subagent_summary', results: ev.subagentResults });
+    copy.push(presentEntry({ kind: 'subagent_summary', results: ev.subagentResults }, 'discrete'));
     return copy;
   }
   return copy;
@@ -163,6 +172,13 @@ export function applyStreamEventToEntries(
 // Session transform (DB rows ↔ entries)
 // ============================================================================
 
+function historyPresentation(row: MessageRow, suffix: string): EntryPresentation {
+  return {
+    key: `history:${row.sessionId}:${row.position}:${suffix}`,
+    sessionId: row.sessionId,
+  };
+}
+
 export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
   const out: DisplayEntry[] = [];
   for (const m of msgs) {
@@ -170,6 +186,7 @@ export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
       let attachments: AttachmentMeta[] | undefined;
       try { if (m.attachments) attachments = JSON.parse(m.attachments); } catch { /* ignore */ }
       const entry: DisplayEntry = { kind: 'user', content: m.content };
+      entry.presentation = historyPresentation(m, 'user');
       if (attachments && attachments.length > 0) entry.attachments = attachments;
       out.push(entry);
     } else if (m.role === 'assistant') {
@@ -177,10 +194,21 @@ export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
       try { if (m.toolCalls) toolCalls = JSON.parse(m.toolCalls); } catch { /* ignore */ }
       // 跳过完全空的 assistant（DB 历史脏数据 / autosave 时机问题）
       if (!m.content && !toolCalls) continue;
-      out.push({ kind: 'assistant', content: m.content, toolCalls });
+      const assistantEntry: DisplayEntry = { kind: 'assistant', content: m.content, toolCalls };
+      assistantEntry.presentation = historyPresentation(m, 'assistant');
+      out.push(assistantEntry);
       if (toolCalls) {
         for (const tc of toolCalls) {
-          out.push({ kind: 'tool_call', id: tc.id, name: tc.function.name, args: tc.function.arguments });
+          out.push({
+            kind: 'tool_call',
+            id: tc.id,
+            name: tc.function.name,
+            args: tc.function.arguments,
+            presentation: {
+              key: `${assistantEntry.presentation!.key}:tool-call:${tc.id}`,
+              sessionId: m.sessionId,
+            },
+          });
         }
       }
     } else if (m.role === 'tool') {
@@ -194,10 +222,24 @@ export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
         ok: !isError,
         output: isError ? m.content.slice('Error:'.length).trim() : m.content,
         meta,
+        presentation: historyPresentation(m, `tool-result:${m.toolCallId ?? m.toolName ?? 'tool'}`),
       });
     }
   }
   return out;
+}
+
+export function clearEntryEnterMotion(entries: DisplayEntry[]): DisplayEntry[] {
+  let changed = false;
+  const next = entries.map((entry) => {
+    if (!entry.presentation?.enter) return entry;
+    changed = true;
+    return {
+      ...entry,
+      presentation: { ...entry.presentation, enter: undefined },
+    };
+  });
+  return changed ? next : entries;
 }
 
 export function entriesToMessages(entries: DisplayEntry[], sessionId: string): MessageRow[] {

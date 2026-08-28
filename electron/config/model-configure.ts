@@ -15,9 +15,8 @@ export interface ConfigureResult {
  */
 export async function configureModel(config: ModelConfig): Promise<ConfigureResult> {
   if (config.apiKey) {
-    const { OpenAICompatClient } = await import('../llm/openai-compat');
-    const client = new OpenAICompatClient(config);
-    const test = await client.testConnection();
+    const { testModelConnection } = await import('../llm/client-factory');
+    const test = await testModelConnection(config);
     if (!test.ok) {
       return { ok: false, error: `连接测试未通过，配置未写入：${test.error ?? '未知错误'}` };
     }
@@ -34,6 +33,12 @@ export async function configureModel(config: ModelConfig): Promise<ConfigureResu
     baseUrl: config.baseUrl || preset?.baseUrl || '',
     model: config.model || preset?.model || '',
     workDir: config.workDir,
+    contextWindow: config.contextWindow,
+    wireApi: config.wireApi ?? preset?.wireApi ?? 'responses',
+    maxOutputTokens: config.maxOutputTokens ?? preset?.maxOutputTokens,
+    reasoningEffort: config.reasoningEffort === 'max' ? 'high' : config.reasoningEffort,
+    compatibility: 'verified' as const,
+    verifiedAt: config.apiKey ? new Date().toISOString() : undefined,
     createdAt: new Date().toISOString(),
   };
   await upsertModel(entry);

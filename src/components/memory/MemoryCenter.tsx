@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Memory, MemoryStats } from '../../../shared/ipc';
+import { usePresence } from '../../hooks/usePresence';
+import { captureFocusTarget, restoreFocusTarget } from '../../lib/presence-ui';
 import { Icon } from '../Icon';
 import { MemoryCard, PIN_THRESHOLD } from './MemoryCard';
 import { MemoryDeleteDialog } from './MemoryDeleteDialog';
@@ -32,28 +34,46 @@ export function MemoryCenter() {
   const [filterScope, setFilterScope] = useState<Memory['scope'] | ''>('');
   const [filterKind, setFilterKind] = useState<Memory['kind'] | ''>('');
   const [loading, setLoading] = useState(false);
-  const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState<Memory | null>(null);
+  const [editor, setEditor] = useState<{
+    present: boolean;
+    memory: Memory | null;
+  }>({ present: false, memory: null });
+  const [deletion, setDeletion] = useState<{
+    present: boolean;
+    memory: Memory | null;
+  }>({ present: false, memory: null });
   const [projectNames, setProjectNames] = useState<Record<string, string>>({});
+  const editorPresence = usePresence(editor.present);
+  const deletePresence = usePresence(deletion.present);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const editorReturnFocusRef = useRef<HTMLElement | null>(null);
+  const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
+  const editorGenerationRef = useRef(0);
+  const deleteGenerationRef = useRef(0);
+  const deleteRequestGenerationRef = useRef<number | null>(null);
+  const deletedMemoryIdsRef = useRef(new Set<string>());
+
+  const fetchMemories = useCallback(async () => {
+    const scope = filterScope || undefined;
+    const kind = filterKind || undefined;
+    const options = { scope, kind, limit: LIST_LIMIT };
+    const trimmed = searchQuery.trim();
+    return trimmed
+      ? window.electronAPI.memory.search(trimmed, options)
+      : window.electronAPI.memory.list(options);
+  }, [searchQuery, filterScope, filterKind]);
 
   const loadMemories = useCallback(async () => {
     setLoading(true);
     try {
-      const scope = filterScope || undefined;
-      const kind = filterKind || undefined;
-      const options = { scope, kind, limit: LIST_LIMIT };
-      const trimmed = searchQuery.trim();
-      const result = trimmed
-        ? await window.electronAPI.memory.search(trimmed, options)
-        : await window.electronAPI.memory.list(options);
-      setMemories(result);
+      const result = await fetchMemories();
+      setMemories(result.filter((memory) => !deletedMemoryIdsRef.current.has(memory.id)));
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, filterScope, filterKind]);
+  }, [fetchMemories]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -106,6 +126,37 @@ export function MemoryCenter() {
     return memory.scopeId ? projectNames[memory.scopeId] : undefined;
   }
 
+  function openEditor(memory: Memory | null, returnFocus?: HTMLElement | null) {
+    if (editor.present || deletion.present) return;
+    editorGenerationRef.current += 1;
+    editorReturnFocusRef.current = captureFocusTarget(returnFocus);
+    setEditor({ present: true, memory });
+  }
+
+  function closeEditor() {
+    if (!editor.present) return;
+    editorGenerationRef.current += 1;
+    restoreFocusTarget(editorReturnFocusRef.current, searchInputRef.current);
+    setEditor((current) => ({ ...current, present: false }));
+  }
+
+  function openDeletion(memory: Memory, returnFocus?: HTMLElement | null) {
+    if (editor.present || deletion.present) return;
+    deleteGenerationRef.current += 1;
+    deleteReturnFocusRef.current = captureFocusTarget(returnFocus);
+    setDeletion({ present: true, memory });
+  }
+
+  function closeDeletion() {
+    if (
+      !deletion.present
+      || deleteRequestGenerationRef.current === deleteGenerationRef.current
+    ) return;
+    deleteGenerationRef.current += 1;
+    restoreFocusTarget(deleteReturnFocusRef.current, searchInputRef.current);
+    setDeletion((current) => ({ ...current, present: false }));
+  }
+
   async function handleSave(data: {
     content: string;
     kind: string;
@@ -113,9 +164,11 @@ export function MemoryCenter() {
     importance: number;
     tags: string[];
   }) {
+    const operationGeneration = editorGenerationRef.current;
+    const memory = editor.memory;
     try {
-      if (editingMemory) {
-        await window.electronAPI.memory.update(editingMemory.id, {
+      if (memory) {
+        await window.electronAPI.memory.update(memory.id, {
           content: data.content,
           importance: data.importance,
           tags: data.tags,
@@ -131,24 +184,54 @@ export function MemoryCenter() {
           tags: data.tags,
         });
       }
-      setEditingMemory(null);
-      setShowCreateDialog(false);
       void loadMemories();
       void loadStats();
+      if (editorGenerationRef.current !== operationGeneration) return;
+      restoreFocusTarget(editorReturnFocusRef.current, searchInputRef.current);
+      editorGenerationRef.current += 1;
+      setEditor((current) => ({ ...current, present: false }));
     } catch {
       // ignore
     }
   }
 
   async function confirmDelete() {
-    if (!pendingDelete) return;
+    const operationGeneration = deleteGenerationRef.current;
+    const memory = deletion.memory;
+    if (
+      !deletion.present
+      || !memory
+      || deleteRequestGenerationRef.current === operationGeneration
+    ) return;
+    deleteRequestGenerationRef.current = operationGeneration;
     try {
-      await window.electronAPI.memory.delete(pendingDelete.id);
-      setPendingDelete(null);
-      void loadMemories();
-      void loadStats();
+      await window.electronAPI.memory.delete(memory.id);
+      if (deleteGenerationRef.current !== operationGeneration) return;
+
+      deletedMemoryIdsRef.current.add(memory.id);
+      setMemories((current) => current.filter((candidate) => candidate.id !== memory.id));
+
+      const [memoriesResult, statsResult] = await Promise.allSettled([
+        fetchMemories(),
+        window.electronAPI.memory.stats(),
+      ]);
+      if (deleteGenerationRef.current !== operationGeneration) return;
+
+      if (memoriesResult.status === 'fulfilled') {
+        setMemories(memoriesResult.value.filter(
+          (candidate) => !deletedMemoryIdsRef.current.has(candidate.id),
+        ));
+      }
+      if (statsResult.status === 'fulfilled') setStats(statsResult.value);
+      restoreFocusTarget(searchInputRef.current);
+      deleteGenerationRef.current += 1;
+      setDeletion((current) => ({ ...current, present: false }));
     } catch {
       // ignore
+    } finally {
+      if (deleteRequestGenerationRef.current === operationGeneration) {
+        deleteRequestGenerationRef.current = null;
+      }
     }
   }
 
@@ -195,8 +278,8 @@ export function MemoryCenter() {
         key={memory.id}
         memory={memory}
         scopeLabel={scopeLabelOf(memory)}
-        onEdit={setEditingMemory}
-        onDelete={setPendingDelete}
+        onEdit={(selected) => openEditor(selected)}
+        onDelete={(selected) => openDeletion(selected)}
         onExport={handleExport}
         onCopy={handleCopy}
         onTogglePin={handleTogglePin}
@@ -205,7 +288,7 @@ export function MemoryCenter() {
   }
 
   return (
-    <div className="memory-center">
+    <div className="memory-center" data-motion="page-enter" data-page="memory">
       <header className="memory-center__header">
         <div>
           <h1>记忆</h1>
@@ -220,7 +303,7 @@ export function MemoryCenter() {
           <button
             className="btn btn-primary"
             type="button"
-            onClick={() => setShowCreateDialog(true)}
+            onClick={(event) => openEditor(null, event.currentTarget)}
           >
             新建记忆
           </button>
@@ -231,6 +314,7 @@ export function MemoryCenter() {
         <div className="memory-center__search">
           <Icon name="search" size={14} />
           <input
+            ref={searchInputRef}
             className="memory-center__search-input"
             type="text"
             placeholder="搜索记忆内容、标签…"
@@ -315,29 +399,28 @@ export function MemoryCenter() {
           <button
             className="btn btn-primary"
             type="button"
-            onClick={() => setShowCreateDialog(true)}
+            onClick={(event) => openEditor(null, event.currentTarget)}
           >
             新建记忆
           </button>
         </div>
       )}
 
-      {pendingDelete && (
+      {deletePresence.mounted && deletion.memory && (
         <MemoryDeleteDialog
-          memory={pendingDelete}
+          presence={deletePresence}
+          memory={deletion.memory}
           onConfirm={confirmDelete}
-          onClose={() => setPendingDelete(null)}
+          onClose={closeDeletion}
         />
       )}
 
-      {(showCreateDialog || editingMemory) && (
+      {editorPresence.mounted && (
         <MemoryEditDialog
-          memory={editingMemory ?? undefined}
+          presence={editorPresence}
+          memory={editor.memory ?? undefined}
           onSave={handleSave}
-          onClose={() => {
-            setEditingMemory(null);
-            setShowCreateDialog(false);
-          }}
+          onClose={closeEditor}
         />
       )}
     </div>

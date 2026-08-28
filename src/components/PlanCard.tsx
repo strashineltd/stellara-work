@@ -7,6 +7,7 @@ export interface PlanCardStep {
 
 interface PlanCardProps {
   steps: PlanCardStep[];
+  running: boolean;
   awaitingApproval?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
@@ -18,7 +19,7 @@ function statusLabel(status: string): string {
   return '待处理';
 }
 
-export function PlanCard({ steps, awaitingApproval, onApprove, onReject }: PlanCardProps) {
+export function PlanCard({ steps, running, awaitingApproval, onApprove, onReject }: PlanCardProps) {
   return (
     <div className="tool-card tool-card-plan" role="group" aria-label="执行计划">
       <div className="tool-card-header">
@@ -33,14 +34,14 @@ export function PlanCard({ steps, awaitingApproval, onApprove, onReject }: PlanC
             <span className="plan-step-text">{s.description}</span>
             <span className="plan-step-status">
               {s.status === 'completed' && <Icon name="check" size={13} />}
-              {s.status === 'in_progress' && <span className="plan-step-spinner" aria-hidden="true" />}
+              {s.status === 'in_progress' && <span className={`plan-step-spinner${running ? ' is-active' : ''}`} aria-hidden="true" />}
               <span className="plan-step-label">{statusLabel(s.status)}</span>
             </span>
           </li>
         ))}
       </ol>
       {awaitingApproval && (
-        <div className="plan-actions">
+        <div className="plan-actions motion-feedback-enter" role="alertdialog" aria-label="确认执行计划">
           <button className="btn btn-secondary btn-small" onClick={onReject} type="button">拒绝</button>
           <button className="btn btn-primary btn-small" onClick={onApprove} type="button">批准执行</button>
         </div>

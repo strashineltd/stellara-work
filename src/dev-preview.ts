@@ -10,6 +10,8 @@ import type {
   ProjectSummary,
   Session,
   SessionSummary,
+  ContextStateView,
+  AppSettings,
 } from '../shared/ipc';
 
 const now = Date.now();
@@ -39,6 +41,8 @@ let sessions: SessionSummary[] = [
   { id: 'release', title: '准备 0.9.0 发布包', modelId: previewModel.id, messageCount: 4, updatedAt: now - 600_000 },
   { id: 'landing', title: '整理官网内容层级', modelId: previewModel.id, projectId: 'website', messageCount: 6, updatedAt: now - 900_000 },
 ];
+let previewSettings: AppSettings = { theme: 'light', workspaceMode: 'sidebar' };
+const settingsListeners = new Set<() => void>();
 
 const previewRows: MessageRow[] = [
   {
@@ -71,7 +75,7 @@ function sessionFromSummary(summary: SessionSummary): Session {
 
 function emptyDiagnostics(): DiagnosticsInfo {
   return {
-    version: '0.9.0-preview', platform: previewPlatform, arch: 'x64', electron: 'preview', chrome: 'preview', node: 'preview',
+    version: '0.9.2-preview', platform: previewPlatform, arch: 'x64', electron: 'preview', chrome: 'preview', node: 'preview',
     appDataPath: 'Preview', envPath: 'Preview', logPath: 'Preview', dbSizeBytes: 0,
     sessionCount: sessions.length, messageCount: previewRows.length, modelCount: 1,
     activeModelId: previewModel.id, modelsWithKey: [previewModel.id], logTail: '', collectedAt: new Date().toISOString(),
@@ -87,8 +91,11 @@ export function installDevPreviewApi(): void {
 
   const api: ElectronAPI = {
     app: {
-      getInfo: async () => ({ version: '0.9.0-preview', platform: previewPlatform, appDataPath: 'Preview', envPath: 'Preview' }),
-      onSettingsChanged: () => () => {},
+      getInfo: async () => ({ version: '0.9.2-preview', platform: previewPlatform, appDataPath: 'Preview', envPath: 'Preview' }),
+      onSettingsChanged: (callback) => {
+        settingsListeners.add(callback);
+        return () => settingsListeners.delete(callback);
+      },
     },
     models: {
       list: async () => ({ presets: [], configured: previewModel }),
@@ -100,6 +107,18 @@ export function installDevPreviewApi(): void {
     chat: {
       start: async () => ({ streamId: 'preview-stream', events: (async function* () { yield { type: 'done' as const }; })() }),
       abort: () => {}, approve: () => {},
+    },
+    context: {
+      getSnapshot: async (sessionId) => previewContextState(sessionId),
+      createCheckpoint: async (sessionId) => ({
+        ...previewContextState(sessionId),
+        checkpoint: {
+          id: 'preview-checkpoint', sessionId, contextRevision: 12, workspaceRevision: 2,
+          objective: '完成桌面端界面升级', constraints: ['保持克制、非科幻视觉'], decisions: ['采用三栏工作台'],
+          filesChanged: ['src/styles/workbench.css'], verification: ['界面测试通过'], failures: [],
+          planState: [], pendingWork: [], createdAt: new Date().toISOString(),
+        },
+      }),
     },
     tools: { invoke: async () => ({ ok: true, output: 'Preview' }) },
     dialog: {
@@ -170,20 +189,25 @@ export function installDevPreviewApi(): void {
       open: async () => true,
     },
     settings: {
-      get: async () => ({ theme: 'light', workspaceMode: 'sidebar' }), update: async () => {}, clearAllData: async () => {}, resetSelective: async () => {},
+      get: async () => previewSettings,
+      update: async (partial) => {
+        previewSettings = { ...previewSettings, ...partial };
+        settingsListeners.forEach((listener) => listener());
+      },
+      clearAllData: async () => {}, resetSelective: async () => {},
       openDataDir: async () => {}, openLogFile: async () => {}, collectDiagnostics: async () => emptyDiagnostics(),
     },
     skills: {
       list: async () => [
         { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md' },
         { name: 'mcp-setup', description: '配置 MCP 服务器的 JSON 模板', prompt: 'JSON 格式技能内容', format: 'json' },
-        { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…' },
+        { name: 'macos-pack', description: '构建 arm64/x64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…' },
       ],
       listDetailed: async () => ({
         items: [
           { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md', file: 'code-review.md' },
           { name: 'mcp-setup', description: '配置 MCP 服务器的 JSON 模板', prompt: 'JSON 格式技能内容', format: 'json', file: 'mcp-setup.json' },
-          { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…', file: 'macos-pack.md' },
+          { name: 'macos-pack', description: '构建 arm64/x64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…', file: 'macos-pack.md' },
         ],
         errors: [
           { file: 'bad.json', reason: '缺少 name' },
@@ -232,4 +256,29 @@ export function installDevPreviewApi(): void {
   };
 
   window.electronAPI = api;
+}
+
+function previewContextState(sessionId: string): ContextStateView {
+  return {
+    sessionId,
+    revision: 12,
+    workspaceRevision: 2,
+    objective: '完成桌面端界面升级',
+    planSteps: [],
+    usage: {
+      inputUsageRatio: 0.18,
+      softThreshold: 0.75,
+      hardThreshold: 0.9,
+      nearLimit: false,
+      hardLimited: false,
+      currentInputTokens: 46_200,
+      usableInputBudget: 239_616,
+    },
+    checkpoint: null,
+    modifiedFiles: ['src/styles/workbench.css'],
+    unverifiedFiles: [],
+    staleEvidence: [],
+    taskGate: { ok: true, reasons: [] },
+    subagents: [],
+  };
 }

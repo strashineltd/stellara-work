@@ -1,36 +1,36 @@
-/* Stellara Work · Calm Workspace tokens */
+/* Stellara Work · Studio Desk tokens */
 
 :root {
   color-scheme: light;
 
-  --color-bg-app: #f1f5fb;
-  --color-bg-sidebar: #fbfcff;
+  --color-bg-app: #eef0f3;
+  --color-bg-sidebar: #f8f8f6;
   --color-bg-content: #ffffff;
   --color-bg-elevated: #ffffff;
-  --color-bg-soft: #f6f8fc;
+  --color-bg-soft: #f4f5f7;
   --color-bg-input: #ffffff;
-  --color-bg-code: #f4f7fb;
-  --color-bg-selected: #edf4ff;
+  --color-bg-code: #f4f5f7;
+  --color-bg-selected: #e9eef9;
 
-  --color-text: #293449;
-  --color-text-strong: #111827;
-  --color-text-soft: #64748b;
-  --color-text-faint: #667085;
+  --color-text: #283244;
+  --color-text-strong: #172033;
+  --color-text-soft: #667085;
+  --color-text-faint: #7b8493;
   --color-text-on-dark: #ffffff;
   --color-text-on-dark-soft: #dbe4f0;
 
-  --color-border: #e6ebf2;
-  --color-border-strong: #dce3ed;
-  --color-border-dark: #c8d2e1;
+  --color-border: #e2e5e9;
+  --color-border-strong: #d5dae1;
+  --color-border-dark: #bdc5d0;
 
-  --color-primary: #1f2937;
-  --color-accent: #2f7cf4;
+  --color-primary: #172033;
+  --color-accent: #4864b8;
   --color-on-accent: #ffffff;
-  --color-accent-soft: #edf4ff;
-  --color-accent-hover: #2469d8;
-  --color-focus: #2f7cf4;
-  --color-accent-tint: rgba(47, 124, 244, 0.14);
-  --color-hover-overlay: rgba(47, 94, 157, 0.06);
+  --color-accent-soft: #edf0fa;
+  --color-accent-hover: #3d56a2;
+  --color-focus: #4864b8;
+  --color-accent-tint: rgba(72, 100, 184, 0.15);
+  --color-hover-overlay: rgba(23, 32, 51, 0.055);
 
   --color-success: #32845d;
   --color-on-success: #ffffff;
@@ -44,9 +44,9 @@
   --color-info: #2f7cf4;
   --color-modal-backdrop: rgba(27, 39, 59, 0.42);
 
-  --shadow-sm: 0 2px 8px rgba(59, 83, 123, 0.08);
-  --shadow-md: 0 14px 38px rgba(59, 83, 123, 0.13);
-  --shadow-lg: 0 30px 80px rgba(64, 94, 145, 0.2);
+  --shadow-sm: 0 1px 3px rgba(25, 34, 50, 0.07), 0 8px 22px rgba(25, 34, 50, 0.035);
+  --shadow-md: 0 12px 32px rgba(25, 34, 50, 0.12);
+  --shadow-lg: 0 24px 64px rgba(25, 34, 50, 0.17);
 
   --font-sans: -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI",
     "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
@@ -76,13 +76,13 @@
   --space-card-h: 14px;
   --space-section-h: 18px;
 
-  --radius-xs: 6px;
-  --radius-sm: 9px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-xs: 7px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
   --radius-pill: 999px;
-  --header-height: 72px;
-  --sidebar-width: 216px;
+  --header-height: 64px;
+  --sidebar-width: 264px;
   --workspace-width: 312px;
   --content-reading-width: 800px;
   --icon-sm: 14px;
@@ -99,22 +99,29 @@
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 220ms;
+  --motion-exit: 140ms;
+  --motion-loop-spin: 800ms;
+  --motion-loop-pulse: 1200ms;
+  --motion-distance-xs: 2px;
+  --motion-distance-sm: 4px;
+  --motion-distance-md: 8px;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
   /* 中性炭灰背景（无蓝相） */
-  --color-bg-app: #14161a;
-  --color-bg-sidebar: #1a1d22;
-  --color-bg-content: #1e2126;
-  --color-bg-elevated: #24272d;
-  --color-bg-soft: #22252b;
-  --color-bg-input: #22252b;
-  --color-bg-code: #171a1f;
-  --color-bg-selected: #2c3038;
+  --color-bg-app: #151618;
+  --color-bg-sidebar: #1d1f23;
+  --color-bg-content: #202226;
+  --color-bg-elevated: #272a2f;
+  --color-bg-soft: #27292e;
+  --color-bg-input: #25272c;
+  --color-bg-code: #191b1f;
+  --color-bg-selected: #30333b;
 
   --color-text: #e8eaf0;
   --color-text-strong: #f7f8fa;
@@ -129,12 +136,12 @@
 
   --color-primary: #eef1f6;
   /* 强调色：低饱和灰蓝，克制的石墨调 */
-  --color-accent: #8ba2bd;
+  --color-accent: #9aa9d4;
   --color-on-accent: #12161c;
-  --color-accent-soft: #2b313a;
-  --color-accent-hover: #9db2cb;
-  --color-focus: #8ba2bd;
-  --color-accent-tint: rgba(139, 162, 189, 0.18);
+  --color-accent-soft: #303544;
+  --color-accent-hover: #aebbe0;
+  --color-focus: #9aa9d4;
+  --color-accent-tint: rgba(154, 169, 212, 0.2);
   --color-hover-overlay: rgba(255, 255, 255, 0.055);
 
   --color-success: #83b292;

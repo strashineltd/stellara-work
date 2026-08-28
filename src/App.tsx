@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   AppInfo, ConfiguredModel, ModelPreset, SessionSummary, ProjectSummary, ThemeName,
 } from '../shared/ipc';
@@ -6,7 +6,10 @@ import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
 import { Onboarding } from './components/Onboarding';
 import { MainView } from './components/MainView';
-import { SettingsPanel, type SettingsTab } from './components/SettingsPanel';
+import { SettingsPanel, type OpenSettings, type SettingsTab } from './components/SettingsPanel';
+import { usePresence } from './hooks/usePresence';
+import { usePageVisibilityMotion } from './hooks/usePageVisibilityMotion';
+import { captureFocusTarget, restoreFocusTarget } from './lib/presence-ui';
 import { resolveTheme } from './lib/theme';
 
 type AppState =
@@ -24,11 +27,19 @@ type AppState =
       workspaceOpen: boolean;
     };
 
+function focusToggleBeforePanelClose(panelSelector: string, toggleSelector: string) {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active.closest(panelSelector)) {
+    document.querySelector<HTMLButtonElement>(toggleSelector)?.focus({ preventScroll: true });
+  }
+}
+
 /**
  * App 根：根据是否已配置模型，决定显示 Onboarding 还是主界面
  * 主界面状态额外管 sessions 列表和 activeSessionId
  */
 export default function App() {
+  usePageVisibilityMotion();
   const [state, setState] = useState<AppState>({ kind: 'loading' });
 
   // 原生菜单（macOS）动作 → 渲染层 UI
@@ -68,10 +79,26 @@ export default function App() {
   const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('sidebar');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('models');
+  const [settingsFocusRequest, setSettingsFocusRequest] = useState(0);
+  const settingsPresence = usePresence(settingsOpen);
+  const settingsOpenRef = useRef(false);
+  const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
 
-  function openSettingsAt(tab: SettingsTab) {
+  const openSettingsAt: OpenSettings = (tab = 'models', returnFocus) => {
+    if (!settingsOpenRef.current) {
+      settingsReturnFocusRef.current = captureFocusTarget(returnFocus);
+    }
+    settingsOpenRef.current = true;
     setSettingsInitialTab(tab);
+    setSettingsFocusRequest((request) => request + 1);
     setSettingsOpen(true);
+  };
+
+  function closeSettings() {
+    if (!settingsOpenRef.current) return;
+    restoreFocusTarget(settingsReturnFocusRef.current);
+    settingsOpenRef.current = false;
+    setSettingsOpen(false);
   }
 
   // 主题写到 documentElement.dataset.theme（global.css 用 [data-theme="dark"] 选择器）
@@ -134,14 +161,26 @@ export default function App() {
   // Tab 快捷键需要的 closed-tab history
   const [closedTabHistory, setClosedTabHistory] = useState<string[]>([]);
 
+  function toggleSidebar() {
+    if (state.kind !== 'ready') return;
+    if (state.sidebarOpen) focusToggleBeforePanelClose('.sidebar', '.sidebar-toggle');
+    setState((current) => current.kind === 'ready'
+      ? { ...current, sidebarOpen: !current.sidebarOpen }
+      : current);
+  }
+
+  function toggleWorkspace() {
+    if (state.kind !== 'ready') return;
+    if (state.workspaceOpen) focusToggleBeforePanelClose('.workspace-panel', '.workspace-toggle');
+    setState((current) => current.kind === 'ready'
+      ? { ...current, workspaceOpen: !current.workspaceOpen }
+      : current);
+  }
+
   // 快捷键：左 sidebar + 右 workspace + tab 操作
   useShortcuts(shortcuts, {
-    toggleSidebar: () => {
-      setState((s) => s.kind === 'ready' ? { ...s, sidebarOpen: !s.sidebarOpen } : s);
-    },
-    toggleWorkspace: () => {
-      setState((s) => s.kind === 'ready' ? { ...s, workspaceOpen: !s.workspaceOpen } : s);
-    },
+    toggleSidebar,
+    toggleWorkspace,
     switchTab1: () => switchToTab(0),
     switchTab2: () => switchToTab(1),
     switchTab3: () => switchToTab(2),
@@ -237,8 +276,13 @@ export default function App() {
 
   return (
     <>
-      {settingsOpen && (
-        <SettingsPanel initialTab={settingsInitialTab} onClose={() => setSettingsOpen(false)} />
+      {settingsPresence.mounted && (
+        <SettingsPanel
+          presence={settingsPresence}
+          initialTab={settingsInitialTab}
+          focusRequest={settingsFocusRequest}
+          onClose={closeSettings}
+        />
       )}
       <MainView
         config={state.config}
@@ -252,8 +296,8 @@ export default function App() {
         activeSessionId={state.activeSessionId}
         projects={state.projects}
         sessions={state.sessions}
-        onToggleSidebar={() => setState((s) => s.kind === 'ready' ? { ...s, sidebarOpen: !s.sidebarOpen } : s)}
-        onToggleWorkspace={() => setState((s) => s.kind === 'ready' ? { ...s, workspaceOpen: !s.workspaceOpen } : s)}
+        onToggleSidebar={toggleSidebar}
+        onToggleWorkspace={toggleWorkspace}
         onReconfigure={() => {
           void window.electronAPI.models.list().then((modelList) => {
             setState({
@@ -264,11 +308,7 @@ export default function App() {
             });
           });
         }}
-        // MainView 的回调会被按钮直接调用；显式包一层，避免 MouseEvent 被误当成设置 tab。
-        onOpenSettings={(tab) => {
-          setSettingsInitialTab(tab ?? 'models');
-          setSettingsOpen(true);
-        }}
+        onOpenSettings={openSettingsAt}
         onProjectCreated={(project) => {
           setState((s) => s.kind === 'ready'
             ? { ...s, projects: [{ id: project.id, name: project.name, workDir: project.workDir, entryFile: project.entryFile, updatedAt: project.updatedAt, sessionCount: 0 }, ...s.projects] }

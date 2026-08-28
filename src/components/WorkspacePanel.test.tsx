@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { WorkspacePanel } from './WorkspacePanel';
 import type { Goal, Progress, Deliverable, MemoryContextItem } from './WorkspacePanel';
+import type { ContextStateView } from '../../shared/ipc';
 
 const GOAL: Goal = { kind: 'userMessage' as const, content: 'Test goal' };
 const PROGRESS: Progress = { completed: 1, total: 3, currentName: 'read_file' };
@@ -20,6 +21,11 @@ function render(ui: React.ReactElement) {
   });
   return {
     container,
+    rerender: (nextUi: React.ReactElement) => {
+      act(() => {
+        root!.render(nextUi);
+      });
+    },
     unmount: () => {
       act(() => {
         root!.unmount();
@@ -41,6 +47,15 @@ function render(ui: React.ReactElement) {
     querySelectorAll: (sel: string) => container.querySelectorAll(sel),
   };
 }
+
+afterEach(() => {
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+});
 
 describe('WorkspacePanel', () => {
   beforeEach(() => {
@@ -122,6 +137,83 @@ describe('WorkspacePanel', () => {
     expect(progressbar?.getAttribute('aria-valuenow')).toBe('33');
     expect(progressbar?.getAttribute('aria-valuemax')).toBe('100');
   });
+
+  it('animates the progress fill with a scaleX transform instead of inline width', () => {
+    const { container, querySelector } = render(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={[]}
+        touchedFiles={new Set()}
+      />,
+    );
+    const taskFill = container.querySelector('.progress-bar') as HTMLElement;
+    const taskProgress = querySelector('[role="progressbar"]');
+    expect(taskFill.style.width).toBe('');
+    expect(taskFill.style.transform).toBe('scaleX(0.33)');
+    expect(taskProgress?.getAttribute('aria-valuenow')).toBe('33');
+  });
+
+  it('forwards closing presence semantics and root transition completion to the aside', () => {
+    const completeExit = vi.fn();
+    const { querySelector } = render(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={DELIVERABLES}
+        touchedFiles={new Set()}
+        presence={{ state: 'closing', completeExit }}
+      />,
+    );
+    const panel = querySelector('.workspace-panel')!;
+    expect(panel.getAttribute('data-motion-state')).toBe('closing');
+    expect(panel.hasAttribute('inert')).toBe(true);
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
+
+    act(() => panel.dispatchEvent(new Event('transitionend', { bubbles: true })));
+    expect(completeExit).toHaveBeenCalledOnce();
+  });
+
+  it('ends an active resize and removes document interactions when closing begins', () => {
+    const completeExit = vi.fn();
+    const onWidthChange = vi.fn();
+    const view = render(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={DELIVERABLES}
+        touchedFiles={new Set()}
+        onWidthChange={onWidthChange}
+        presence={{ state: 'open', completeExit }}
+      />,
+    );
+    const handle = view.querySelector('.workspace-resize-handle')!;
+    act(() => handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 300 })));
+    act(() => document.dispatchEvent(new MouseEvent('mousemove', { clientX: 260 })));
+    expect(document.body.style.cursor).toBe('ew-resize');
+    expect(document.body.style.userSelect).toBe('none');
+    const callsBeforeClose = onWidthChange.mock.calls.length;
+
+    view.rerender(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={DELIVERABLES}
+        touchedFiles={new Set()}
+        onWidthChange={onWidthChange}
+        presence={{ state: 'closing', completeExit }}
+      />,
+    );
+
+    expect(document.body.style.cursor).toBe('');
+    expect(document.body.style.userSelect).toBe('');
+    act(() => document.dispatchEvent(new MouseEvent('mousemove', { clientX: 200 })));
+    expect(onWidthChange).toHaveBeenCalledTimes(callsBeforeClose);
+  });
 });
 
 describe('WorkspacePanel context stats', () => {
@@ -184,6 +276,25 @@ describe('WorkspacePanel context stats', () => {
     );
     const fill = container.querySelector('.context-stats__bar-fill');
     expect(fill?.classList.contains('warn')).toBe(true);
+  });
+
+  it('renders the context usage fill as a scaleX transform instead of inline width', () => {
+    const { container } = render(
+      <WorkspacePanel
+        {...BASE}
+        contextStats={{
+          promptTokens: 100000,
+          completionTokens: 0,
+          toolCounts: {},
+          recentCalls: [],
+          compressedCount: 0,
+          inputUsageRatio: 0.8,
+        }}
+      />,
+    );
+    const contextFill = container.querySelector('.context-stats__bar-fill') as HTMLElement;
+    expect(contextFill.style.width).toBe('');
+    expect(contextFill.style.transform).toBe('scaleX(0.8)');
   });
 
   it('shows empty state when contextStats is null', () => {
@@ -304,5 +415,75 @@ describe('WorkspacePanel subagents', () => {
     const { container } = render(<WorkspacePanel {...BASE} subagents={[]} />);
     expect(container.textContent).not.toContain('子代理');
     expect(container.querySelector('.subagent-list')).toBeNull();
+  });
+});
+
+describe('WorkspacePanel task gate', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    (window as any).electronAPI = {
+      fs: {
+        listTree: vi.fn().mockResolvedValue(null),
+      },
+    };
+  });
+
+  function taskGateState(taskGate: { ok: boolean; reasons: string[] }): ContextStateView {
+    return {
+      sessionId: 'a',
+      revision: 1,
+      workspaceRevision: 1,
+      objective: 'task',
+      planSteps: [],
+      usage: {
+        inputUsageRatio: 0,
+        softThreshold: 0.8,
+        hardThreshold: 0.95,
+        nearLimit: false,
+        hardLimited: false,
+        currentInputTokens: 0,
+        usableInputBudget: 1000,
+      },
+      checkpoint: null,
+      modifiedFiles: [],
+      unverifiedFiles: [],
+      staleEvidence: [],
+      taskGate,
+      subagents: [],
+    };
+  }
+
+  it('announces the blocked task gate with role=alert and one-shot entry motion', () => {
+    const { querySelector } = render(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={DELIVERABLES}
+        touchedFiles={new Set()}
+        contextState={taskGateState({ ok: false, reasons: ['存在未验证文件'] })}
+      />,
+    );
+    const gate = querySelector('.task-gate');
+    expect(gate?.getAttribute('role')).toBe('alert');
+    expect(gate?.classList.contains('motion-feedback-enter')).toBe(true);
+    expect(gate?.textContent).toContain('任务阻塞');
+  });
+
+  it('announces the ready task gate with role=status and one-shot entry motion', () => {
+    const { querySelector } = render(
+      <WorkspacePanel
+        workDir="D:/test"
+        goal={GOAL}
+        progress={PROGRESS}
+        deliverables={DELIVERABLES}
+        touchedFiles={new Set()}
+        contextState={taskGateState({ ok: true, reasons: [] })}
+      />,
+    );
+    const gate = querySelector('.task-gate');
+    expect(gate?.getAttribute('role')).toBe('status');
+    expect(gate?.classList.contains('motion-feedback-enter')).toBe(true);
+    expect(gate?.textContent).toContain('任务可完成');
   });
 });

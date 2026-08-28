@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ModelConfig, ModelListItem, ModelPreset, PresetModelId } from '../../../shared/ipc';
+import type { ModelConfig, ModelListItem, ModelPreset, PresetModelId, WireApi } from '../../../shared/ipc';
 import { DEFAULT_CONTEXT_WINDOW } from '../../../shared/context-window';
 import { Icon } from '../Icon';
 import { ModelCard } from '../ModelCard';
@@ -39,6 +39,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
   const [addApiKey, setAddApiKey] = useState('');
   const [addBaseUrl, setAddBaseUrl] = useState('');
   const [addModelName, setAddModelName] = useState('');
+  const [addWireApi, setAddWireApi] = useState<WireApi>('responses');
   const [addBusy, setAddBusy] = useState(false);
   const [addTest, setAddTest] = useState<'idle' | 'saving' | 'ok' | 'fail'>('idle');
   const [addError, setAddError] = useState<string | null>(null);
@@ -112,6 +113,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
     setAddApiKey('');
     setAddBaseUrl('');
     setAddModelName('');
+    setAddWireApi('responses');
     setAddBusy(false);
     setAddTest('idle');
     setAddError(null);
@@ -135,6 +137,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
       model: addModelName || p.model,
       apiKey: addApiKey,
       isCustom: p.isCustom,
+      wireApi: p.isCustom ? addWireApi : (p.wireApi ?? 'responses'),
     };
     // 后端会自动先测连接再保存；测试不通过 → 不写入
     const r = await window.electronAPI.models.configure(config);
@@ -196,11 +199,23 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
             {addPresetId === 'custom' ? (
               <>
                 <div className="form-row">
+                  <label htmlFor="add-model-wire-api">接口协议</label>
+                  <select
+                    id="add-model-wire-api"
+                    value={addWireApi}
+                    onChange={(event) => setAddWireApi(event.target.value as WireApi)}
+                  >
+                    <option value="responses">Responses API</option>
+                    <option value="anthropic">Anthropic Messages API</option>
+                  </select>
+                  <div className="form-hint">OpenAI Chat Completions 已在 v0.9.2 移除。</div>
+                </div>
+                <div className="form-row">
                   <label htmlFor="add-model-base-url">Base URL</label>
                   <input
                     id="add-model-base-url"
                     type="text"
-                    placeholder="任意 Responses API endpoint"
+                    placeholder={addWireApi === 'anthropic' ? 'Anthropic 兼容服务地址' : 'Responses API 服务地址'}
                     value={addBaseUrl}
                     onChange={(e) => setAddBaseUrl(e.target.value)}
                   />
@@ -274,7 +289,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
             <div className="active-model__name">{active?.label ?? '未设置'}</div>
             <div className="active-model__meta">
               {active
-                ? `${active.baseUrl} · ${formatContextWindow(active.contextWindow)} 上下文 · key ${active.hasKey ? '已配置' : '未配置'}`
+                ? `${active.baseUrl} · ${active.wireApi === 'anthropic' ? 'Anthropic' : 'Responses'} · ${formatContextWindow(active.contextWindow)} 上下文 · key ${active.hasKey ? '已配置' : '未配置'}`
                 : '在下方列表中添加并设为活跃'}
             </div>
           </div>
@@ -330,7 +345,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
                   </span>
                 </div>
                 <div className="settings-item__base">
-                  {m.baseUrl} · model: {m.model} · {formatContextWindow(m.contextWindow)}
+                  {m.baseUrl} · {m.wireApi === 'anthropic' ? 'Anthropic Messages' : 'Responses API'} · model: {m.model} · {formatContextWindow(m.contextWindow)}
                 </div>
               </div>
               <div className="settings-item__ops">

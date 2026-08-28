@@ -1,7 +1,7 @@
 /**
  * Responses API 客户端
  *
- * 替代 OpenAICompatClient，使用 Responses API（POST /responses）。
+ * 使用 Responses API（POST /responses）。
  * 支持：
  * - 流式和非流式响应
  * - typed SSE事件解析
@@ -271,14 +271,15 @@ export class ResponsesClient {
     let buffer = '';
     let lastChunkTime = Date.now();
     let receivedFirstChunk = false;
+    let idleError: Error | null = null;
 
     const checkIdle = (): void => {
       const now = Date.now();
       const elapsed = now - lastChunkTime;
       const timeout = receivedFirstChunk ? STREAM_IDLE_TIMEOUT_MS : STREAM_FIRST_CHUNK_TIMEOUT_MS;
       if (elapsed > timeout) {
-        reader.cancel().catch(() => {});
-        throw new Error(`流空闲超时 (${Math.round(elapsed / 1000)}s)`);
+        idleError = new Error(`流空闲超时 (${Math.round(elapsed / 1000)}s)`);
+        void reader.cancel();
       }
     };
 
@@ -293,6 +294,7 @@ export class ResponsesClient {
         }
 
         const { done, value } = await reader.read();
+        if (idleError) throw idleError;
         if (done) break;
 
         lastChunkTime = Date.now();
@@ -305,9 +307,6 @@ export class ResponsesClient {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const json = line.slice(6).trim();
-            if (json === '[DONE]') {
-              return; // 传统 SSE 结束标记（Responses API 不应该收到，但兼容）
-            }
             try {
               const event = JSON.parse(json) as ResponseStreamEvent;
               yield event;

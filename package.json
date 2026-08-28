@@ -1,7 +1,7 @@
 {
   "name": "stellara-work",
-  "version": "0.9.1",
-  "description": "A local-first, Codex-style desktop agent for Windows and macOS. Bring your own OpenAI-compatible API key.",
+  "version": "0.9.2",
+  "description": "A local-first desktop agent for Windows and macOS with Responses API and Anthropic Messages support.",
   "main": "electron/dist/electron/main.js",
   "author": "Stellara Work",
   "license": "MIT",
@@ -10,7 +10,7 @@
     "dev:renderer": "vite",
     "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .",
     "build:renderer": "vite build",
-    "build:electron": "tsc -p electron/tsconfig.json",
+    "build:electron": "node -e \"require('fs').rmSync('electron/dist',{recursive:true,force:true})\" && tsc -p electron/tsconfig.json",
     "build": "npm run build:renderer && npm run build:electron",
     "start": "cross-env NODE_ENV=production electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p electron/tsconfig.json --noEmit",
@@ -20,8 +20,11 @@
     "rebuild:node": "node -e \"require('fs').rmSync('node_modules/better-sqlite3',{recursive:true,force:true})\" && npm install better-sqlite3",
     "rebuild:electron": "npx --yes @electron/rebuild",
     "package": "npm run build && electron-builder --win nsis",
-    "package:win": "npm run build && electron-builder --win nsis",
-    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win nsis --x64",
+    "package:win:x64": "npm run build && electron-builder --win nsis --x64",
+    "package:mac": "npm run build && electron-builder --mac --x64 --arm64",
+    "package:mac:x64": "npm run build && electron-builder --mac --x64",
+    "package:mac:arm64": "npm run build && electron-builder --mac --arm64",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
   },
@@ -77,6 +80,7 @@
   "build": {
     "appId": "work.stellara.app",
     "productName": "Stellara Work",
+    "npmRebuild": false,
     "directories": {
       "output": "release",
       "buildResources": "assets"
@@ -95,12 +99,14 @@
         {
           "target": "dmg",
           "arch": [
+            "x64",
             "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
+            "x64",
             "arm64"
           ]
         }
@@ -119,7 +125,7 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../Icon';
+import { usePresence } from '../../hooks/usePresence';
+import { presenceRootProps, restoreFocusTarget } from '../../lib/presence-ui';
 
 type NewEntryKind = 'file' | 'folder';
 
@@ -7,6 +9,32 @@ interface NewEntryMenuProps {
   workDir: string;
   disabled?: boolean;
   onCreated: () => void;
+}
+
+const POINTER_FOCUS_TARGET = [
+  'a[href]',
+  'area[href]',
+  'button',
+  'input:not([type="hidden"])',
+  'select',
+  'textarea',
+  'iframe',
+  'summary',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getPointerFocusTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const candidate = target.closest<HTMLElement>(POINTER_FOCUS_TARGET);
+  if (
+    !candidate?.isConnected
+    || candidate.matches(':disabled, [aria-disabled="true"]')
+    || candidate.closest('[inert], [aria-hidden="true"]')
+  ) {
+    return null;
+  }
+  return candidate;
 }
 
 /**
@@ -21,33 +49,61 @@ export function NewEntryMenu({ workDir, disabled, onCreated }: NewEntryMenuProps
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuOpenRef = useRef(false);
+  const menuPresence = usePresence(menuOpen, 120);
 
   useEffect(() => {
     if (!menuOpen && !kind) return;
     const onMouseDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) close();
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        close(getPointerFocusTarget(event.target) === null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && menuOpenRef.current) close(true);
     };
     document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [menuOpen, kind]);
 
   useEffect(() => {
     if (kind) inputRef.current?.focus();
   }, [kind]);
 
-  function close() {
+  function close(restoreFocus = true): boolean {
+    if (!menuOpenRef.current && !kind) return false;
+    menuOpenRef.current = false;
+    if (restoreFocus && menuOpen) restoreFocusTarget(triggerRef.current);
     setMenuOpen(false);
     setKind(null);
     setName('');
     setError(null);
+    return true;
   }
 
   function start(next: NewEntryKind) {
+    if (!menuOpenRef.current) return;
+    menuOpenRef.current = false;
     setMenuOpen(false);
     setKind(next);
     setName('');
     setError(null);
+  }
+
+  function toggleMenu() {
+    if (menuOpenRef.current) {
+      menuOpenRef.current = false;
+      setMenuOpen(false);
+      return;
+    }
+    menuOpenRef.current = true;
+    setMenuOpen(true);
   }
 
   function validateName(value: string): string | null {
@@ -86,17 +142,26 @@ export function NewEntryMenu({ workDir, disabled, onCreated }: NewEntryMenuProps
   return (
     <div className="new-entry-menu" ref={rootRef}>
       <button
+        ref={triggerRef}
         className="btn-icon btn-icon-small new-entry-menu__trigger"
         type="button"
         title="新建文件或文件夹"
         aria-label="新建文件或文件夹"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
         disabled={disabled}
-        onClick={() => setMenuOpen((open) => !open)}
+        onClick={toggleMenu}
       >
         <Icon name="plus" size={14} />
       </button>
-      {menuOpen && (
-        <div className="new-entry-menu__dropdown" role="menu">
+      {menuPresence.mounted && (
+        <div
+          className="new-entry-menu__dropdown"
+          role="menu"
+          data-motion="menu"
+          data-side="bottom"
+          {...presenceRootProps(menuPresence)}
+        >
           <button type="button" role="menuitem" className="new-entry-menu__item" onClick={() => start('file')}>
             <Icon name="file" size={14} />
             新建文件
@@ -145,7 +210,7 @@ export function NewEntryMenu({ workDir, disabled, onCreated }: NewEntryMenuProps
               title="取消"
               aria-label="取消创建"
               disabled={busy}
-              onClick={close}
+              onClick={() => close()}
             >
               <Icon name="x" size={14} />
             </button>

@@ -12,6 +12,7 @@ interface ModelCardProps {
  */
 export function ModelCard({ preset, selected, onSelect }: ModelCardProps) {
   const isResponses = preset.wireApi === 'responses';
+  const isAnthropic = preset.wireApi === 'anthropic';
   const isIncompatible = preset.compatibility === 'incompatible';
   const isVerified = preset.compatibility === 'verified';
 
@@ -29,6 +30,7 @@ export function ModelCard({ preset, selected, onSelect }: ModelCardProps) {
             Responses API
           </span>
         )}
+        {isAnthropic && <span className="model-card-badge verified">Anthropic</span>}
       </div>
       <div className="model-card-base">{preset.baseUrl || '任意 Responses API endpoint'}</div>
       <div className="model-card-model">{preset.model || '（自定义填入）'}</div>

@@ -6,11 +6,7 @@ const { mockTestConnection, mockUpsertModel, mockSetKey } = vi.hoisted(() => ({
   mockSetKey: vi.fn(),
 }));
 
-vi.mock('../llm/openai-compat', () => ({
-  OpenAICompatClient: vi.fn(function () {
-    return { testConnection: mockTestConnection };
-  }),
-}));
+vi.mock('../llm/client-factory', () => ({ testModelConnection: mockTestConnection }));
 vi.mock('../llm/presets', () => ({
   findPreset: vi.fn().mockReturnValue({ id: 'custom', label: 'x', baseUrl: 'https://x', model: 'm', isCustom: true }),
 }));
@@ -21,7 +17,7 @@ import { configureModel } from './model-configure';
 import type { ModelConfig } from '../../shared/ipc';
 
 function cfg(over: Partial<ModelConfig> = {}): ModelConfig {
-  return { id: 'custom', label: 'Custom', baseUrl: 'https://x', model: 'm', isCustom: true, apiKey: 'sk-new', ...over };
+  return { id: 'custom', label: 'Custom', baseUrl: 'https://x', model: 'm', wireApi: 'responses', isCustom: true, apiKey: 'sk-new', ...over };
 }
 
 describe('configureModel', () => {

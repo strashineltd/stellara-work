@@ -212,7 +212,7 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
         MCP 服务器 <span className="count">{loading ? '加载中…' : servers.length}</span>
       </div>
       {error && (
-        <div className="error-banner" role="alert">
+        <div className="error-banner motion-feedback-enter" role="alert">
           <span className="error-icon"><Icon name="alert" size={17} /></span>
           <div className="error-text">{error}</div>
         </div>
@@ -413,8 +413,8 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
           )}
           {testResult && (
             <div
-              className={`settings-mcp-test-result ${testResult.ok ? 'ok' : 'error'}`}
-              role="status"
+              className={`settings-mcp-test-result motion-feedback-enter ${testResult.ok ? 'ok' : 'error'}`}
+              role={testResult.ok ? 'status' : 'alert'}
             >
               {testResult.ok
                 ? `连接成功，可用工具 ${testResult.toolCount ?? 0} 个`

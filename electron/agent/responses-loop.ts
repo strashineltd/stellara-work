@@ -1,7 +1,7 @@
 /**
  * Responses API Agent Loop
  *
- * 替代原有的 runAgentLoop（基于 Chat Completions），使用 Responses API。
+ * 基于 Responses API 的主 Agent 循环。
  * 核心变化（按计划 Section 7）：
  * 1. 使用 ResponseItem[] 替代 ChatMessage[]
  * 2. 接入 Context Hub（单一事实源）
@@ -25,6 +25,7 @@ import { ResponsesClient } from '../llm/responses';
 import { allTools, planModeTools, invokeTool } from './tools';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { ContextHub, type TaskContext, type PlanStep } from '../context/context-hub';
+import { parsePlanFromContent } from './plan-parser';
 
 // ============================================
 // 接口定义
@@ -64,8 +65,14 @@ export interface ResponsesLoopOptions {
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
   /** 子代理角色提示 */
   rolePrompt?: string;
+  /** 首次迁移旧会话时使用的领域消息历史；不会直接作为供应商请求体。 */
+  history?: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_calls?: ToolCall[]; tool_call_id?: string }>;
+  /** 当前 Agent 标识。 */
+  agentId?: string;
   /** 达到 maxToolCalls 上限后转为强制审批模式 */
   requireApprovalAfterLimit?: boolean;
+  /** 子代理内部关闭再次分派，避免递归任务树。 */
+  allowSubagents?: boolean;
 }
 
 // ============================================
@@ -106,6 +113,8 @@ export async function* runResponsesLoop(
   let iteration = 0;
   let toolCallCount = 0;
   let forceApprovalMode = false;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   // 初始化 ResponsesClient
   const client = new ResponsesClient({
@@ -121,6 +130,38 @@ export async function* runResponsesLoop(
   let systemPrompt = getSystemPrompt(planMode, platformInfo, options.skills, options.activeSkill);
   if (options.rolePrompt) {
     systemPrompt += `\n\n${options.rolePrompt}`;
+  }
+
+  // v0.9.1 会话尚未持久化完整 Responses Items 时，用领域历史做一次迁移。
+  if (contextHub.getResponseItems().length === 0 && options.history?.length) {
+    for (const message of options.history) {
+      if ((message.role === 'user' || message.role === 'assistant') && message.content) {
+        contextHub.addResponseItem({
+          type: 'message',
+          role: message.role,
+          content: [{ type: message.role === 'user' ? 'input_text' : 'output_text', text: message.content }],
+          status: 'completed',
+        });
+      }
+      if (message.role === 'assistant') {
+        for (const call of message.tool_calls ?? []) {
+          contextHub.addResponseItem({
+            type: 'function_call',
+            call_id: call.id,
+            name: call.function.name,
+            arguments: call.function.arguments,
+            status: 'completed',
+          });
+        }
+      }
+      if (message.role === 'tool' && message.tool_call_id) {
+        contextHub.addResponseItem({
+          type: 'function_call_output',
+          call_id: message.tool_call_id,
+          output: message.content,
+        });
+      }
+    }
   }
 
   // 注入记忆
@@ -162,9 +203,12 @@ export async function* runResponsesLoop(
   });
 
   // 获取工具定义
-  const tools = planMode
+  const executableTools = options.allowSubagents === false
+    ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
+    : allTools;
+  let tools = planMode
     ? planModeTools.map(t => convertToResponseTool(t))
-    : [...allTools.map(t => convertToResponseTool(t)), ...(options.extraTools ?? [])];
+    : [...executableTools.map(t => convertToResponseTool(t)), ...(options.extraTools ?? [])];
 
   // 主循环
   while (iteration < maxIterations) {
@@ -201,10 +245,16 @@ export async function* runResponsesLoop(
       max_output_tokens: model.maxOutputTokens ?? 16384,
       parallel_tool_calls: true,
     };
+    if (model.reasoningEffort) {
+      request.reasoning = {
+        effort: model.reasoningEffort === 'max' ? 'high' : model.reasoningEffort,
+      };
+    }
 
     // 调用模型
     let responseItems: ResponseItem[] = [];
-    let functionCalls: ResponseFunctionCallItem[] = [];
+    const functionCalls = new Map<string, ResponseFunctionCallItem>();
+    let assistantText = '';
     let failed = false;
     let errorMessage = '';
 
@@ -214,13 +264,30 @@ export async function* runResponsesLoop(
         const result = handleStreamEvent(event);
 
         if (result.type === 'content') {
+          assistantText += result.content ?? '';
           yield { type: 'content', content: result.content };
         } else if (result.type === 'reasoning') {
           // reasoning 事件（UI 可选展示）
-        } else if (result.type === 'function_call') {
-          functionCalls.push(result.functionCall!);
+        } else if (result.type === 'function_call' && result.functionCall) {
+          functionCalls.set(result.functionCall.call_id, result.functionCall);
         } else if (result.type === 'completed') {
           responseItems = result.items || [];
+          for (const item of responseItems) {
+            if (item.type === 'function_call') functionCalls.set(item.call_id, item);
+          }
+          if (result.usage) {
+            totalInputTokens += result.usage.input_tokens;
+            totalOutputTokens += result.usage.output_tokens;
+            yield {
+              type: 'usage',
+              usage: {
+                promptTokens: result.usage.input_tokens,
+                completionTokens: result.usage.output_tokens,
+                estimated: false,
+              },
+              totals: { promptTokens: totalInputTokens, completionTokens: totalOutputTokens },
+            };
+          }
         } else if (result.type === 'failed') {
           failed = true;
           errorMessage = result.error || '未知错误';
@@ -251,13 +318,56 @@ export async function* runResponsesLoop(
     }
 
     // 如果没有 Function Call，任务完成
-    if (functionCalls.length === 0) {
+    if (functionCalls.size === 0) {
+      if (planMode) {
+        const parsed = parsePlanFromContent(assistantText);
+        if (!parsed) {
+          yield {
+            type: 'error',
+            error: '计划模式未生成可执行的编号步骤',
+            errorMeta: { kind: 'invalid_request', hint: '请让模型输出编号计划后重试', retryable: true },
+          };
+          return;
+        }
+        const structuredPlan = {
+          objective: userMessage,
+          constraints: [],
+          steps: parsed.steps.map((step) => ({
+            id: `plan-${contextHub.getRevision()}-${step.index}`,
+            description: step.description,
+            status: 'pending' as const,
+            relatedFiles: [],
+            requiredVerification: [],
+            evidenceIds: [],
+          })),
+        };
+        await contextHub.commitEvent('plan_created', structuredPlan, options.agentId ?? 'main');
+        yield { type: 'plan', plan: structuredPlan.steps.map((step) => step.description) };
+        if (!options.onPlanApproval) {
+          yield { type: 'done' };
+          return;
+        }
+        if (!(await options.onPlanApproval(structuredPlan))) {
+          yield { type: 'content', content: '\n\n[计划未批准]' };
+          yield { type: 'done' };
+          return;
+        }
+        planMode = false;
+        systemPrompt = getSystemPrompt(false, platformInfo, options.skills, options.activeSkill);
+        if (options.rolePrompt) systemPrompt += `\n\n${options.rolePrompt}`;
+        tools = [...executableTools.map(t => convertToResponseTool(t)), ...(options.extraTools ?? [])];
+        await contextHub.commitEvent('user_message_added', {
+          content: '计划已批准。现在严格按计划执行，完成修改与验证后调用 task_complete。',
+          attachments: [],
+        }, options.agentId ?? 'main');
+        continue;
+      }
       yield { type: 'done' };
       return;
     }
 
     // 检查是否超过工具调用限制
-    toolCallCount += functionCalls.length;
+    toolCallCount += functionCalls.size;
     if (toolCallCount > maxToolCalls) {
       if (options.requireApprovalAfterLimit !== false) {
         forceApprovalMode = true;
@@ -278,7 +388,8 @@ export async function* runResponsesLoop(
     // 执行 Function Calls
     const toolResults: ResponseFunctionCallOutputItem[] = [];
 
-    for (const fc of functionCalls) {
+    let taskCompleteAccepted = false;
+    for (const fc of functionCalls.values()) {
       // 检查是否是 task_complete
       if (fc.name === 'task_complete') {
         const gateCheck = contextHub.canCompleteTask();
@@ -305,16 +416,6 @@ export async function* runResponsesLoop(
           function: { name: fc.name, arguments: fc.arguments },
         };
 
-        yield {
-          type: 'approval_required',
-          approval: {
-            id: fc.call_id,
-            toolName: fc.name,
-            args: fc.arguments,
-            toolCallId: fc.call_id,
-          },
-        };
-
         const approved = await onApproval(toolCall);
         if (!approved) {
           toolResults.push({
@@ -326,12 +427,32 @@ export async function* runResponsesLoop(
         }
       }
 
+      let args: Record<string, unknown>;
+      try {
+        args = JSON.parse(fc.arguments) as Record<string, unknown>;
+      } catch {
+        toolResults.push({
+          type: 'function_call_output',
+          call_id: fc.call_id,
+          output: JSON.stringify({ ok: false, error: '工具参数不是有效 JSON' }),
+        });
+        continue;
+      }
+      const matchedPlanStep = findPlanStepForTool(contextHub.getContext(), fc.name, args);
+      if (matchedPlanStep?.status === 'pending') {
+        await contextHub.commitEvent('plan_step_changed', {
+          stepId: matchedPlanStep.id,
+          status: 'in_progress',
+        }, options.agentId ?? 'main');
+      }
+
       // 记录工具调用开始
       await contextHub.commitEvent('tool_call_started', {
         id: fc.call_id,
         name: fc.name,
-        args: JSON.parse(fc.arguments),
-      });
+        args,
+        planStepId: matchedPlanStep?.id,
+      }, options.agentId ?? 'main');
 
       yield {
         type: 'tool_call',
@@ -344,16 +465,14 @@ export async function* runResponsesLoop(
 
       // 执行工具
       try {
-        const args = JSON.parse(fc.arguments);
-
         // 创建工具执行上下文
         const toolContext: ToolExecutionContext = {
           sessionId,
-          agentId: 'main',
+          agentId: options.agentId ?? 'main',
           contextRevision: contextHub.getRevision(),
           workspaceRevision: contextHub.getWorkspaceRevision(),
           toolCallId: fc.call_id,
-          planStepId: contextHub.getContext().plan.steps.find(s => s.status === 'in_progress')?.id,
+          planStepId: matchedPlanStep?.id ?? contextHub.getContext().plan.steps.find(s => s.status === 'in_progress')?.id,
         };
 
         const result = await invokeTool(fc.name as ToolName, args, cwd, toolContext);
@@ -371,6 +490,27 @@ export async function* runResponsesLoop(
           affectedFiles: result.meta?.kind === 'edit' ? [result.meta.path] : [],
         });
 
+        if (result.meta?.kind === 'command') {
+          await contextHub.commitEvent('command_completed', {
+            command: result.meta.command,
+            exitCode: result.meta.exitCode,
+            stdout: result.meta.stdout,
+            stderr: result.meta.stderr,
+            planStepId: toolContext.planStepId,
+          }, options.agentId ?? 'main');
+          if (result.meta.exitCode === 0) {
+            const verifiedFiles = contextHub.getUnverifiedFiles();
+            await contextHub.commitEvent('verification_completed', {
+              kind: 'test',
+              command: result.meta.command,
+              relatedFiles: verifiedFiles,
+              planStepIds: toolContext.planStepId ? [toolContext.planStepId] : [],
+              ok: true,
+              summary: `验证命令通过：${result.meta.command}`,
+            }, options.agentId ?? 'main');
+          }
+        }
+
         yield {
           type: 'tool_result',
           toolResult: { name: fc.name, toolCallId: fc.call_id, result },
@@ -381,9 +521,17 @@ export async function* runResponsesLoop(
           await contextHub.commitEvent('file_modified', {
             filePath: result.meta.path,
             toolCallId: fc.call_id,
-            agentId: 'main',
-          });
+            agentId: options.agentId ?? 'main',
+            planStepId: toolContext.planStepId,
+          }, options.agentId ?? 'main');
         }
+        if (result.ok && matchedPlanStep) {
+          await contextHub.commitEvent('plan_step_changed', {
+            stepId: matchedPlanStep.id,
+            status: 'completed',
+          }, options.agentId ?? 'main');
+        }
+        if (fc.name === 'task_complete' && result.ok) taskCompleteAccepted = true;
       } catch (err) {
         const error = (err as Error).message;
         toolResults.push({
@@ -408,6 +556,11 @@ export async function* runResponsesLoop(
     for (const tr of toolResults) {
       contextHub.addResponseItem(tr);
     }
+    if (taskCompleteAccepted) {
+      yield { type: 'task_complete' };
+      yield { type: 'done' };
+      return;
+    }
   }
 
   // 超过最大迭代次数
@@ -421,6 +574,27 @@ export async function* runResponsesLoop(
 // ============================================
 // 辅助函数
 // ============================================
+
+function findPlanStepForTool(
+  context: Readonly<TaskContext>,
+  toolName: string,
+  args: Record<string, unknown>,
+): PlanStep | undefined {
+  if (toolName === 'task_complete' || toolName === 'dispatch_subagents') return undefined;
+  const active = context.plan.steps.find((step) => step.status === 'in_progress');
+  if (active) return active;
+  const pathValue = typeof args.path === 'string' ? args.path.toLowerCase() : '';
+  const commandValue = typeof args.command === 'string' ? args.command.toLowerCase() : '';
+  return context.plan.steps.find((step) => {
+    if (step.status !== 'pending') return false;
+    const text = step.description.toLowerCase();
+    if (pathValue && text.includes(pathValue)) return true;
+    if (commandValue && text.includes(commandValue)) return true;
+    if (toolName === 'run_command') return /测试|验证|构建|运行|test|build|verify/.test(text);
+    if (toolName === 'write_file' || toolName === 'edit_file') return /实现|修改|编辑|创建|写入|add|edit|implement/.test(text);
+    return false;
+  }) ?? context.plan.steps.find((step) => step.status === 'pending');
+}
 
 /**
  * 构建 instructions（每轮重新生成）
@@ -486,6 +660,7 @@ function handleStreamEvent(
   content?: string;
   functionCall?: ResponseFunctionCallItem;
   items?: ResponseItem[];
+  usage?: import('../../shared/responses').ResponseUsage;
   error?: string;
 } {
   switch (event.type) {
@@ -495,21 +670,21 @@ function handleStreamEvent(
     case 'response.reasoning_text.delta':
       return { type: 'reasoning' };
 
-    case 'response.function_call_arguments.done':
+    case 'response.output_item.done':
+      if (event.item.type !== 'function_call') return { type: 'content', content: '' };
       return {
         type: 'function_call',
-        functionCall: {
-          type: 'function_call',
-          call_id: event.call_id || event.item_id,
-          name: '', // 需要从 output_item.done 获取
-          arguments: event.arguments,
-        },
+        functionCall: event.item,
       };
+
+    case 'response.function_call_arguments.done':
+      return { type: 'content', content: '' };
 
     case 'response.completed':
       return {
         type: 'completed',
         items: event.response.output,
+        usage: event.response.usage,
       };
 
     case 'response.failed':

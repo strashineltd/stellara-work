@@ -11,7 +11,7 @@ interface ApprovalTopBarProps {
 export function ApprovalTopBar({ request, onApprove, onReject }: ApprovalTopBarProps) {
   const subagentDefId = parseSubagentDefId(request.id);
   return (
-    <div className="approval-top-bar" role="alertdialog" aria-label="确认敏感操作">
+    <div className="approval-top-bar motion-feedback-enter" role="alertdialog" aria-label="确认敏感操作">
       <div className="approval-top-bar__inner">
         <span className="approval-top-bar__icon"><Icon name="shield" size={18} /></span>
         <div className="approval-top-bar__message">

@@ -1,8 +1,15 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ElectronAPI } from '../../../shared/ipc';
 import { SettingsPanel, type SettingsTab } from '../SettingsPanel';
+
+interface MountedView {
+  container: HTMLDivElement;
+  root: Root;
+}
+
+const mountedViews = new Set<MountedView>();
 
 function installApi() {
   const mocks = {
@@ -17,11 +24,12 @@ function installApi() {
     updateContextWindow: vi.fn().mockResolvedValue(undefined),
     onSettingsChanged: vi.fn().mockReturnValue(() => {}),
     settingsGet: vi.fn().mockResolvedValue({ theme: 'light' }),
+    getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
       app: {
-        getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
+        getInfo: mocks.getInfo,
         onSettingsChanged: mocks.onSettingsChanged,
       },
       settings: {
@@ -48,16 +56,23 @@ function installApi() {
 async function render(ui: React.ReactElement) {
   const container = document.createElement('div');
   document.body.appendChild(container);
-  let root: Root;
+  const root = createRoot(container);
+  const view = { container, root };
+  mountedViews.add(view);
   await act(async () => {
-    root = createRoot(container);
     root.render(ui);
   });
   return {
     container,
+    rerender: async (nextUi: React.ReactElement) => {
+      await act(async () => {
+        root!.render(nextUi);
+      });
+    },
     unmount: () => {
-      act(() => root!.unmount());
-      document.body.removeChild(container);
+      if (!mountedViews.delete(view)) return;
+      act(() => root.unmount());
+      container.remove();
     },
   };
 }
@@ -66,10 +81,22 @@ describe('SettingsPanel', () => {
   let mocks: ReturnType<typeof installApi>;
 
   beforeEach(() => {
-    document.body.innerHTML = '';
+    document.body.replaceChildren();
     delete document.documentElement.dataset.platform;
     delete document.documentElement.dataset.theme;
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     mocks = installApi();
+  });
+
+  afterEach(() => {
+    mountedViews.forEach(({ container, root }) => {
+      act(() => root.unmount());
+      container.remove();
+    });
+    mountedViews.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
   });
 
   it('renders 5 nav tabs with the models panel by default', async () => {
@@ -112,6 +139,37 @@ describe('SettingsPanel', () => {
     expect(document.documentElement.dataset.platform).toBe('darwin');
   });
 
+  it('does not apply a pending platform read after unmount', async () => {
+    let resolveInfo!: (value: Awaited<ReturnType<ElectronAPI['app']['getInfo']>>) => void;
+    const infoPromise = new Promise<Awaited<ReturnType<ElectronAPI['app']['getInfo']>>>((resolve) => {
+      resolveInfo = resolve;
+    });
+    mocks.getInfo.mockReturnValue(infoPromise);
+    const view = await render(<SettingsPanel onClose={vi.fn()} />);
+    view.unmount();
+    document.documentElement.dataset.platform = 'test-platform';
+
+    await act(async () => {
+      resolveInfo({ version: '0.9.0-test', platform: 'win32', appDataPath: '/tmp', envPath: '/tmp' });
+      await infoPromise;
+    });
+
+    expect(document.documentElement.dataset.platform).toBe('test-platform');
+  });
+
+  it('unmounts idempotently and removes document and settings listeners', async () => {
+    const unsubscribe = vi.fn();
+    mocks.onSettingsChanged.mockReturnValue(unsubscribe);
+    const removeEventListener = vi.spyOn(document, 'removeEventListener');
+    const view = await render(<SettingsPanel onClose={vi.fn()} />);
+
+    view.unmount();
+
+    expect(() => view.unmount()).not.toThrow();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(removeEventListener).toHaveBeenCalledWith('keydown', expect.any(Function));
+  });
+
   it('calls onClose when the backdrop is clicked', async () => {
     const onClose = vi.fn();
     const { container } = await render(<SettingsPanel onClose={onClose} />);
@@ -144,6 +202,218 @@ describe('SettingsPanel', () => {
     expect(container.querySelector('.settings-nav__item.active')?.textContent).toContain('会话');
   });
 
+  it('closes on Escape while open and ignores Escape and backdrop clicks while closing', async () => {
+    const onClose = vi.fn();
+    const completeExit = vi.fn();
+    const view = await render(
+      <SettingsPanel presence={{ state: 'open', completeExit }} onClose={onClose} />,
+    );
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await view.rerender(
+      <SettingsPanel presence={{ state: 'closing', completeExit }} onClose={onClose} />,
+    );
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      view.container.querySelector('.modal-backdrop')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it('selects and focuses the requested non-default nav tab when Settings opens', async () => {
+    Object.defineProperty(window, 'electronAPI', {
+      value: {
+        ...window.electronAPI,
+        sessions: { list: vi.fn().mockResolvedValue([]), delete: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as ElectronAPI,
+      writable: true,
+      configurable: true,
+    });
+    const view = await render(
+      <SettingsPanel
+        initialTab="sessions"
+        presence={{ state: 'entering', completeExit: vi.fn() }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const sessionsTab = view.container.querySelector('.settings-nav__item[data-tab="sessions"]');
+    expect(sessionsTab?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(sessionsTab);
+    view.unmount();
+  });
+
+  it('selects and focuses the requested tab when reduced motion mounts Settings directly open', async () => {
+    Object.defineProperty(window, 'electronAPI', {
+      value: {
+        ...window.electronAPI,
+        sessions: { list: vi.fn().mockResolvedValue([]), delete: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as ElectronAPI,
+      writable: true,
+      configurable: true,
+    });
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    outside.focus();
+    const view = await render(
+      <SettingsPanel
+        initialTab="sessions"
+        focusRequest={1}
+        presence={{ state: 'open', completeExit: vi.fn() }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const sessionsTab = view.container.querySelector('.settings-nav__item[data-tab="sessions"]');
+    expect(sessionsTab?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(sessionsTab);
+    view.unmount();
+    outside.remove();
+  });
+
+  it('syncs and focuses a changed request while Settings is already open', async () => {
+    Object.defineProperty(window, 'electronAPI', {
+      value: {
+        ...window.electronAPI,
+        sessions: { list: vi.fn().mockResolvedValue([]), delete: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as ElectronAPI,
+      writable: true,
+      configurable: true,
+    });
+    const completeExit = vi.fn();
+    const onClose = vi.fn();
+    const view = await render(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={1}
+        presence={{ state: 'open', completeExit }}
+        onClose={onClose}
+      />,
+    );
+
+    await view.rerender(
+      <SettingsPanel
+        initialTab="sessions"
+        focusRequest={2}
+        presence={{ state: 'open', completeExit }}
+        onClose={onClose}
+      />,
+    );
+
+    const sessionsTab = view.container.querySelector('.settings-nav__item[data-tab="sessions"]');
+    expect(sessionsTab?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(sessionsTab);
+    view.unmount();
+  });
+
+  it('refocuses the requested tab for a repeated request while Settings is already open', async () => {
+    const completeExit = vi.fn();
+    const onClose = vi.fn();
+    const view = await render(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={1}
+        presence={{ state: 'open', completeExit }}
+        onClose={onClose}
+      />,
+    );
+    const modelsTab = view.container.querySelector('.settings-nav__item[data-tab="models"]');
+    const sessionsTab = view.container.querySelector('.settings-nav__item[data-tab="sessions"]') as HTMLButtonElement;
+    sessionsTab.focus();
+
+    await view.rerender(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={2}
+        presence={{ state: 'open', completeExit }}
+        onClose={onClose}
+      />,
+    );
+
+    expect(document.activeElement).toBe(modelsTab);
+    view.unmount();
+  });
+
+  it('does not pull focus back to the active tab when entering settles open', async () => {
+    const completeExit = vi.fn();
+    const onClose = vi.fn();
+    const view = await render(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={1}
+        presence={{ state: 'entering', completeExit }}
+        onClose={onClose}
+      />,
+    );
+    const modelsTab = view.container.querySelector('.settings-nav__item[data-tab="models"]');
+    const sessionsTab = view.container.querySelector(
+      '.settings-nav__item[data-tab="sessions"]',
+    ) as HTMLButtonElement;
+    expect(document.activeElement).toBe(modelsTab);
+    sessionsTab.focus();
+    expect(document.activeElement).toBe(sessionsTab);
+
+    await view.rerender(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={1}
+        presence={{ state: 'open', completeExit }}
+        onClose={onClose}
+      />,
+    );
+
+    expect(document.activeElement).toBe(sessionsTab);
+    view.unmount();
+  });
+
+  it('syncs and focuses the requested nav tab when Settings rapidly reopens during exit', async () => {
+    Object.defineProperty(window, 'electronAPI', {
+      value: {
+        ...window.electronAPI,
+        sessions: { list: vi.fn().mockResolvedValue([]), delete: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as ElectronAPI,
+      writable: true,
+      configurable: true,
+    });
+    const completeExit = vi.fn();
+    const view = await render(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={1}
+        presence={{ state: 'entering', completeExit }}
+        onClose={vi.fn()}
+      />,
+    );
+    await view.rerender(
+      <SettingsPanel
+        initialTab="models"
+        focusRequest={1}
+        presence={{ state: 'closing', completeExit }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await view.rerender(
+      <SettingsPanel
+        initialTab="sessions"
+        focusRequest={2}
+        presence={{ state: 'entering', completeExit }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const sessionsTab = view.container.querySelector('.settings-nav__item[data-tab="sessions"]');
+    expect(sessionsTab?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(sessionsTab);
+    view.unmount();
+  });
+
   it('reloads the models panel when settings-changed is broadcast', async () => {
     const { container } = await render(<SettingsPanel onClose={vi.fn()} />);
     expect(mocks.getAll).toHaveBeenCalledTimes(1);
@@ -155,6 +425,15 @@ describe('SettingsPanel', () => {
 
     expect(mocks.getAll).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('模型');
+  });
+
+  it('preserves the resolved document theme while saved settings are loading', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    mocks.settingsGet.mockReturnValue(new Promise(() => {}));
+
+    await render(<SettingsPanel onClose={vi.fn()} />);
+
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
   it('applies the saved theme to documentElement', async () => {
@@ -206,5 +485,42 @@ describe('SettingsPanel', () => {
       for (const cb of listeners) cb();
     });
     expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('keeps the settings shell identity while only tab content changes', async () => {
+    const { container } = await render(<SettingsPanel onClose={vi.fn()} />);
+
+    const modal = container.querySelector('.settings-modal');
+    const panels = container.querySelector('.settings-panels');
+    const firstContent = container.querySelector('.settings-tab-content');
+    expect(firstContent?.getAttribute('data-motion')).toBe('settings-content-enter');
+    expect(firstContent?.getAttribute('data-tab')).toBe('models');
+
+    const sessions = container.querySelector('.settings-nav__item[data-tab="sessions"]') as HTMLElement;
+    await act(async () => {
+      sessions.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('.settings-modal')).toBe(modal);
+    expect(container.querySelector('.settings-panels')).toBe(panels);
+    const nextContent = container.querySelector('.settings-tab-content');
+    expect(nextContent).not.toBe(firstContent);
+    expect(nextContent?.getAttribute('data-motion')).toBe('settings-content-enter');
+    expect(nextContent?.getAttribute('data-tab')).toBe('sessions');
+    expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('会话');
+  });
+
+  it('preserves the tab content node when settings-changed refreshes the active panel', async () => {
+    const { container } = await render(<SettingsPanel onClose={vi.fn()} />);
+    const content = container.querySelector('.settings-tab-content');
+    expect(content).not.toBeNull();
+
+    const broadcast = mocks.onSettingsChanged.mock.calls[0]![0] as () => void;
+    await act(async () => {
+      broadcast();
+    });
+
+    expect(container.querySelector('.settings-tab-content')).toBe(content);
+    expect(mocks.getAll).toHaveBeenCalledTimes(2);
   });
 });

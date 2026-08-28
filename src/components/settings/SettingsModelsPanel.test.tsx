@@ -175,6 +175,7 @@ describe('SettingsModelsPanel', () => {
       model: 'glm-5.2',
       apiKey: 'sk-test',
       isCustom: false,
+      wireApi: 'responses',
     });
     expect(mocks.getAll).toHaveBeenCalledTimes(2);
     expect(container.querySelector('.settings-add-form')).toBeNull();

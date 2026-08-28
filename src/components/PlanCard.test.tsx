@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { PlanCard } from './PlanCard';
 
 function render(ui: React.ReactElement) {
@@ -35,6 +35,7 @@ describe('PlanCard', () => {
   it('renders numbered steps with status', () => {
     const { getByText, querySelector } = render(
       <PlanCard
+        running={false}
         steps={[
           { description: '读 README', status: 'completed' },
           { description: '写测试', status: 'pending' },
@@ -50,7 +51,7 @@ describe('PlanCard', () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();
     const { querySelector } = render(
-      <PlanCard steps={[{ description: 'a', status: 'pending' }]} awaitingApproval onApprove={onApprove} onReject={onReject} />,
+      <PlanCard steps={[{ description: 'a', status: 'pending' }]} running={false} awaitingApproval onApprove={onApprove} onReject={onReject} />,
     );
     expect(querySelector('.plan-actions')).not.toBeNull();
     act(() => {
@@ -60,7 +61,87 @@ describe('PlanCard', () => {
   });
 
   it('hides buttons when not awaiting approval', () => {
-    const { querySelector } = render(<PlanCard steps={[{ description: 'a', status: 'pending' }]} />);
+    const { querySelector } = render(<PlanCard steps={[{ description: 'a', status: 'pending' }]} running={false} />);
+    expect(querySelector('.plan-actions')).toBeNull();
+  });
+
+  it('activates the step spinner loop only while running', () => {
+    const { querySelector, getByText } = render(
+      <PlanCard steps={[{ description: '写测试', status: 'in_progress' }]} running />,
+    );
+    expect(querySelector('.plan-step-spinner.is-active')).not.toBeNull();
+    expect(getByText('进行中')).not.toBeNull();
+  });
+
+  it('keeps the status visible without the active loop class when idle', () => {
+    const { querySelector, getByText } = render(
+      <PlanCard steps={[{ description: '写测试', status: 'in_progress' }]} running={false} />,
+    );
+    expect(querySelector('.plan-step-spinner.is-active')).toBeNull();
+    expect(querySelector('.plan-step-spinner')).not.toBeNull();
+    expect(getByText('进行中')).not.toBeNull();
+  });
+
+  it('gives the pending approval action group alertdialog semantics with one-shot entry motion', () => {
+    const { querySelector } = render(
+      <PlanCard steps={[{ description: 'a', status: 'pending' }]} running={false} awaitingApproval onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    const actions = querySelector('.plan-actions');
+    expect(actions?.getAttribute('role')).toBe('alertdialog');
+    expect(actions?.classList.contains('motion-feedback-enter')).toBe(true);
+  });
+
+  it('approves, fires the callback and removes the action group immediately in the same act', () => {
+    const onApprove = vi.fn();
+    function Harness() {
+      const [awaiting, setAwaiting] = useState(true);
+      return (
+        <PlanCard
+          steps={[{ description: 'a', status: 'pending' }]}
+          running={false}
+          awaitingApproval={awaiting}
+          onApprove={() => {
+            onApprove();
+            setAwaiting(false);
+          }}
+          onReject={vi.fn()}
+        />
+      );
+    }
+    const { container, querySelector } = render(<Harness />);
+    expect(querySelector('.plan-actions')).not.toBeNull();
+    act(() => {
+      const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '批准执行');
+      approveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onApprove).toHaveBeenCalledOnce();
+    expect(querySelector('.plan-actions')).toBeNull();
+  });
+
+  it('rejects, fires the callback and removes the action group immediately in the same act', () => {
+    const onReject = vi.fn();
+    function Harness() {
+      const [awaiting, setAwaiting] = useState(true);
+      return (
+        <PlanCard
+          steps={[{ description: 'a', status: 'pending' }]}
+          running={false}
+          awaitingApproval={awaiting}
+          onApprove={vi.fn()}
+          onReject={() => {
+            onReject();
+            setAwaiting(false);
+          }}
+        />
+      );
+    }
+    const { container, querySelector } = render(<Harness />);
+    expect(querySelector('.plan-actions')).not.toBeNull();
+    act(() => {
+      const rejectBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '拒绝');
+      rejectBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onReject).toHaveBeenCalledOnce();
     expect(querySelector('.plan-actions')).toBeNull();
   });
 });

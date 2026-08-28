@@ -4,10 +4,8 @@ import { promises as fs } from 'node:fs';
 import log from 'electron-log/main';
 import { loadEnv, getEnvPath } from './config/env';
 import { loadModelsConfig } from './config/models';
-import { runAgentLoop } from './agent/loop';
 import { runResponsesLoop } from './agent/responses-loop';
-import { AnthropicClient } from './llm/anthropic';
-import { getSystemPrompt } from './agent/plan';
+import { runAnthropicAgentLoop } from './agent/anthropic-loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { SubagentCoordinator } from './agent/subagent-coordinator';
@@ -32,6 +30,7 @@ import type {
   ProjectFileSelection,
   Memory,
   McpServerConfig,
+  ContextStateView,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -216,6 +215,10 @@ function registerIpcHandlers(): void {
       workDir: active.workDir,
       isCustom: false,
       contextWindow: active.contextWindow,
+      wireApi: active.wireApi ?? 'responses',
+      compatibility: active.compatibility,
+      maxOutputTokens: active.maxOutputTokens,
+      reasoningEffort: active.reasoningEffort,
       hasKey: !!key,
     };
     return { presets: MODEL_PRESETS, configured };
@@ -234,9 +237,8 @@ function registerIpcHandlers(): void {
 
   handle('models:test', async (_e, config: ModelConfig) => {
     try {
-      const { OpenAICompatClient } = await import('./llm/openai-compat');
-      const client = new OpenAICompatClient(config);
-      return await client.testConnection();
+      const { testModelConnection } = await import('./llm/client-factory');
+      return await testModelConnection(config);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -258,6 +260,9 @@ function registerIpcHandlers(): void {
       hasKey: !!keys[m.id],
       isActive: m.id === cfg.activeModelId,
       contextWindow: m.contextWindow,
+      wireApi: m.wireApi ?? 'responses',
+      compatibility: m.compatibility,
+      verifiedAt: m.verifiedAt,
     }));
   });
 
@@ -305,24 +310,34 @@ function registerIpcHandlers(): void {
     const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // 自动检测协议（对于自定义模型）
-    let wireApi = configured.wireApi;
-    if (!wireApi) {
-      const { inferWireApiFromUrl } = await import('../shared/ipc');
-      wireApi = inferWireApiFromUrl(configured.baseUrl);
-    }
-
-    // 渐进式集成：根据 wireApi 选择 loop
+    const wireApi = configured.wireApi ?? 'responses';
     if (wireApi === 'anthropic') {
       void runAnthropicLoopForIpc(request, configured, streamId);
-    } else if (wireApi === 'responses') {
-      void runResponsesLoopForIpc(request, configured, streamId);
     } else {
-      // chat-completions 或未指定（默认 chat-completions）
-      void runAgentLoopForIpc(request, configured, streamId);
+      void runResponsesLoopForIpc(request, configured, streamId);
     }
 
     return { streamId };
+  });
+
+  handle('context:getSnapshot', async (_e, sessionId: string): Promise<ContextStateView> => {
+    const hub = await openPersistedContextHub(sessionId);
+    try {
+      return contextStateView(hub);
+    } finally {
+      hub.dispose();
+    }
+  });
+
+  handle('context:createCheckpoint', async (_e, sessionId: string): Promise<ContextStateView> => {
+    const hub = await openPersistedContextHub(sessionId);
+    try {
+      const checkpoint = hub.createCheckpoint();
+      await hub.commitEvent('checkpoint_created', { checkpointId: checkpoint.id });
+      return contextStateView(hub);
+    } finally {
+      hub.dispose();
+    }
   });
 
   // P0-2: 取消任务
@@ -938,12 +953,85 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
   throw new Error(`工作目录不在已配置的工作区内：${workDir}`);
 }
 
-/**
- * Responses API Agent Loop 的 IPC 包装器
-  *
-  * 渐进式集成：保留旧 runAgentLoopForIpc，新增此函数。
-  * 通过模型的 wireApi 配置选择使用哪个 loop。
- */
+async function openPersistedContextHub(sessionId: string): Promise<ContextHub> {
+  if (!sessionId) throw new Error('缺少会话 ID');
+  const [{ getSession, getProject }, { loadConfig }] = await Promise.all([
+    import('./store/db'),
+    import('./config/config-v2'),
+  ]);
+  const session = getSession(sessionId);
+  if (!session) throw new Error('会话不存在或已删除');
+  const config = await loadConfig();
+  const model = config.models.find((item) => item.id === session.modelId);
+  const project = session.projectId ? getProject(session.projectId) : null;
+  const workDir = project?.workDir ?? session.workDir ?? model?.workDir ?? '.';
+  return new ContextHub(
+    sessionId,
+    workDir,
+    model?.contextWindow ?? 256000,
+    model?.maxOutputTokens ?? 16384,
+  );
+}
+
+function contextStateView(contextHub: ContextHub): ContextStateView {
+  const context = contextHub.getContext();
+  return {
+    sessionId: context.sessionId,
+    revision: context.revision,
+    workspaceRevision: context.workspaceRevision,
+    objective: context.objective,
+    planSteps: context.plan.steps.map((step) => ({
+      id: step.id,
+      description: step.description,
+      status: step.status,
+    })),
+    usage: { ...context.usage },
+    checkpoint: contextHub.getLatestCheckpoint(),
+    modifiedFiles: Array.from(context.workspace.modifiedFiles.keys()),
+    unverifiedFiles: contextHub.getUnverifiedFiles(),
+    staleEvidence: contextHub.getStaleEvidence().map((item) => ({ id: item.id, summary: item.summary })),
+    taskGate: contextHub.canCompleteTask(),
+    subagents: context.subagents.map((item) => ({ ...item })),
+  };
+}
+
+function attachContextEvents(
+  contextHub: ContextHub,
+  send: (event: ChatStreamEvent) => void,
+): () => void {
+  return contextHub.onEvent((event) => {
+    send({
+      type: 'context_revision',
+      contextRevision: contextHub.getRevision(),
+      workspaceRevision: contextHub.getWorkspaceRevision(),
+      contextState: contextStateView(contextHub),
+    });
+    const usage = contextHub.getContext().usage;
+    send({
+      type: 'context_usage',
+      contextRevision: contextHub.getRevision(),
+      workspaceRevision: contextHub.getWorkspaceRevision(),
+      contextUsage: {
+        inputUsageRatio: usage.inputUsageRatio,
+        currentInputTokens: usage.currentInputTokens,
+        usableInputBudget: usage.usableInputBudget,
+        nearLimit: usage.nearLimit,
+        hardLimited: usage.hardLimited,
+        lastCompactedAt: usage.lastCompactedAt,
+      },
+      contextState: contextStateView(contextHub),
+    });
+    if (event.event === 'file_modified') {
+      send({
+        type: 'file_revision_changed',
+        contextRevision: contextHub.getRevision(),
+        workspaceRevision: contextHub.getWorkspaceRevision(),
+      });
+    }
+  });
+}
+
+/** Responses API Agent Loop 的 IPC 包装器。 */
 
 /**
  * Anthropic Messages API Agent Loop 的 IPC 包装器
@@ -977,12 +1065,14 @@ async function runAnthropicLoopForIpc(
     userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
   }
 
-  // 创建 Anthropic 客户端
-  const client = new AnthropicClient({
-    baseUrl: model.baseUrl,
-    apiKey: model.apiKey,
-    model: model.model,
-  });
+  const contextHub = new ContextHub(
+    request.sessionId,
+    model.workDir || '.',
+    model.contextWindow || 256000,
+    model.maxOutputTokens || 16384,
+  );
+  const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
+  attachContextEvents(contextHub, send);
 
   // 创建 AbortController
   const ctrl = chatStreams.start(streamId);
@@ -1008,30 +1098,56 @@ async function runAnthropicLoopForIpc(
       // skills 加载失败不影响 agent 运行
     }
 
-    // 构建 Anthropic 请求
-    const systemPrompt = getSystemPrompt(false, { platform: process.platform, arch: process.arch }, skills);
-    const anthropicRequest: import('./llm/anthropic').AnthropicRequest = {
-      model: model.model,
-      max_tokens: model.maxOutputTokens || 4096,
-      messages: [{ role: 'user', content: userContent }],
-      system: systemPrompt,
-      stream: true,
-    };
+    let extraTools: import('../shared/ipc').OpenAITool[] = [];
+    try {
+      const { mcpManager } = await import('./mcp/mcp-manager');
+      extraTools = await mcpManager.getEnabledTools();
+    } catch {
+      // MCP 不可用不阻断 Agent
+    }
 
-    // 运行 Anthropic Loop
-    for await (const event of client.createStream(anthropicRequest, ctrl.signal)) {
+    coordinator.setRunner(async (definition, packet, signal) => {
+      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal);
+    });
+    setSubagentRunner(request.sessionId, {
+      dispatch: (definitions) => coordinator.dispatch(definitions),
+    });
+
+    for await (const event of runAnthropicAgentLoop(userContent, {
+      model,
+      cwd,
+      sessionId: request.sessionId,
+      contextHub,
+      history: messages.slice(0, -1),
+      planMode: request.planMode ?? false,
+      platform: { platform: process.platform, arch: process.arch },
+      skills,
+      extraTools,
+      signal: ctrl.signal,
+      onApproval: async (toolCall) => {
+        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        send({
+          type: 'approval_required',
+          approval: { id: approvalId, toolName: toolCall.function.name, args: toolCall.function.arguments, toolCallId: toolCall.id },
+        });
+        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
+        return chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
+      },
+      onPlanApproval: async (plan) => {
+        const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        send({
+          type: 'plan_approval_required',
+          planApproval: { id: approvalId, plan: plan.steps.map((step) => step.description) },
+        });
+        const requestedTimeout = request.approvalTimeoutMs ?? 300_000;
+        return chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
+      },
+    })) {
       if (ctrl.signal.aborted) break;
-
-      // 处理流式事件
-      if (event.type === 'content_block_delta' && event.delta?.text) {
-        send({ type: 'content', content: event.delta.text });
-      } else if (event.type === 'message_stop') {
-        send({ type: 'done' });
-        terminalEventSent = true;
-      } else if (event.type === 'error') {
-        send({ type: 'error', error: event.error?.message || '未知错误' });
-        terminalEventSent = true;
-      }
+      send(event);
+      if (event.type === 'task_complete') taskCompleted = true;
+      if (event.type === 'error') taskFailed = true;
+      if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
     }
 
     // 任务结束通知
@@ -1056,7 +1172,9 @@ async function runAnthropicLoopForIpc(
       send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
     }
   } finally {
-    // 清理资源
+    setSubagentRunner(request.sessionId, null);
+    coordinator.dispose();
+    contextHub.dispose();
     chatStreams.cleanup(streamId);
     if (!terminalEventSent) send({ type: 'done' });
 
@@ -1107,14 +1225,7 @@ async function runResponsesLoopForIpc(
 
   const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
 
-  // 监听 context events 并广播到 Renderer
-  contextHub.onEvent((event) => {
-    send({
-      type: 'context_revision',
-      contextRevision: event.contextRevision,
-      workspaceRevision: event.workspaceRevision,
-    });
-  });
+  attachContextEvents(contextHub, send);
 
   // 创建 AbortController
   const ctrl = chatStreams.start(streamId);
@@ -1150,9 +1261,11 @@ async function runResponsesLoopForIpc(
     }
 
     // 设置子代理执行器
-    coordinator.setRunner(async (task, id, signal) => {
-      const result = await runOneSubagent(task, id, model, cwd, send, signal);
-      return { summary: result.summary, ok: result.ok };
+    coordinator.setRunner(async (definition, packet, signal) => {
+      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal);
+    });
+    setSubagentRunner(request.sessionId, {
+      dispatch: (definitions) => coordinator.dispatch(definitions),
     });
 
     // 运行 Responses Loop
@@ -1161,6 +1274,7 @@ async function runResponsesLoopForIpc(
       cwd,
       sessionId: request.sessionId,
       contextHub,
+      history: messages.slice(0, -1),
       planMode: request.planMode ?? false,
       platform: { platform: process.platform, arch: process.arch },
       skills,
@@ -1175,6 +1289,15 @@ async function runResponsesLoopForIpc(
         const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
         const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
         return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
+      },
+      onPlanApproval: async (plan) => {
+        const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        send({
+          type: 'plan_approval_required',
+          planApproval: { id: approvalId, plan: plan.steps.map((step) => step.description) },
+        });
+        const requestedTimeout = request.approvalTimeoutMs ?? 300_000;
+        return chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
       },
     })) {
       if (ctrl.signal.aborted) break;
@@ -1207,6 +1330,7 @@ async function runResponsesLoopForIpc(
     }
   } finally {
     // 清理资源
+    setSubagentRunner(request.sessionId, null);
     coordinator.dispose();
     contextHub.dispose();
     chatStreams.cleanup(streamId);
@@ -1222,264 +1346,150 @@ async function runResponsesLoopForIpc(
   }
 }
 
-async function runAgentLoopForIpc(
-  request: ChatRequest,
-  model: ModelConfig,
-  streamId: string,
-): Promise<void> {
-  const send = (event: ChatStreamEvent) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('chat-stream', { streamId, event });
-    }
-  };
-
-  const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
-  const last = messages[messages.length - 1];
-  if (!last || last.role !== 'user') {
-    send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
-    return;
-  }
-  const history = messages.slice(0, -1);
-
-  // 附件注入：request.attachments 非空 → 在用户消息 content 前加附件说明，
-  // Agent 据此用 read_file 读取 .stellara-attachments/ 内的文本附件
-  let userContent = last.content;
-  if (request.attachments && request.attachments.length > 0) {
-    const attachmentLines = request.attachments.map(
-      (a) => `- ${a.name} → ${a.relPath}（${a.kind === 'image' ? '图片' : '文件'}）`,
-    );
-    userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
-  }
-
-  // M4.1: 上下文压缩阈值随模型 contextWindow 自适应（默认 24K 阈值对 256K 窗口过保守）
-  const { compressionForContextWindow } = await import('./agent/compress');
-  const compression = compressionForContextWindow(model.contextWindow);
-
-  // P0-2: 创建 AbortController
-  const ctrl = chatStreams.start(streamId);
-  let terminalEventSent = false;
-  let taskCompleted = false;
-  let taskFailed = false;
-
-  // macOS 深度适配：Agent 执行期间阻止系统休眠（长任务不被打断）
-  let powerSaveId: number | null = null;
-  if (process.platform === 'darwin') {
-    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
-  }
-
-    try {
-      // 使用已验证的工作目录（chat:start 已检查 model.workDir 必须存在）
-      const cwd = model.workDir!;
-
-      // 注册子代理执行器：dispatch_subagents 工具在本次会话内可并行启动子代理 loop
-      // 批次内全部完成时发射 subagent_summary 汇总报告（卡片 id 与报告 id 均为 def.id）
-      const subagentResults: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> = [];
-      let subagentTotal = 0;
-      setSubagentRunner({
-        setTotal: (total) => {
-          subagentTotal = total;
-        },
-        run: async (task, id) => {
-          const startedAt = Date.now();
-          const result = await runOneSubagent(task, id, model, cwd, send);
-          subagentResults.push({
-            id,
-            summary: result.summary,
-            ok: result.ok,
-            elapsedMs: Date.now() - startedAt,
-          });
-          if (subagentTotal > 0 && subagentResults.length >= subagentTotal) {
-            send({ type: 'subagent_summary', subagentResults: [...subagentResults] });
-          }
-          return result;
-        },
-      });
-
-
-    // 加载 skills（注入 system prompt）
-    let skills: import('../shared/ipc').SkillDef[] = [];
-    try {
-      const { loadSkills } = await import('./agent/skills');
-      skills = await loadSkills(cwd);
-    } catch {
-      // skills 加载失败不影响 agent 运行
-    }
-
-    // 加载 MCP 工具（注入 extraTools）
-    let extraTools: import('../shared/ipc').OpenAITool[] = [];
-    try {
-      const { mcpManager } = await import('./mcp/mcp-manager');
-      extraTools = await mcpManager.getEnabledTools();
-    } catch {
-      // MCP 工具加载失败不影响 agent 运行
-    }
-
-    for await (const event of runAgentLoop(userContent, {
-      model,
-      cwd,
-      history,
-      compression,
-      planMode: request.planMode ?? false,
-      platform: { platform: process.platform, arch: process.arch },
-      skills,
-      extraTools,
-      signal: ctrl.signal,
-      onApproval: async (toolCall) => {
-        // P0-1: 向前端发送审批请求，等待用户响应
-        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const toolName = toolCall.function.name;
-
-        send({
-          type: 'approval_required',
-          approval: { id: approvalId, toolName, args: toolCall.function.arguments, toolCallId: toolCall.id },
-        });
-
-        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
-        const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
-        return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
-      },
-      onPlanApproval: async (plan) => {
-        const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        send({
-          type: 'plan_approval_required',
-          planApproval: { id: approvalId, plan: plan.steps.map((s) => s.description) },
-        });
-        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
-        const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
-        return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
-      },
-    })) {
-      // P0-2: 检查是否已 abort
-      if (ctrl.signal.aborted) break;
-      send(event);
-      if (event.type === 'task_complete') taskCompleted = true;
-      if (event.type === 'error') taskFailed = true;
-      if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
-    }
-
-    // M2.3: 任务结束系统通知（仅窗口未聚焦时）+ Dock bounce
-    const windowActive = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused();
-    if (!windowActive && !ctrl.signal.aborted && (taskCompleted || taskFailed)) {
-      // macOS：Dock 图标弹跳提示
-      if (process.platform === 'darwin') {
-        app.dock?.bounce(taskFailed ? 'critical' : 'informational');
-      }
-      notifyTaskEnd(
-        { completed: taskCompleted, failed: taskFailed, aborted: false },
-        () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.show();
-            mainWindow.focus();
-          }
-        },
-      );
-    }
-  } catch (err) {
-    if (!ctrl.signal.aborted) {
-      send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
-    }
-  } finally {
-    // 清理：主会话结束 → 级联 abort 所有子代理流（runOneSubagent 各自 cleanup）
-    for (const subId of chatStreams.allStreamIds()) {
-      if (subId.startsWith('sub-')) {
-        chatStreams.abort(subId);
-      }
-    }
-    chatStreams.cleanup(streamId);
-    setSubagentRunner(null);
-    if (!terminalEventSent) send({ type: 'done' });
-
-    // macOS：任务结束恢复系统休眠策略
-    if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {
-      powerSaveBlocker.stop(powerSaveId);
-    }
-
-    // 异步提取记忆（不阻塞会话结束）
-    void extractMemoriesFromSession(request, model).catch(() => {});
-  }
-}
-
 /**
  * 运行单个子代理：独立 streamId（sub- 前缀，仅用于 registry 隔离）、独立 AbortController
  * 与上下文，共享 model / cwd / 审批通道。事件通过 parentSend 以 subagent_* 标注转发到
  * 主会话流，subagentId 使用 def.id（与审批标注、汇总报告一致）。
  */
-async function runOneSubagent(
-  task: string,
-  defId: string,
-  model: ModelConfig,
+async function resolveSubagentModel(
+  definition: import('../shared/ipc').SubagentDef,
+  parentModel: ModelConfig,
   cwd: string,
+): Promise<ModelConfig> {
+  if (!definition.modelId || definition.modelId === parentModel.id) return parentModel;
+  const [{ loadConfig }, { getKey }] = await Promise.all([
+    import('./config/config-v2'),
+    import('./config/secrets'),
+  ]);
+  const entry = (await loadConfig()).models.find((item) => item.id === definition.modelId);
+  if (!entry) throw new Error(`子代理模型不存在：${definition.modelId}`);
+  const apiKey = getKey(entry.id);
+  if (!apiKey) throw new Error(`子代理模型未配置 API Key：${entry.label}`);
+  return {
+    id: entry.id as ModelConfig['id'],
+    label: entry.label,
+    baseUrl: entry.baseUrl,
+    model: entry.model,
+    apiKey,
+    workDir: cwd,
+    isCustom: entry.id === 'custom',
+    wireApi: entry.wireApi ?? 'responses',
+    contextWindow: entry.contextWindow,
+    maxOutputTokens: entry.maxOutputTokens,
+    reasoningEffort: entry.reasoningEffort,
+    compatibility: entry.compatibility,
+  };
+}
+
+async function runOneSubagent(
+  definition: import('../shared/ipc').SubagentDef,
+  packet: import('./agent/subagent-coordinator').SubagentContextPacket,
+  parentModel: ModelConfig,
+  cwd: string,
+  parentSessionId: string,
   parentSend: (event: ChatStreamEvent) => void,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<{ summary: string; ok: boolean }> {
-  const streamId = `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const ctrl = chatStreams.start(streamId);
   const startedAt = Date.now();
   let summary = '';
   let ok = false;
+  const model = await resolveSubagentModel(definition, parentModel, cwd);
+  const readOnly = definition.readOnly ?? definition.role !== 'build';
+  const contextHub = new ContextHub(
+    `${parentSessionId}:${definition.id}`,
+    cwd,
+    model.contextWindow ?? 256000,
+    model.maxOutputTokens ?? 16384,
+    { persist: false },
+  );
+  const packetPrompt = [
+    `你是 ${definition.role ?? 'research'} 子代理，只完成被分配的任务，不再分派其他子代理。`,
+    `父上下文 revision: ${packet.parentContextRevision}；工作区 revision: ${packet.workspaceRevision}。`,
+    packet.constraints.length > 0 ? `约束：\n${packet.constraints.map((item) => `- ${item}`).join('\n')}` : '',
+    packet.relevantFiles.length > 0 ? `允许关注的文件范围：\n${packet.relevantFiles.map((item) => `- ${item}`).join('\n')}` : '',
+    `期望输出：${packet.expectedOutput}`,
+    readOnly ? '这是只读任务：不得修改文件或执行会改变工作区的命令。' : '只允许修改 fileScopes 声明的文件。',
+  ].filter(Boolean).join('\n\n');
 
-  parentSend({ type: 'subagent_start', subagentId: defId, subagentTask: task });
+  parentSend({
+    type: 'subagent_start',
+    subagentId: definition.id,
+    subagentTask: definition.task,
+    subagentRole: definition.role ?? 'research',
+    subagentModelId: model.id,
+    subagentContextRevision: packet.parentContextRevision,
+    workspaceRevision: packet.workspaceRevision,
+  });
 
   try {
-    for await (const event of runAgentLoop(task, {
-      model,
-      cwd,
-      history: [],
-      platform: { platform: process.platform, arch: process.arch },
-      maxToolCalls: 100,
-      requireApprovalAfterLimit: true,
-      rolePrompt: '你是子代理，专注完成分配的任务。完成后用简洁报告总结成果（改了哪些文件、结果如何）。',
-      signal: signal || ctrl.signal,
-      onApproval: async (toolCall) => {
-        // 复用主会话审批机制：approvalId 带 sub-{defId}- 前缀，渲染层据此标注为子代理审批
-        const approvalId = `sub-${defId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        parentSend({
-          type: 'approval_required',
-          approval: {
-            id: approvalId,
-            toolName: toolCall.function.name,
-            args: toolCall.function.arguments,
-            toolCallId: toolCall.id,
-          },
+    let skills: import('../shared/ipc').SkillDef[] = [];
+    try {
+      const { loadSkills } = await import('./agent/skills');
+      skills = await loadSkills(cwd);
+    } catch {
+      // 技能加载失败不阻断子代理
+    }
+
+    const loop = model.wireApi === 'anthropic'
+      ? runAnthropicAgentLoop(definition.task, {
+          model,
+          cwd,
+          sessionId: parentSessionId,
+          contextHub,
+          planMode: readOnly,
+          platform: { platform: process.platform, arch: process.arch },
+          skills,
+          rolePrompt: packetPrompt,
+          agentId: definition.id,
+          signal,
+          maxToolCalls: 100,
+          allowSubagents: false,
+        })
+      : runResponsesLoop(definition.task, {
+          model,
+          cwd,
+          sessionId: parentSessionId,
+          contextHub,
+          planMode: readOnly,
+          platform: { platform: process.platform, arch: process.arch },
+          skills,
+          rolePrompt: packetPrompt,
+          agentId: definition.id,
+          signal,
+          maxToolCalls: 100,
+          requireApprovalAfterLimit: true,
+          allowSubagents: false,
         });
-        return chatStreams.requestApproval(streamId, approvalId, 60_000);
-      },
-    })) {
-      if (ctrl.signal.aborted) break;
-      if (event.type === 'content' && event.content) {
-        summary += event.content;
-      }
+
+    for await (const event of loop) {
+      if (signal.aborted) break;
+      if (event.type === 'content' && event.content) summary += event.content;
       if (event.type === 'tool_result' && event.toolResult) {
-        parentSend({
-          type: 'subagent_progress',
-          subagentId: defId,
-          subagentTool: event.toolResult.name,
-        });
+        parentSend({ type: 'subagent_progress', subagentId: definition.id, subagentTool: event.toolResult.name });
       }
-      if (event.type === 'task_complete') {
-        ok = true;
-      }
-      if (event.type === 'done') {
-        ok = true;
-      }
+      if (event.type === 'task_complete' || event.type === 'done') ok = true;
       if (event.type === 'error') {
         ok = false;
+        summary += `\n${event.error ?? '子代理执行失败'}`;
       }
     }
-  } catch (err) {
-    summary = err instanceof Error ? err.message : String(err);
+  } catch (error) {
+    summary = error instanceof Error ? error.message : String(error);
     ok = false;
   } finally {
-    chatStreams.cleanup(streamId);
+    contextHub.dispose();
   }
 
   parentSend({
     type: 'subagent_done',
-    subagentId: defId,
+    subagentId: definition.id,
     subagentOk: ok,
     subagentSummary: summary.trim(),
     subagentElapsedMs: Date.now() - startedAt,
+    subagentRole: definition.role ?? 'research',
+    subagentModelId: model.id,
+    subagentContextRevision: packet.parentContextRevision,
+    workspaceRevision: packet.workspaceRevision,
   });
   return { summary: summary.trim(), ok };
 }
@@ -1494,7 +1504,7 @@ async function extractMemoriesFromSession(
   try {
     const { getMessages, getSession } = await import('./store/db');
     const { extractMemories } = await import('./memory/memory-extractor');
-    const { OpenAICompatClient } = await import('./llm/openai-compat');
+    const { summarizeWithModel } = await import('./llm/client-factory');
 
     const messages = getMessages(request.sessionId);
     if (messages.length < 2) return;
@@ -1503,13 +1513,14 @@ async function extractMemoriesFromSession(
     const scope = session?.projectId ? 'project' as const : 'personal' as const;
     const scopeId = session?.projectId ?? undefined;
 
-    const client = new OpenAICompatClient(model);
     const llmCall = async (systemPrompt: string, userMessage: string): Promise<string> => {
-      return client.summarize(
-        [{ role: 'user', content: userMessage }],
-        systemPrompt,
-        30_000,
-      );
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        return await summarizeWithModel(model, systemPrompt, userMessage, controller.signal);
+      } finally {
+        clearTimeout(timer);
+      }
     };
 
     const chatMessages: import('../shared/ipc').ChatMessage[] = messages.map((m) => ({

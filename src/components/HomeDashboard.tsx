@@ -29,10 +29,10 @@ interface HomeDashboardProps {
   onAttachmentsChange: (next: AttachmentMeta[]) => void;
   onAddPaths: (paths: string[]) => void;
   onPickAttachments: () => void;
-  onSend: () => void;
+  onSend: (returnFocus?: HTMLElement | null) => void;
   onSelectSession: (id: string) => void;
   onOpenProject: (id: string) => void;
-  onCreateProject: () => void;
+  onCreateProject: (returnFocus?: HTMLElement | null) => void;
   onOpenFiles: () => void;
 }
 
@@ -88,14 +88,24 @@ export function HomeDashboard(props: HomeDashboardProps) {
 
   if (props.section === 'projects') {
     return (
-      <main className="dashboard dashboard--projects" aria-labelledby="projects-page-title">
+      <main
+        key={props.section}
+        className="dashboard dashboard--projects"
+        data-motion="page-enter"
+        data-page={props.section}
+        aria-labelledby="projects-page-title"
+      >
         <header className="dashboard-page-header">
           <div>
             <p className="dashboard-eyebrow">本地项目</p>
             <h1 id="projects-page-title">项目</h1>
             <p>在一个位置查看项目与关联工作记录。</p>
           </div>
-          <button className="btn btn-primary dashboard-create-button" type="button" onClick={props.onCreateProject}>
+          <button
+            className="btn btn-primary dashboard-create-button"
+            type="button"
+            onClick={(event) => props.onCreateProject(event.currentTarget)}
+          >
             <Icon name="plus" size={15} />
             新建项目
           </button>
@@ -127,7 +137,13 @@ export function HomeDashboard(props: HomeDashboardProps) {
             <span><Icon name="folder" size={16} /></span>
             <h2>还没有项目</h2>
             <p>创建一个项目，把相关工作记录整理在一起。</p>
-            <button className="btn btn-secondary" type="button" onClick={props.onCreateProject}>创建第一个项目</button>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={(event) => props.onCreateProject(event.currentTarget)}
+            >
+              创建第一个项目
+            </button>
           </div>
         )}
       </main>
@@ -135,7 +151,13 @@ export function HomeDashboard(props: HomeDashboardProps) {
   }
 
   return (
-    <main className="dashboard dashboard--home" aria-labelledby="home-dashboard-title">
+    <main
+      key={props.section}
+      className="dashboard dashboard--home"
+      data-motion="page-enter"
+      data-page={props.section}
+      aria-labelledby="home-dashboard-title"
+    >
       {props.modelMissing && !bannerDismissed && (
         <div className="no-model-banner" role="alert">
           <Icon name="alert" size={15} />
@@ -161,6 +183,10 @@ export function HomeDashboard(props: HomeDashboardProps) {
 
       <section className="task-deck">
         <div className="task-deck-intro">
+          <div className="task-deck-kicker">
+            <span>STELLARA WORKBENCH</span>
+            <span className="task-deck-status"><i aria-hidden="true" /> 本地工作区就绪</span>
+          </div>
           <h1 id="home-dashboard-title">把任务交给 Agent</h1>
           <p>描述目标、范围和完成标准；Agent 会在当前工作区执行并逐条记录结果。</p>
         </div>
@@ -176,7 +202,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
-                props.onSend();
+                props.onSend(event.currentTarget);
               }
             }}
           />
@@ -188,7 +214,12 @@ export function HomeDashboard(props: HomeDashboardProps) {
             disabled={props.busy || !props.hasWorkDir}
           />
           <div className="dashboard-composer__footer">
-            <span><Icon name="folder" size={14} />{props.projectName ?? workDirName}</span>
+            <span className="dashboard-composer__project"><Icon name="folder" size={14} />{props.projectName ?? workDirName}</span>
+            {props.config && (
+              <span className="dashboard-composer__model">
+                <i aria-hidden="true" /> {props.config.label}
+              </span>
+            )}
             {!props.hasWorkDir && (
               <span className="attach-hint">先创建项目</span>
             )}
@@ -198,7 +229,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
               aria-label="交给 Agent"
               title="交给 Agent"
               disabled={props.busy || !props.input.trim()}
-              onClick={props.onSend}
+              onClick={(event) => props.onSend(event.currentTarget)}
             >
               <Icon name="arrow-right" size={16} />
             </button>
@@ -215,7 +246,13 @@ export function HomeDashboard(props: HomeDashboardProps) {
         </div>
 
         <section className="continue-band" aria-label="继续工作">
-          <h2 className="continue-band__title">继续工作</h2>
+          <header className="continue-band__header">
+            <div>
+              <span>RECENT WORK</span>
+              <h2 className="continue-band__title">继续工作</h2>
+            </div>
+            <strong>{recentSessions.length || visibleProjects.length}</strong>
+          </header>
           {recentSessions.length > 0 ? (
             <div className="continue-band__list">
               {recentSessions.map((session) => (

@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Icon } from '../Icon';
+import { usePresence } from '../../hooks/usePresence';
+import { presenceRootProps, restoreFocusTarget } from '../../lib/presence-ui';
 
 export type TabBarTab = {
   id: string;
@@ -12,36 +14,94 @@ interface TabBarProps {
   activeId: string;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
-  onNewTab: () => void;
+  onNewTab: (returnFocus?: HTMLElement | null) => void;
   onRename?: (id: string) => void;
   onCloseOthers?: (id: string) => void;
 }
 
+type ContextMenuState = {
+  open: boolean;
+  x: number;
+  y: number;
+  side: 'bottom';
+  tabId: string;
+};
+
+const POINTER_FOCUS_TARGET = [
+  'a[href]',
+  'area[href]',
+  'button',
+  'input:not([type="hidden"])',
+  'select',
+  'textarea',
+  'iframe',
+  'summary',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getPointerFocusTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const candidate = target.closest<HTMLElement>(POINTER_FOCUS_TARGET);
+  if (
+    !candidate?.isConnected
+    || candidate.matches(':disabled, [aria-disabled="true"]')
+    || candidate.closest('[inert], [aria-hidden="true"]')
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
 export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, onCloseOthers }: TabBarProps) {
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenuPresence = usePresence(contextMenu?.open === true, 120);
+  const menuOpenRef = useRef(false);
+  const chipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const newTabRef = useRef<HTMLButtonElement | null>(null);
+  const contextMenuOpen = contextMenu?.open === true;
+  const menuTabId = contextMenu?.tabId ?? '';
+
+  function closeContextMenu(
+    primary: HTMLElement | null,
+    fallback: HTMLElement | null,
+    restoreFocus = true,
+  ): boolean {
+    if (!menuOpenRef.current) return false;
+    menuOpenRef.current = false;
+    if (restoreFocus) restoreFocusTarget(primary, fallback);
+    setContextMenu((current) => (current?.open ? { ...current, open: false } : current));
+    return true;
+  }
 
   useEffect(() => {
-    if (!contextMenu) return;
-    const handleClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setContextMenu(null);
-      }
+    if (!contextMenuOpen) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('.tab-context-menu')) return;
+      closeContextMenu(chipRefs.current[menuTabId] ?? null, newTabRef.current, getPointerFocusTarget(e.target) === null);
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
+      if (e.key === 'Escape') closeContextMenu(chipRefs.current[menuTabId] ?? null, newTabRef.current);
     };
-    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [contextMenu]);
+  }, [contextMenuOpen, menuTabId]);
+
+  useEffect(() => {
+    if (contextMenuPresence.mounted || !contextMenu || contextMenu.open) return;
+    setContextMenu(null);
+    menuOpenRef.current = false;
+  }, [contextMenu, contextMenuPresence.mounted]);
 
   function handleContextMenu(e: React.MouseEvent, tabId: string) {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, tabId });
+    menuOpenRef.current = true;
+    setContextMenu({ open: true, x: e.clientX, y: e.clientY, side: 'bottom', tabId });
   }
 
   return (
@@ -53,8 +113,13 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
             type="button"
             id={`session-tab-${t.id}`}
             aria-selected={t.id === activeId}
+            aria-haspopup="menu"
+            aria-expanded={contextMenuOpen && menuTabId === t.id}
             tabIndex={t.id === activeId ? 0 : -1}
             data-tab-id={t.id}
+            ref={(el) => {
+              chipRefs.current[t.id] = el;
+            }}
             className={`tab-chip${t.id === activeId ? ' tab-chip--active' : ''}`}
             onClick={() => onSelect(t.id)}
             onContextMenu={(e) => handleContextMenu(e, t.id)}
@@ -92,8 +157,9 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
         </div>
       ))}
       <button
+        ref={newTabRef}
         className="tab-chip tab-chip--new"
-        onClick={onNewTab}
+        onClick={(event) => onNewTab(event.currentTarget)}
         aria-label="新建会话标签页"
         title="新建会话"
         type="button"
@@ -101,19 +167,25 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
         <Icon name="plus" size={14} />
       </button>
 
-      {contextMenu && (
+      {contextMenuPresence.mounted && contextMenu && (
         <div
-          ref={menuRef}
           className="tab-context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           role="menu"
+          data-motion="menu"
+          data-side={contextMenu.side}
+          {...presenceRootProps(contextMenuPresence)}
+          onClick={(e) => e.stopPropagation()}
         >
           {onRename && (
             <button
               className="tab-context-menu-item"
               type="button"
               role="menuitem"
-              onClick={() => { onRename(contextMenu.tabId); setContextMenu(null); }}
+              onClick={() => {
+                if (!closeContextMenu(chipRefs.current[contextMenu.tabId] ?? null, newTabRef.current)) return;
+                onRename(contextMenu.tabId);
+              }}
             >
               重命名
             </button>
@@ -123,7 +195,10 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
               className="tab-context-menu-item"
               type="button"
               role="menuitem"
-              onClick={() => { onCloseOthers(contextMenu.tabId); setContextMenu(null); }}
+              onClick={() => {
+                if (!closeContextMenu(chipRefs.current[contextMenu.tabId] ?? null, newTabRef.current)) return;
+                onCloseOthers(contextMenu.tabId);
+              }}
             >
               关闭其他
             </button>
@@ -132,7 +207,10 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
             className="tab-context-menu-item"
             type="button"
             role="menuitem"
-            onClick={() => { onClose(contextMenu.tabId); setContextMenu(null); }}
+            onClick={() => {
+              if (!closeContextMenu(newTabRef.current, chipRefs.current[contextMenu.tabId] ?? null)) return;
+              onClose(contextMenu.tabId);
+            }}
           >
             关闭
           </button>

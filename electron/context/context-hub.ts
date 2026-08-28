@@ -17,6 +17,7 @@ import {
   getContextEventsBySession,
   getMaxSequence,
   insertResponseItem,
+  getResponseItemsBySession,
   insertVerificationEvidence,
   markEvidenceStale,
   insertContextCheckpoint,
@@ -175,17 +176,27 @@ export class ContextHub {
   private eventQueue: ContextEventEnvelope[] = [];
   private processing = false;
   private listeners: Array<(event: ContextEventEnvelope) => void> = [];
+  private replaying = false;
+  private responseItemSequence = 0;
 
   constructor(
     private sessionId: string,
     private workDir: string,
     private contextWindow: number = 256000,
     private maxOutputTokens: number = 16384,
+    private options: { persist?: boolean } = {},
   ) {
     // 从数据库恢复状态或初始化
-    this.sequence = getMaxSequence(sessionId);
+    this.sequence = this.shouldPersist ? getMaxSequence(sessionId) : 0;
     this.context = this.initializeContext();
-    this.replayEvents();
+    if (this.shouldPersist) {
+      this.replayEvents();
+      this.restoreResponseItems();
+    }
+  }
+
+  private get shouldPersist(): boolean {
+    return this.options.persist !== false;
   }
 
   /**
@@ -228,10 +239,27 @@ export class ContextHub {
    */
   private replayEvents(): void {
     const events = getContextEventsBySession(this.sessionId);
+    this.replaying = true;
     for (const event of events) {
       this.applyEvent(event);
     }
+    this.replaying = false;
     log.info(`Context Hub: 重放 ${events.length} 个事件，revision=${this.context.revision}`);
+  }
+
+  private restoreResponseItems(): void {
+    const rows = getResponseItemsBySession(this.sessionId);
+    this.responseItemSequence = rows.length;
+    const persisted = rows.map((row) => row.itemData as ResponseItem);
+    const hasPersistedUser = persisted.some((item) => item.type === 'message' && item.role === 'user');
+    if (hasPersistedUser) {
+      this.context.responseItems = persisted;
+    } else if (persisted.length > 0) {
+      // v0.9.1 预览实现只持久化 assistant/tool Items。保留从事件恢复的
+      // 用户消息，避免升级后丢失旧会话上下文。
+      this.context.responseItems.push(...persisted);
+    }
+    this.context.usage = this.calculateUsage();
   }
 
   /**
@@ -244,8 +272,10 @@ export class ContextHub {
     const softThreshold = usableInputBudget * 0.75;
     const hardThreshold = usableInputBudget * 0.90;
 
-    // 简化估算：基于 responseItems 数量（每个 item 约 100 tokens）
-    const currentInputTokens = this.context?.responseItems.length * 100 || 0;
+    const currentInputTokens = this.context?.responseItems.reduce(
+      (total, item) => total + Math.max(1, Math.ceil(JSON.stringify(item).length / 4)),
+      0,
+    ) || 0;
     const inputUsageRatio = usableInputBudget > 0 ? currentInputTokens / usableInputBudget : 1;
 
     return {
@@ -337,8 +367,11 @@ export class ContextHub {
       try {
         // 应用事件到状态
         this.applyEvent(event);
+        // 信封记录的是事件应用后的 revision，供跨进程观察者直接使用。
+        event.contextRevision = this.context.revision;
+        event.workspaceRevision = this.context.workspaceRevision;
         // 持久化到数据库
-        insertContextEvent(event);
+        if (this.shouldPersist) insertContextEvent(event);
         // 通知监听器
         for (const listener of this.listeners) {
           listener(event);
@@ -419,11 +452,13 @@ export class ContextHub {
 
   private handleUserMessageAdded(event: ContextEventEnvelope): void {
     const data = event.data as { content: string; attachments?: unknown[] };
-    this.context.responseItems.push({
+    const item: ResponseItem = {
       type: 'message',
       role: 'user',
       content: [{ type: 'input_text', text: data.content }],
-    });
+    };
+    this.context.responseItems.push(item);
+    if (!this.replaying) this.persistResponseItem(item);
   }
 
   private handlePlanCreated(event: ContextEventEnvelope): void {
@@ -550,7 +585,7 @@ export class ContextHub {
     };
 
     this.context.verification.evidence.push(evidence);
-    insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
+    if (this.shouldPersist) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
   }
 
   private handleVerificationCompleted(event: ContextEventEnvelope): void {
@@ -576,7 +611,7 @@ export class ContextHub {
     };
 
     this.context.verification.evidence.push(evidence);
-    insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
+    if (this.shouldPersist) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
 
     // 如果验证成功，移除 unverified 标记
     if (data.ok) {
@@ -604,7 +639,7 @@ export class ContextHub {
       workspaceRevision: this.context.workspaceRevision,
     });
 
-    insertSubagentRun({
+    if (this.shouldPersist) insertSubagentRun({
       id: data.id,
       sessionId: this.sessionId,
       parentAgentId: event.sourceAgentId,
@@ -630,7 +665,7 @@ export class ContextHub {
       subagent.resultSummary = data.resultSummary;
     }
 
-    updateSubagentRun(data.id, data.status, data.resultSummary);
+    if (this.shouldPersist) updateSubagentRun(data.id, data.status, data.resultSummary);
   }
 
   private handleMemoryInjected(event: ContextEventEnvelope): void {
@@ -684,7 +719,7 @@ export class ContextHub {
       }
     }
     // 更新数据库
-    markEvidenceStale(this.sessionId, this.context.workspaceRevision);
+    if (this.shouldPersist) markEvidenceStale(this.sessionId, this.context.workspaceRevision);
   }
 
   /**
@@ -697,7 +732,7 @@ export class ContextHub {
         if (subagent.workspaceRevision < this.context.workspaceRevision) {
           subagent.status = 'failed';
           subagent.resultSummary = `上下文已过期：文件 ${filePath} 已修改`;
-          updateSubagentRun(subagent.id, 'failed', subagent.resultSummary);
+          if (this.shouldPersist) updateSubagentRun(subagent.id, 'failed', subagent.resultSummary);
         }
       }
     }
@@ -733,7 +768,7 @@ export class ContextHub {
       createdAt: new Date().toISOString(),
     };
 
-    insertContextCheckpoint(checkpoint);
+    if (this.shouldPersist) insertContextCheckpoint(checkpoint);
     this.context.checkpointId = checkpoint.id;
 
     return checkpoint;
@@ -743,7 +778,7 @@ export class ContextHub {
    * 获取最新 checkpoint
    */
   getLatestCheckpoint(): ContextCheckpoint | null {
-    return getLatestCheckpoint(this.sessionId);
+    return this.shouldPersist ? getLatestCheckpoint(this.sessionId) : null;
   }
 
   /**
@@ -751,10 +786,16 @@ export class ContextHub {
    */
   addResponseItem(item: ResponseItem): void {
     this.context.responseItems.push(item);
+    this.persistResponseItem(item);
+    this.context.usage = this.calculateUsage();
+  }
+
+  private persistResponseItem(item: ResponseItem): void {
+    if (!this.shouldPersist) return;
     insertResponseItem({
       id: uuid(),
       sessionId: this.sessionId,
-      sequence: this.context.responseItems.length,
+      sequence: ++this.responseItemSequence,
       contextRevision: this.context.revision,
       workspaceRevision: this.context.workspaceRevision,
       itemType: item.type,

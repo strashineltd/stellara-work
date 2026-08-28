@@ -352,4 +352,167 @@ describe('Onboarding', () => {
     expect(sent?.apiKey).toBe('');
     expect(onComplete).toHaveBeenCalledOnce();
   });
+
+  it('marks each step root with its motion and step markers', () => {
+    const { container, getByText } = render(<Onboarding presets={PRESETS} initialConfig={null} onComplete={vi.fn()} />);
+    const welcome = container.querySelector('.ob-page');
+    expect(welcome?.getAttribute('data-motion')).toBe('onboarding-step-enter');
+    expect(welcome?.getAttribute('data-step')).toBe('welcome');
+
+    fireClick(getByText(/开始配置/));
+    const pick = container.querySelector('.ob-page');
+    expect(pick).not.toBe(welcome);
+    expect(pick?.getAttribute('data-motion')).toBe('onboarding-step-enter');
+    expect(pick?.getAttribute('data-step')).toBe('pick');
+
+    fireClick(getByText(/下一步/));
+    const connection = container.querySelector('.ob-page');
+    expect(connection).not.toBe(pick);
+    expect(connection?.getAttribute('data-motion')).toBe('onboarding-step-enter');
+    expect(connection?.getAttribute('data-step')).toBe('connection');
+  });
+
+  it('keeps the pick page root across model selection', () => {
+    const { container, querySelector } = renderFirstTime();
+    const pickRoot = container.querySelector('.ob-page');
+    expect(pickRoot).not.toBeNull();
+
+    fireClick(querySelector('[data-model-id="glm-5.2"]'));
+
+    expect(container.querySelector('.ob-page')).toBe(pickRoot);
+    expect(pickRoot?.getAttribute('data-step')).toBe('pick');
+  });
+
+  it('keeps the connection page root across input and save-status transitions', async () => {
+    let resolveTest!: (v: { ok: boolean; error?: string }) => void;
+    const testPromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveTest = resolve;
+    });
+    let resolveConfigure!: (v: { ok: boolean; error?: string }) => void;
+    const configurePromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveConfigure = resolve;
+    });
+    (window as any).electronAPI.models.test = vi.fn(() => testPromise);
+    (window as any).electronAPI.models.configure = vi.fn(() => configurePromise);
+    const { container, getByText } = renderFirstTime();
+    fireClick(getByText(/下一步/));
+    const root = container.querySelector('.ob-page') as HTMLElement;
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+
+    typeInto(keyInput, 'sk-test');
+    expect(container.querySelector('.ob-page')).toBe(root);
+
+    fireClick(getByText(/完成配置/));
+    expect(container.querySelector('.ob-page')).toBe(root);
+
+    await act(async () => {
+      resolveTest({ ok: true });
+      await testPromise;
+    });
+    expect(container.querySelector('.ob-page')).toBe(root);
+
+    await act(async () => {
+      resolveConfigure({ ok: true });
+      await configurePromise;
+    });
+    expect(container.querySelector('.ob-page')).toBe(root);
+    expect(getByText(/连接成功/)).toBeTruthy();
+  });
+
+  it('keeps the connection page root when saving fails', async () => {
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn().mockResolvedValue({ ok: false, error: 'Connection refused' });
+    const { container, getByText } = renderFirstTime();
+    fireClick(getByText(/下一步/));
+    const root = container.querySelector('.ob-page') as HTMLElement;
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+
+    fireClick(getByText(/完成配置/));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(getByText(/Connection refused/)).toBeTruthy();
+    expect(container.querySelector('.ob-page')).toBe(root);
+    expect(root.getAttribute('data-step')).toBe('connection');
+  });
+
+  it('announces active test and save states with role=status', async () => {
+    let resolveTest!: (v: { ok: boolean; error?: string }) => void;
+    const testPromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveTest = resolve;
+    });
+    let resolveConfigure!: (v: { ok: boolean; error?: string }) => void;
+    const configurePromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveConfigure = resolve;
+    });
+    (window as any).electronAPI.models.test = vi.fn(() => testPromise);
+    (window as any).electronAPI.models.configure = vi.fn(() => configurePromise);
+    const { getByText, querySelector } = renderFirstTime();
+    fireClick(getByText(/下一步/));
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+    fireClick(getByText(/完成配置/));
+
+    const testing = querySelector('.status-busy');
+    expect(testing?.getAttribute('role')).toBe('status');
+    expect(testing?.textContent).toContain('正在测试连接');
+    expect(testing?.classList.contains('motion-feedback-enter')).toBe(true);
+
+    await act(async () => {
+      resolveTest({ ok: true });
+      await testPromise;
+    });
+    const saving = querySelector('.status-busy');
+    expect(saving?.getAttribute('role')).toBe('status');
+    expect(saving?.textContent).toContain('正在保存配置');
+
+    await act(async () => {
+      resolveConfigure({ ok: true });
+      await configurePromise;
+    });
+  });
+
+  it('announces save success with role=status', async () => {
+    let resolveConfigure!: (v: { ok: boolean; error?: string }) => void;
+    const configurePromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveConfigure = resolve;
+    });
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn(() => configurePromise);
+    const { getByText, querySelector } = renderFirstTime();
+    fireClick(getByText(/下一步/));
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+    fireClick(getByText(/完成配置/));
+    await act(async () => {
+      resolveConfigure({ ok: true });
+      await configurePromise;
+    });
+    const ok = querySelector('.status-ok');
+    expect(ok?.getAttribute('role')).toBe('status');
+    expect(ok?.classList.contains('motion-feedback-enter')).toBe(true);
+  });
+
+  it('announces save failure with role=alert', async () => {
+    let resolveConfigure!: (v: { ok: boolean; error?: string }) => void;
+    const configurePromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      resolveConfigure = resolve;
+    });
+    (window as any).electronAPI.models.test = vi.fn().mockResolvedValue({ ok: true });
+    (window as any).electronAPI.models.configure = vi.fn(() => configurePromise);
+    const { getByText, querySelector } = renderFirstTime();
+    fireClick(getByText(/下一步/));
+    const keyInput = getByText(/API 密钥/)!.parentElement!.querySelector('input') as HTMLInputElement;
+    typeInto(keyInput, 'sk-test');
+    fireClick(getByText(/完成配置/));
+    await act(async () => {
+      resolveConfigure({ ok: false, error: 'Connection refused' });
+      await configurePromise;
+    });
+    const fail = querySelector('.status-fail');
+    expect(fail?.getAttribute('role')).toBe('alert');
+    expect(fail?.classList.contains('motion-feedback-enter')).toBe(true);
+  });
 });

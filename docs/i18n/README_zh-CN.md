@@ -48,12 +48,13 @@ API 密钥、会话、文件与配置**永远不会离开本机**。Stellara Wor
 
 ## 下载
 
-**最新版本：v0.9.1**
+**最新版本：v0.9.2**
 
 | 平台 | 安装包 |
 |---|---|
-| macOS (Apple Silicon) | [Stellara Work-0.9.1-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
-| Windows (x64) | [Stellara Work-Setup-0.9.1.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Apple Silicon) | [Stellara Work-0.9.2-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Intel) | [Stellara Work-0.9.2-x64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| Windows (x64) | [Stellara Work-Setup-0.9.2-x64.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
 
 > **注意：** 当前安装包未签名。macOS 请右键 → 打开；Windows 在 SmartScreen 中选择"更多信息 → 仍要运行"。
 
@@ -97,13 +98,12 @@ npm run package:win  # 构建 Windows NSIS 安装包
 
 ## 内置模型预设
 
-| 模型 | 提供商 | base_url |
-|---|---|---|
-| GLM-5.2 | 智谱大模型 | `https://open.bigmodel.cn/api/paas/v4` |
-| DeepSeek-v4-Pro | DeepSeek | `https://api.deepseek.com` |
-| Kimi-K3 | Moonshot | `https://api.moonshot.cn` |
-| MiniMax-M3 | MiniMax | `https://api.minimaxi.com/v1` |
-| 自定义 | 你的 | 任意 OpenAI 兼容端点 |
+| 模型 | 提供商 | baseURL | 协议 |
+|---|---|---|---|
+| GLM-5.3 | 智谱大模型 | `https://open.bigmodel.cn/api/v1` | Responses API |
+| DeepSeek-V4-Flash | DeepSeek | `https://api.deepseek.com` | Responses API |
+| Qwen3.8-Max | 阿里云百炼 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Responses API |
+| 自定义 | 你的服务 | 自定义 | Responses API / Anthropic Messages |
 
 ---
 
@@ -124,8 +124,9 @@ npm run package:win  # 构建 Windows NSIS 安装包
 electron/                  # Electron 主进程
 ├── main.ts                # 入口 + IPC handlers
 ├── preload.ts             # contextBridge API
-├── agent/                 # Agent 循环、规划、工具（fs / shell / grep / git）
-├── llm/                   # OpenAI 兼容客户端 + SSE 流式
+├── agent/                 # Responses / Anthropic Agent 循环、规划与工具
+├── context/               # Context Hub、检查点、验证门禁
+├── llm/                   # Responses API / Anthropic Messages 客户端
 ├── memory/                # 持久化记忆存储
 └── config/                # 加密密钥存储（safeStorage）
 src/                       # React 渲染进程

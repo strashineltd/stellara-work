@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   applyStreamEventToEntries, formatRelativeTime, formatFileSize,
-  messagesToEntries, entriesToMessages, buildHistory,
-  type DisplayEntry,
+  messagesToEntries, entriesToMessages, buildHistory, clearEntryEnterMotion,
+  type DisplayEntry, type PresentEntry,
 } from './chat-utils';
 import type { AttachmentMeta, ChatStreamEvent, MessageRow, PlanApprovalRequest } from '../../shared/ipc';
 
@@ -16,10 +16,10 @@ const FILE_ATT: AttachmentMeta = {
   mimeType: 'text/plain', kind: 'file', relPath: 'sess-1/notes.txt',
 };
 
-function apply(prev: DisplayEntry[], ev: ChatStreamEvent) {
+function apply(prev: DisplayEntry[], ev: ChatStreamEvent, present?: PresentEntry) {
   const setPendingApproval = vi.fn();
   const setPendingPlanApproval = vi.fn();
-  const next = applyStreamEventToEntries(prev, ev, setPendingApproval, setPendingPlanApproval);
+  const next = applyStreamEventToEntries(prev, ev, setPendingApproval, setPendingPlanApproval, present);
   return { next, setPendingApproval, setPendingPlanApproval };
 }
 
@@ -95,6 +95,88 @@ describe('applyStreamEventToEntries — subagent events', () => {
   });
 });
 
+describe('applyStreamEventToEntries — presentation metadata', () => {
+  it('gives history deterministic keys without enter motion', () => {
+    const entries = messagesToEntries([
+      { sessionId: 's1', position: 3, role: 'user', content: 'hi', createdAt: 1 },
+    ]);
+    expect(entries[0]?.presentation).toEqual({
+      key: 'history:s1:3:user',
+      sessionId: 's1',
+    });
+  });
+
+  it('presents a tool call append as discrete', () => {
+    const present = vi.fn((entry: DisplayEntry) => entry);
+    applyStreamEventToEntries(
+      [],
+      {
+        type: 'tool_call',
+        toolCall: {
+          id: 'tc-1',
+          type: 'function',
+          function: { name: 'read_file', arguments: '{"path":"a.ts"}' },
+        },
+      },
+      vi.fn(),
+      vi.fn(),
+      present,
+    );
+    expect(present).toHaveBeenCalledWith({
+      kind: 'tool_call',
+      id: 'tc-1',
+      name: 'read_file',
+      args: '{"path":"a.ts"}',
+    }, 'discrete');
+  });
+
+  it('presents an error append as status', () => {
+    const present = vi.fn((entry: DisplayEntry) => entry);
+    applyStreamEventToEntries(
+      [{ kind: 'user', content: 'x' }],
+      { type: 'error', error: 'offline' },
+      vi.fn(),
+      vi.fn(),
+      present,
+    );
+    expect(present).toHaveBeenCalledWith({
+      kind: 'error',
+      message: 'offline',
+      meta: undefined,
+    }, 'status');
+  });
+
+  it('does not present update-only events', () => {
+    const events: ChatStreamEvent[] = [
+      { type: 'content', content: 'x' },
+      { type: 'plan_progress', planSteps: [{ description: 'a', status: 'completed' }] },
+      { type: 'approval_required', approval: { id: 'a', toolName: 'edit_file', args: '{}', toolCallId: 'tc' } },
+      { type: 'plan_approval_required', planApproval: { id: 'p', plan: ['a'] } },
+      { type: 'usage', totals: { promptTokens: 1, completionTokens: 2 } },
+      { type: 'subagent_progress', subagentId: 'sub-1', subagentTool: 'read_file' },
+    ];
+    for (const event of events) {
+      const present = vi.fn((entry: DisplayEntry) => entry);
+      applyStreamEventToEntries(
+        [{ kind: 'assistant', content: '' }, { kind: 'plan', steps: [] }],
+        event,
+        vi.fn(),
+        vi.fn(),
+        present,
+      );
+      expect(present, event.type).not.toHaveBeenCalled();
+    }
+  });
+
+  it('clears enter motion without changing keys or untouched entry identity', () => {
+    const animated = { kind: 'user', content: 'x', presentation: { key: 'k', sessionId: 's', enter: 'discrete' } } as DisplayEntry;
+    const stable = { kind: 'assistant', content: 'y', presentation: { key: 'y', sessionId: 's' } } as DisplayEntry;
+    const result = clearEntryEnterMotion([animated, stable]);
+    expect(result[0]?.presentation).toEqual({ key: 'k', sessionId: 's', enter: undefined });
+    expect(result[1]).toBe(stable);
+  });
+});
+
 describe('formatRelativeTime', () => {
   const now = Date.now();
 
@@ -137,8 +219,17 @@ describe('attachments round-trip (user entries)', () => {
       { sessionId: 's', position: 1, role: 'user', content: '无附件', createdAt: 2 },
     ];
     const entries = messagesToEntries(rows);
-    expect(entries[0]).toEqual({ kind: 'user', content: '看图', attachments: [IMG_ATT, FILE_ATT] });
-    expect(entries[1]).toEqual({ kind: 'user', content: '无附件' });
+    expect(entries[0]).toEqual({
+      kind: 'user',
+      content: '看图',
+      attachments: [IMG_ATT, FILE_ATT],
+      presentation: { key: 'history:s:0:user', sessionId: 's' },
+    });
+    expect(entries[1]).toEqual({
+      kind: 'user',
+      content: '无附件',
+      presentation: { key: 'history:s:1:user', sessionId: 's' },
+    });
     const second = entries[1];
     expect(second && second.kind === 'user' ? second.attachments : undefined).toBeUndefined();
   });
@@ -148,7 +239,11 @@ describe('attachments round-trip (user entries)', () => {
       { sessionId: 's', position: 0, role: 'user', content: 'hi', attachments: '{broken', createdAt: 1 },
     ];
     const entries = messagesToEntries(rows);
-    expect(entries[0]).toEqual({ kind: 'user', content: 'hi' });
+    expect(entries[0]).toEqual({
+      kind: 'user',
+      content: 'hi',
+      presentation: { key: 'history:s:0:user', sessionId: 's' },
+    });
   });
 
   it('entriesToMessages serializes user attachments as JSON', () => {
@@ -159,6 +254,17 @@ describe('attachments round-trip (user entries)', () => {
   it('entriesToMessages leaves attachments undefined when absent', () => {
     const msgs = entriesToMessages([{ kind: 'user', content: 'hi' }], 's');
     expect(msgs[0]!.attachments).toBeUndefined();
+  });
+
+  it('entriesToMessages omits renderer presentation data (round-trip)', () => {
+    const rows: MessageRow[] = [
+      { sessionId: 's', position: 0, role: 'user', content: 'hi', createdAt: 1 },
+      { sessionId: 's', position: 1, role: 'assistant', content: 'ok', createdAt: 2 },
+      { sessionId: 's', position: 2, role: 'tool', content: 'out', toolCallId: 'tc-1', toolName: 'read_file', createdAt: 3 },
+    ];
+    const entries = messagesToEntries(rows);
+    const round = entriesToMessages(entries, 's');
+    expect(round.map((r) => ({ ...r, createdAt: 0 }))).toEqual(rows.map((r) => ({ ...r, createdAt: 0 })));
   });
 
   it('buildHistory passes user attachments through', () => {

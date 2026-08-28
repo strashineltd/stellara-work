@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FsNode } from '../../shared/ipc';
+import type { ContextStateView, FsNode } from '../../shared/ipc';
 import { FileTreeNode } from './FileTreeNode';
 import { Icon } from './Icon';
+import { presenceRootProps, type PresenceMotionProps } from '../lib/presence-ui';
 
 /**
  * 右侧工作区 sidebar（4 个垂直堆叠区域）：
@@ -46,6 +47,12 @@ export interface ContextStats {
   compressedCount: number;
   /** 最近一次 usage 是否为本地估算（provider 未上报 usage） */
   estimated?: boolean;
+  contextRevision?: number;
+  workspaceRevision?: number;
+  usableInputBudget?: number;
+  inputUsageRatio?: number;
+  nearLimit?: boolean;
+  hardLimited?: boolean;
 }
 
 export interface SubagentInfo {
@@ -91,7 +98,7 @@ function fmtK(n: number): string {
   return `${(n / 1000).toFixed(1)}K`;
 }
 
-interface WorkspacePanelProps {
+interface WorkspacePanelProps extends PresenceMotionProps {
   workDir: string;
   goal: Goal | null;
   progress: Progress;
@@ -103,8 +110,10 @@ interface WorkspacePanelProps {
   onWidthChange?: (w: number) => void;
   memoryContext?: MemoryContextItem[];
   contextStats?: ContextStats | null;
+  contextState?: ContextStateView | null;
   contextWindow?: number;
   subagents?: SubagentInfo[];
+  onCreateCheckpoint?: () => Promise<void>;
 }
 
 const MIN_WIDTH = 200;
@@ -113,13 +122,20 @@ const DEFAULT_WIDTH = 280;
 
 export function WorkspacePanel({
   workDir, goal, progress, deliverables, touchedFiles,
-  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext, contextStats, contextWindow, subagents,
+  stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext, contextStats, contextState,
+  contextWindow, subagents, onCreateCheckpoint, presence,
 }: WorkspacePanelProps) {
   const [width, setWidth] = useState(initialWidth ?? DEFAULT_WIDTH);
   const panelRef = useRef<HTMLElement | null>(null);
   const dragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
+
+  const endResize = useCallback(() => {
+    dragging.current = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
@@ -131,6 +147,10 @@ export function WorkspacePanel({
   }, [width]);
 
   useEffect(() => {
+    if (presence?.state === 'closing') {
+      endResize();
+      return;
+    }
     const onMouseMove = (e: MouseEvent) => {
       if (!dragging.current) return;
       const dx = startX.current - e.clientX; // 向左拖 = 增大宽度
@@ -138,21 +158,25 @@ export function WorkspacePanel({
       setWidth(w);
       onWidthChange?.(w);
     };
-    const onMouseUp = () => {
-      dragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
+    const onMouseUp = endResize;
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
     return () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      endResize();
     };
-  }, [onWidthChange]);
+  }, [endResize, onWidthChange, presence?.state]);
 
   return (
-    <aside id="workspace-panel" className="workspace-panel" ref={panelRef} style={{ width }} aria-label="任务详情">
+    <aside
+      id="workspace-panel"
+      className="workspace-panel"
+      ref={panelRef}
+      style={{ width }}
+      aria-label="任务详情"
+      {...presenceRootProps(presence)}
+    >
       <div
         className="workspace-resize-handle"
         onMouseDown={onMouseDown}
@@ -180,10 +204,11 @@ export function WorkspacePanel({
       <ProgressSection progress={progress} goal={goal} stepStatus={stepStatus} />
       <ContextStatsSection contextStats={contextStats} contextWindow={contextWindow} />
       <ContextCheckpointSection
-        checkpoint={null}
-        unverifiedFiles={[]}
-        staleEvidence={[]}
-        taskGate={undefined}
+        checkpoint={contextState?.checkpoint}
+        unverifiedFiles={contextState?.unverifiedFiles}
+        staleEvidence={contextState?.staleEvidence}
+        taskGate={contextState?.taskGate}
+        onCreateCheckpoint={onCreateCheckpoint}
       />
       <SubagentsSection subagents={subagents} />
       <DeliverablesSection deliverables={deliverables} />
@@ -249,6 +274,10 @@ function GoalSection({
   );
 }
 
+function progressScale(value: number): number {
+  return Math.min(100, Math.max(0, value)) / 100;
+}
+
 function ProgressSection({
   progress,
   goal,
@@ -278,7 +307,7 @@ function ProgressSection({
             aria-valuemax={100}
             aria-valuenow={pct}
           >
-            <div className="progress-bar" style={{ width: `${pct}%` }} />
+            <div className="progress-bar" style={{ transform: `scaleX(${progressScale(pct)})` }} />
           </div>
           <span className="progress-bar-text">{pct}%</span>
         </div>
@@ -302,7 +331,9 @@ function ContextStatsSection({ contextStats, contextWindow }: { contextStats: Co
   if (!contextStats) {
     return <div className="context-stats__empty">暂无任务数据</div>;
   }
-  const pct = contextWindow ? (contextStats.promptTokens / contextWindow) * 100 : 0;
+  const pct = contextStats.inputUsageRatio != null
+    ? contextStats.inputUsageRatio * 100
+    : contextWindow ? (contextStats.promptTokens / contextWindow) * 100 : 0;
   const toolRows = Object.entries(contextStats.toolCounts)
     .sort((a, b) => b[1] - a[1])
     .map(([name, count]) => ({ name, count }));
@@ -326,7 +357,7 @@ function ContextStatsSection({ contextStats, contextWindow }: { contextStats: Co
           <div className="context-stats__bar">
             <div
               className={`context-stats__bar-fill${pct >= 80 ? ' warn' : ''}`}
-              style={{ width: `${Math.min(100, pct)}%` }}
+              style={{ transform: `scaleX(${progressScale(pct)})` }}
               role="progressbar"
               aria-label="上下文使用率"
               aria-valuemin={0}
@@ -338,6 +369,14 @@ function ContextStatsSection({ contextStats, contextWindow }: { contextStats: Co
         <div className="context-stats__tokens">
           输入 {fmtK(contextStats.promptTokens)} · 输出 {fmtK(contextStats.completionTokens)}
         </div>
+        {(contextStats.contextRevision != null || contextStats.workspaceRevision != null) && (
+          <div className="context-revision-row">
+            <span>上下文 r{contextStats.contextRevision ?? 0}</span>
+            <span>工作区 r{contextStats.workspaceRevision ?? 0}</span>
+            {contextStats.nearLimit && <span className="context-limit-badge">接近上限</span>}
+            {contextStats.hardLimited && <span className="context-limit-badge danger">已达硬限制</span>}
+          </div>
+        )}
         {toolRows.length > 0 && (
           <div className="context-stats__tools">
             <span className="context-stats__label">工具调用 {totalTools} 次</span>
@@ -380,12 +419,15 @@ function ContextCheckpointSection({
   unverifiedFiles,
   staleEvidence,
   taskGate,
+  onCreateCheckpoint,
 }: {
   checkpoint?: { id: string; objective: string; createdAt: string } | null;
   unverifiedFiles?: string[];
   staleEvidence?: Array<{ id: string; summary: string }>;
   taskGate?: { ok: boolean; reasons: string[] };
+  onCreateCheckpoint?: () => Promise<void>;
 }) {
+  const [creating, setCreating] = useState(false);
   return (
     <details className="workspace-section">
       <summary className="workspace-section-header">
@@ -398,6 +440,19 @@ function ContextCheckpointSection({
         </div>
       ) : (
         <div className="empty-hint">暂无检查点</div>
+      )}
+      {onCreateCheckpoint && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-small checkpoint-create"
+          disabled={creating}
+          onClick={() => {
+            setCreating(true);
+            void onCreateCheckpoint().finally(() => setCreating(false));
+          }}
+        >
+          {creating ? '正在创建…' : '创建当前检查点'}
+        </button>
       )}
       {unverifiedFiles && unverifiedFiles.length > 0 && (
         <div className="checkpoint-unverified">
@@ -420,7 +475,10 @@ function ContextCheckpointSection({
         </div>
       )}
       {taskGate && (
-        <div className={`task-gate ${taskGate.ok ? 'ok' : 'blocked'}`}>
+        <div
+          className={`task-gate motion-feedback-enter ${taskGate.ok ? 'ok' : 'blocked'}`}
+          role={taskGate.ok ? 'status' : 'alert'}
+        >
           <div className="task-gate-status">
             {taskGate.ok ? '✓ 任务可完成' : '✗ 任务阻塞'}
           </div>

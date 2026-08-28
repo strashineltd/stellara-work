@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AppInfo, ApprovalRequest, AttachmentMeta, ConfiguredModel, ModelListItem,
-  SessionSummary, Session, SkillDef, Project,
+  SessionSummary, Session, SkillDef, Project, ContextStateView,
 } from '../../shared/ipc';
 import {
   type DisplayEntry,
+  type EntryEnterMotion,
   messagesToEntries, entriesToMessages, buildHistory,
-  applyStreamEventToEntries, generateReportFromEntries,
+  applyStreamEventToEntries, generateReportFromEntries, clearEntryEnterMotion,
 } from '../lib/chat-utils';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
@@ -21,8 +23,10 @@ import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
 import { CommandPalette } from './CommandPalette';
-import { type SettingsTab } from './SettingsPanel';
+import { type OpenSettings } from './SettingsPanel';
 import { useShortcuts } from '../hooks/useShortcuts';
+import { usePresence } from '../hooks/usePresence';
+import { captureFocusTarget, presenceRootProps, restoreFocusTarget } from '../lib/presence-ui';
 
 interface MainViewProps {
   /** 可为 null：跳过引导后无模型配置；发送任务前会校验并提示打开设置 */
@@ -39,7 +43,7 @@ interface MainViewProps {
   theme?: import('../../shared/ipc').ThemeName;
   onToggleSidebar: () => void;
   onReconfigure: () => void;
-  onOpenSettings: (tab?: SettingsTab) => void;
+  onOpenSettings: OpenSettings;
   onProjectCreated: (project: import('../../shared/ipc').Project) => void;
   onProjectDeleted: (id: string) => void;
   onProjectRenamed: (id: string, name: string) => void;
@@ -74,16 +78,27 @@ export function MainView(props: MainViewProps) {
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const activeProject = projects.find((project) => project.id === activeSession?.projectId);
   const activeWorkDir = activeProject?.workDir ?? activeSession?.workDir ?? config?.workDir;
+  const sidebarPresence = usePresence(sidebarOpen);
+  const workspacePresent = props.workspaceOpen && Boolean(activeWorkDir);
+  const workspacePresence = usePresence(workspacePresent);
+  const retainedWorkDirRef = useRef<string | null>(activeWorkDir ?? null);
+  if (activeWorkDir) retainedWorkDirRef.current = activeWorkDir;
 
   // ---- State ----
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [busy, setBusy] = useState(false);
-  const [confirmNew, setConfirmNew] = useState(false);
+  const [clearTask, setClearTask] = useState<{ present: boolean; entryCount: number }>({
+    present: false,
+    entryCount: 0,
+  });
   const [planMode, setPlanMode] = useState(false);
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
-  const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const [fileTree, setFileTree] = useState<{ present: boolean; workDir: string | null }>({
+    present: false,
+    workDir: null,
+  });
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   // 仅当会话引用的模型已从配置中删除时才提示（切换活跃模型不算）
@@ -101,10 +116,122 @@ export function MainView(props: MainViewProps) {
   const [memoryContext, setMemoryContext] = useState<MemoryContextItem[]>([]);
   // 本次任务的上下文统计（usage/tool_result/summary 事件累计）
   const [contextStats, setContextStats] = useState<ContextStats | null>(null);
+  const [contextState, setContextState] = useState<ContextStateView | null>(null);
   // 本次任务的子代理（subagent_start/progress/done 事件）
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   // 会话结束后已沉淀记忆的提示（memories-extracted 事件）
   const [extractedNotice, setExtractedNotice] = useState<{ sessionId: string; count: number } | null>(null);
+  const fileTreePresence = usePresence(fileTree.present);
+  const clearTaskPresence = usePresence(clearTask.present);
+  const commandPresence = usePresence(commandPaletteOpen);
+  const createProjectPresence = usePresence(createProjectOpen);
+  const fileTreeReturnFocusRef = useRef<HTMLElement | null>(null);
+  const clearTaskReturnFocusRef = useRef<HTMLElement | null>(null);
+  const commandReturnFocusRef = useRef<HTMLElement | null>(null);
+  const createProjectReturnFocusRef = useRef<HTMLElement | null>(null);
+  const clearTaskCancelRef = useRef<HTMLButtonElement | null>(null);
+
+  // ---- Live entry motion metadata ----
+  const reducedMotion = useReducedMotion();
+  const entrySequenceRef = useRef(0);
+  const activeSectionRef = useRef(activeSection);
+  const activeSessionRef = useRef(activeSessionId);
+  const reducedMotionRef = useRef(reducedMotion);
+
+  activeSectionRef.current = activeSection;
+  activeSessionRef.current = activeSessionId;
+  reducedMotionRef.current = reducedMotion;
+
+  function nextLiveKey(): string {
+    entrySequenceRef.current += 1;
+    return `live:${activeSessionRef.current ?? 'none'}:${entrySequenceRef.current}`;
+  }
+
+  function presentWithKey(
+    entry: DisplayEntry,
+    enter: EntryEnterMotion,
+    key: string,
+    sessionId: string | null = activeSessionRef.current,
+  ): DisplayEntry {
+    return {
+      ...entry,
+      presentation: {
+        key,
+        sessionId,
+        enter: activeSectionRef.current === 'tasks' && !reducedMotionRef.current
+          ? enter
+          : undefined,
+      },
+    };
+  }
+
+  function appendLocalError(message: string) {
+    const errorKey = nextLiveKey();
+    setEntries((prev) => [...prev, presentWithKey({ kind: 'error', message }, 'status', errorKey)]);
+  }
+
+  function navigateToSection(next: 'home' | 'projects' | 'tasks' | 'memory' | 'files') {
+    const previous = activeSectionRef.current;
+    activeSectionRef.current = next;
+    if (previous === 'tasks' && next !== 'tasks') {
+      setEntries(clearEntryEnterMotion);
+    }
+    setActiveSection(next);
+  }
+
+  useLayoutEffect(() => {
+    if (clearTaskPresence.state === 'entering') {
+      clearTaskCancelRef.current?.focus({ preventScroll: true });
+    }
+  }, [clearTaskPresence.state]);
+
+  function openFileTree(returnFocus?: HTMLElement | null): boolean {
+    if (!activeWorkDir) return false;
+    if (fileTree.present) {
+      if (fileTree.workDir !== activeWorkDir) {
+        setFileTree({ present: true, workDir: activeWorkDir });
+      }
+      document
+        .querySelector<HTMLButtonElement>('.file-tree-modal [aria-label="关闭文件浏览"]')
+        ?.focus({ preventScroll: true });
+      return true;
+    }
+    fileTreeReturnFocusRef.current = captureFocusTarget(returnFocus);
+    setFileTree({ present: true, workDir: activeWorkDir });
+    return true;
+  }
+
+  function closeFileTree() {
+    if (!fileTree.present) return;
+    restoreFocusTarget(fileTreeReturnFocusRef.current);
+    setFileTree((current) => ({ ...current, present: false }));
+  }
+
+  function openCommandPalette(returnFocus?: HTMLElement | null) {
+    commandReturnFocusRef.current = captureFocusTarget(returnFocus);
+    setCommandPaletteOpen(true);
+  }
+
+  function closeCommandPalette(options?: { restoreFocus?: boolean }) {
+    if (!commandPaletteOpen) return;
+    if (options?.restoreFocus !== false) restoreFocusTarget(commandReturnFocusRef.current);
+    setCommandPaletteOpen(false);
+  }
+
+  function openCreateProject(returnFocus?: HTMLElement | null) {
+    if (createProjectOpen) return;
+    createProjectReturnFocusRef.current = captureFocusTarget(returnFocus);
+    setCreateProjectOpen(true);
+  }
+
+  function closeCreateProject() {
+    if (!createProjectOpen) return;
+    restoreFocusTarget(
+      createProjectReturnFocusRef.current,
+      document.querySelector<HTMLButtonElement>('.dashboard-create-button'),
+    );
+    setCreateProjectOpen(false);
+  }
 
   // ---- Model list ----
   useEffect(() => {
@@ -137,6 +264,7 @@ export function MainView(props: MainViewProps) {
   useEffect(() => {
     let cancelled = false;
     setMemoryContext([]);
+    setContextState(null);
     (async () => {
       if (!activeSessionId) {
         if (saveTimer.current) {
@@ -174,6 +302,27 @@ export function MainView(props: MainViewProps) {
       }).catch((e) => {
         console.error('Failed to load session:', e);
       });
+      void window.electronAPI.context?.getSnapshot(activeSessionId)
+        .then((snapshot) => {
+          if (!cancelled) {
+            setContextState(snapshot);
+            setContextStats({
+              promptTokens: snapshot.usage.currentInputTokens,
+              completionTokens: 0,
+              toolCounts: {},
+              recentCalls: [],
+              compressedCount: snapshot.usage.lastCompactedAt ? 1 : 0,
+              estimated: true,
+              contextRevision: snapshot.revision,
+              workspaceRevision: snapshot.workspaceRevision,
+              usableInputBudget: snapshot.usage.usableInputBudget,
+              inputUsageRatio: snapshot.usage.inputUsageRatio,
+              nearLimit: snapshot.usage.nearLimit,
+              hardLimited: snapshot.usage.hardLimited,
+            });
+          }
+        })
+        .catch(() => { /* 旧数据或尚未初始化 Context DB 时保持空态 */ });
     })();
     return () => { cancelled = true; };
   }, [activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -198,12 +347,17 @@ export function MainView(props: MainViewProps) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries, busy]);
 
+  // 运行时启用 reduced motion → 清除一次性入场标记，避免重新启用后重放旧动画
+  useEffect(() => {
+    if (reducedMotion) setEntries(clearEntryEnterMotion);
+  }, [reducedMotion]);
+
   // 原生菜单（macOS）动作：命令面板 / 新建会话 / 打开路径（App 已处理 open-settings）
   useEffect(() => {
     const onMenuAction = (e: Event) => {
       const action = (e as CustomEvent<string>).detail;
       if (action === 'open-command-palette') {
-        setCommandPaletteOpen(true);
+        openCommandPalette();
       } else if (action === 'new-session') {
         void handleNewSession();
       } else if (action.startsWith('open-path:')) {
@@ -220,20 +374,20 @@ export function MainView(props: MainViewProps) {
     if (project) {
       const session = sessions.find((s) => s.projectId === project.id);
       if (session) void props.onSessionSwitched(session.id);
-      else setActiveSection('projects');
+      else navigateToSection('projects');
     } else {
-      setActiveSection('projects');
+      navigateToSection('projects');
     }
   }
 
   useEffect(() => {
-    if (!confirmNew) return;
+    if (!clearTask.present) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setConfirmNew(false);
+      if (event.key === 'Escape') closeClearTask();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [confirmNew]);
+  }, [clearTask.present]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-rename session on first user message
   useEffect(() => {
@@ -282,34 +436,48 @@ export function MainView(props: MainViewProps) {
   const toolResultCount = useMemo(() => entries.filter((e) => e.kind === 'tool_result').length, [entries]);
 
   // ---- Chat handlers ----
-  function handleNewTask() {
-    if (busy || entries.length === 0) return;
-    setConfirmNew(true);
+  function handleNewTask(returnFocus?: HTMLElement | null): boolean {
+    if (clearTask.present) {
+      clearTaskCancelRef.current?.focus({ preventScroll: true });
+      return true;
+    }
+    if (busy || entries.length === 0) return false;
+    clearTaskReturnFocusRef.current = captureFocusTarget(returnFocus);
+    setClearTask({ present: true, entryCount: entries.length });
+    return true;
+  }
+
+  function closeClearTask() {
+    if (!clearTask.present) return;
+    restoreFocusTarget(clearTaskReturnFocusRef.current);
+    setClearTask((current) => ({ ...current, present: false }));
   }
 
   function doNewTask() {
+    if (!clearTask.present) return;
+    restoreFocusTarget(clearTaskReturnFocusRef.current);
     setEntries([]);
     setAttachments([]);
-    setConfirmNew(false);
+    setClearTask((current) => ({ ...current, present: false }));
     setLastUserForRetry(null);
   }
 
   async function handleSend() {
     if (!input.trim() || busy) return;
     if (!config) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先配置模型后再发送任务。' }]);
-      onOpenSettings();
+      appendLocalError('请先配置模型后再发送任务。');
+      onOpenSettings(undefined, document.querySelector<HTMLButtonElement>('.model-pill--missing'));
       return;
     }
     setMemoryContext([]);
     setContextStats(null);
     setSubagents([]);
     if (!activeSessionId) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再发送任务。' }]);
+      appendLocalError('请先创建并选择一个会话后再发送任务。');
       return;
     }
     if (attachments.length > 0 && !activeWorkDir) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建项目或设置工作目录，再发送附件。' }]);
+      appendLocalError('请先创建项目或设置工作目录，再发送附件。');
       return;
     }
     const userContent = input;
@@ -318,10 +486,14 @@ export function MainView(props: MainViewProps) {
     const usePlanMode = planMode;
     setLastUserForRetry(null);
 
+    const userKey = nextLiveKey();
+    const assistantKey = nextLiveKey();
+    // 流属于启动它的会话：切换会话后，残留事件仍按所属会话标记（渲染为静态）
+    const streamSessionId = activeSessionId;
     setEntries((prev) => [
       ...prev,
-      { kind: 'user', content: userContent, attachments: sentAttachments },
-      { kind: 'assistant', content: '' },
+      presentWithKey({ kind: 'user', content: userContent, attachments: sentAttachments }, 'discrete', userKey),
+      presentWithKey({ kind: 'assistant', content: '' }, 'discrete', assistantKey),
     ]);
     setInput('');
     setAttachments([]);
@@ -337,8 +509,15 @@ export function MainView(props: MainViewProps) {
       });
       setStreamId(result.streamId);
       for await (const ev of result.events) {
+        const eventKey = nextLiveKey();
         setEntries((prev) => {
-          const next = applyStreamEventToEntries(prev, ev, setPendingApproval, setPendingPlanApproval);
+          const next = applyStreamEventToEntries(
+            prev,
+            ev,
+            setPendingApproval,
+            setPendingPlanApproval,
+            (entry, enter) => presentWithKey(entry, enter, eventKey, streamSessionId),
+          );
           return next ?? prev;
         });
         if (ev.type === 'memory_context' && ev.memories) {
@@ -352,6 +531,24 @@ export function MainView(props: MainViewProps) {
             recentCalls: prev?.recentCalls ?? [],
             compressedCount: prev?.compressedCount ?? 0,
             estimated: ev.usage?.estimated ?? prev?.estimated,
+          }));
+        }
+        if (ev.contextState) setContextState(ev.contextState);
+        if (ev.type === 'context_usage' && ev.contextUsage) {
+          const usage = ev.contextUsage;
+          setContextStats((prev) => ({
+            promptTokens: usage.currentInputTokens,
+            completionTokens: prev?.completionTokens ?? 0,
+            toolCounts: prev?.toolCounts ?? {},
+            recentCalls: prev?.recentCalls ?? [],
+            compressedCount: prev?.compressedCount ?? 0,
+            estimated: true,
+            contextRevision: ev.contextRevision,
+            workspaceRevision: ev.workspaceRevision,
+            usableInputBudget: usage.usableInputBudget,
+            inputUsageRatio: usage.inputUsageRatio,
+            nearLimit: usage.nearLimit,
+            hardLimited: usage.hardLimited,
           }));
         }
         if (ev.type === 'tool_result' && ev.toolResult) {
@@ -381,7 +578,15 @@ export function MainView(props: MainViewProps) {
           const subagentTask = ev.subagentTask ?? '';
           setSubagents((prev) => {
             if (prev.some((s) => s.id === subagentId)) return prev;
-            return [...prev, { id: subagentId, task: subagentTask, status: 'running' as const }];
+            return [...prev, {
+              id: subagentId,
+              task: subagentTask,
+              status: 'running' as const,
+              role: ev.subagentRole,
+              modelId: ev.subagentModelId,
+              contextRevision: ev.subagentContextRevision,
+              workspaceRevision: ev.workspaceRevision,
+            }];
           });
         }
         if (ev.type === 'subagent_progress' && ev.subagentId) {
@@ -406,15 +611,20 @@ export function MainView(props: MainViewProps) {
                     status: subagentOk ? 'done' as const : 'failed' as const,
                     summary: subagentSummary,
                     elapsedMs: subagentElapsedMs,
+                    role: ev.subagentRole ?? s.role,
+                    modelId: ev.subagentModelId ?? s.modelId,
+                    contextRevision: ev.subagentContextRevision ?? s.contextRevision,
+                    workspaceRevision: ev.workspaceRevision ?? s.workspaceRevision,
                   }
                 : s,
             ),
           );
         }
         if (ev.type === 'task_complete') {
+          const reportKey = nextLiveKey();
           setEntries((prev) => {
             const report = generateReportFromEntries(prev);
-            return report ? [...prev, report] : prev;
+            return report ? [...prev, presentWithKey(report, 'discrete', reportKey, streamSessionId)] : prev;
           });
         }
         if (ev.type === 'error') {
@@ -427,16 +637,17 @@ export function MainView(props: MainViewProps) {
         }
       }
     } catch (err) {
+      const errorKey = nextLiveKey();
+      const msg = (err instanceof Error ? err.message : String(err)) || '请求失败';
       setEntries((prev) => {
-        const copy = [...prev];
-        const last = copy[copy.length - 1];
-        const msg = err instanceof Error ? err.message : String(err);
-        if (last && last.kind === 'assistant') {
-          copy[copy.length - 1] = { ...last, content: last.content + `\n\n[连接错误] ${msg}` };
-        } else {
-          copy.push({ kind: 'error', message: msg });
-        }
-        return copy;
+        const next = applyStreamEventToEntries(
+          prev,
+          { type: 'error', error: msg },
+          setPendingApproval,
+          setPendingPlanApproval,
+          (entry, enter) => presentWithKey(entry, enter, errorKey, streamSessionId),
+        );
+        return next ?? prev;
       });
       setLastUserForRetry(userContent);
       setPendingApproval(null);
@@ -460,11 +671,11 @@ export function MainView(props: MainViewProps) {
   // ---- Attachments ----
   async function handlePickAttachmentFiles() {
     if (!activeSessionId) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再添加附件。' }]);
+      appendLocalError('请先创建并选择一个会话后再添加附件。');
       return;
     }
     if (!activeWorkDir) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建项目或设置工作目录，再添加附件。' }]);
+      appendLocalError('请先创建项目或设置工作目录，再添加附件。');
       return;
     }
     try {
@@ -472,25 +683,25 @@ export function MainView(props: MainViewProps) {
       if (!paths || paths.length === 0) return;
       await handleAddAttachmentPaths(paths);
     } catch (e) {
-      setEntries((prev) => [...prev, { kind: 'error', message: `添加附件失败：${e instanceof Error ? e.message : String(e)}` }]);
+      appendLocalError(`添加附件失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   async function handleAddAttachmentPaths(paths: string[]) {
     if (paths.length === 0) return;
     if (!activeSessionId) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建并选择一个会话后再添加附件。' }]);
+      appendLocalError('请先创建并选择一个会话后再添加附件。');
       return;
     }
     if (!activeWorkDir) {
-      setEntries((prev) => [...prev, { kind: 'error', message: '请先创建项目或设置工作目录，再添加附件。' }]);
+      appendLocalError('请先创建项目或设置工作目录，再添加附件。');
       return;
     }
     try {
       const { attachments: added } = await window.electronAPI.attachments.add(activeSessionId, activeWorkDir, paths);
       setAttachments((prev) => [...prev, ...added]);
     } catch (e) {
-      setEntries((prev) => [...prev, { kind: 'error', message: `添加附件失败：${e instanceof Error ? e.message : String(e)}` }]);
+      appendLocalError(`添加附件失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -525,7 +736,7 @@ export function MainView(props: MainViewProps) {
           setPendingApproval(null);
         }
       },
-      openCommandPalette: () => setCommandPaletteOpen(true),
+      openCommandPalette: () => openCommandPalette(),
     },
     !commandPaletteOpen,
   );
@@ -561,21 +772,23 @@ export function MainView(props: MainViewProps) {
   }
 
   // ---- Session CRUD ----
-  async function handleNewSession(projectId?: string) {
+  function handleNewSession(projectId?: string, returnFocus?: HTMLElement | null): true | void {
     if (busy || !config) return;
     const targetProjectId = projectId ?? activeSession?.projectId;
     if (!targetProjectId) {
-      setActiveSection('projects');
-      if (projects.length === 0) setCreateProjectOpen(true);
+      navigateToSection('projects');
+      if (projects.length === 0 && !createProjectOpen) {
+        openCreateProject(returnFocus);
+        return true;
+      }
       return;
     }
-    try {
-      const s = await window.electronAPI.sessions.create({ modelId: config.id, projectId: targetProjectId });
-      onSessionCreated(s);
-      setActiveSection('tasks');
-    } catch (e) {
-      console.error('New session failed:', e);
-    }
+    void window.electronAPI.sessions.create({ modelId: config.id, projectId: targetProjectId })
+      .then((session) => {
+        onSessionCreated(session);
+        navigateToSection('tasks');
+      })
+      .catch((error) => console.error('New session failed:', error));
   }
 
   async function handleCreateProject(name: string, selection: { workDir: string; entryFile?: string }) {
@@ -584,12 +797,17 @@ export function MainView(props: MainViewProps) {
       workDir: selection.workDir,
       entryFile: selection.entryFile,
     });
+    restoreFocusTarget(
+      document.querySelector<HTMLButtonElement>('.dashboard-create-button'),
+      createProjectReturnFocusRef.current,
+    );
     onProjectCreated(project);
+    createProjectReturnFocusRef.current = null;
     setCreateProjectOpen(false);
   }
 
   function handleSelectSession(id: string) {
-    setActiveSection('tasks');
+    navigateToSection('tasks');
     onSessionSwitched(id);
   }
 
@@ -638,36 +856,37 @@ export function MainView(props: MainViewProps) {
         workDir={activeWorkDir}
         projectName={activeProject?.name}
         onChooseProject={() => {
-          setActiveSection('projects');
-          if (!activeProject && projects.length === 0) setCreateProjectOpen(true);
+          navigateToSection('projects');
+          if (!activeProject && projects.length === 0) openCreateProject();
         }}
-        onOpenFileTree={() => setFileTreeOpen(true)}
+        onOpenFileTree={() => { openFileTree(); }}
         onOpenSettings={onOpenSettings}
         onReconfigure={onReconfigure}
-        onNewSession={() => void handleNewSession()}
+        onNewSession={(returnFocus) => handleNewSession(undefined, returnFocus)}
         onNewTask={handleNewTask}
         onSwitchModel={(id) => void handleSwitchModel(id)}
       />
 
       <div className="main-layout">
-        {sidebarOpen && (
+        {sidebarPresence.mounted && (
           <Sidebar
+            presence={sidebarPresence}
             projects={projects}
             sessions={sessions}
             activeId={activeSessionId}
             mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
             activeSection={activeSection}
-            onNavigateHome={() => setActiveSection('home')}
-            onNavigateProjects={() => setActiveSection('projects')}
-            onNavigateTasks={() => setActiveSection('tasks')}
-            onNavigateMemory={() => setActiveSection('memory')}
-            onNavigateFiles={() => setActiveSection('files')}
+            onNavigateHome={() => navigateToSection('home')}
+            onNavigateProjects={() => navigateToSection('projects')}
+            onNavigateTasks={() => navigateToSection('tasks')}
+            onNavigateMemory={() => navigateToSection('memory')}
+            onNavigateFiles={() => navigateToSection('files')}
             onOpenSettings={() => onOpenSettings()}
             onSelect={handleSelectSession}
-            onNew={() => void handleNewSession()}
+            onNew={(returnFocus) => void handleNewSession(undefined, returnFocus)}
             onDelete={(id) => void handleDeleteSession(id)}
             onRename={(id, title) => void handleRenameSession(id, title)}
-            onProjectCreate={() => setCreateProjectOpen(true)}
+            onProjectCreate={openCreateProject}
             onProjectDelete={async (id) => {
               await window.electronAPI.projects.delete(id);
               onProjectDeleted(id);
@@ -693,7 +912,7 @@ export function MainView(props: MainViewProps) {
                   activeId={activeSessionId ?? ''}
                   onSelect={handleSelectSession}
                   onClose={(id) => void handleDeleteSession(id)}
-                  onNewTab={() => void handleNewSession()}
+                  onNewTab={(returnFocus) => void handleNewSession(undefined, returnFocus)}
                   onRename={(id) => {
                     const tab = sessions.find((s) => s.id === id);
                     if (tab) {
@@ -740,7 +959,7 @@ export function MainView(props: MainViewProps) {
                 }}
               />
               {extractedNotice && activeSessionId === extractedNotice.sessionId && (
-                <div className="memory-extracted-hint">
+                <div className="memory-extracted-hint motion-feedback-enter" role="status">
                   本次会话已沉淀 {extractedNotice.count} 条记忆，可在记忆中心查看
                 </div>
               )}
@@ -767,7 +986,7 @@ export function MainView(props: MainViewProps) {
           ) : activeSection === 'memory' ? (
             <MemoryCenter />
           ) : activeSection === 'files' ? (
-            <SidebarFileView workDir={activeWorkDir ?? null} onOpenFullScreen={() => setFileTreeOpen(true)} />
+            <SidebarFileView workDir={activeWorkDir ?? null} onOpenFullScreen={() => { openFileTree(); }} />
           ) : (
             <HomeDashboard
               section={activeSection}
@@ -786,43 +1005,53 @@ export function MainView(props: MainViewProps) {
               onAttachmentsChange={setAttachments}
               onAddPaths={(paths) => void handleAddAttachmentPaths(paths)}
               onPickAttachments={() => void handlePickAttachmentFiles()}
-              onSend={() => {
+              onSend={(returnFocus) => {
                 if (!config) {
-                  setActiveSection('tasks');
+                  navigateToSection('tasks');
                   void handleSend();
                   return;
                 }
                 if (!activeSessionId) {
-                  void handleNewSession();
+                  void handleNewSession(undefined, returnFocus);
                   return;
                 }
-                setActiveSection('tasks');
+                navigateToSection('tasks');
                 void handleSend();
               }}
               onSelectSession={handleSelectSession}
               onOpenProject={handleOpenProject}
-              onCreateProject={() => setCreateProjectOpen(true)}
-              onOpenFiles={() => activeWorkDir ? setFileTreeOpen(true) : setCreateProjectOpen(true)}
+              onCreateProject={openCreateProject}
+              onOpenFiles={() => activeWorkDir ? openFileTree() : openCreateProject()}
             />
           )}
         </div>
-        {props.workspaceOpen && activeWorkDir && (
+        {workspacePresence.mounted && retainedWorkDirRef.current && (
           <WorkspacePanel
-            workDir={activeWorkDir}
+            presence={workspacePresence}
+            workDir={retainedWorkDirRef.current}
             goal={workspaceGoal}
             progress={{ completed: toolResultCount, total: toolCallCount }}
             deliverables={workspaceDeliverables}
             touchedFiles={touchedFiles}
             memoryContext={memoryContext}
             contextStats={contextStats}
+            contextState={contextState}
             contextWindow={config?.contextWindow}
             subagents={subagents}
+            onCreateCheckpoint={activeSessionId ? async () => {
+              const snapshot = await window.electronAPI.context.createCheckpoint(activeSessionId);
+              setContextState(snapshot);
+            } : undefined}
           />
         )}
       </div>
 
-      {confirmNew && (
-        <div className="modal-backdrop" onClick={() => setConfirmNew(false)}>
+      {clearTaskPresence.mounted && (
+        <div
+          className="modal-backdrop"
+          {...presenceRootProps(clearTaskPresence)}
+          onClick={closeClearTask}
+        >
           <div
             className="modal confirm-modal"
             role="dialog"
@@ -832,9 +1061,9 @@ export function MainView(props: MainViewProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="confirm-new-title">清空当前聊天？</h3>
-            <p id="confirm-new-description">当前 {entries.length} 条记录会被清除，任务上下文也会重新开始。</p>
+            <p id="confirm-new-description">当前 {clearTask.entryCount} 条工作记录会被清除，任务上下文也会重新开始。</p>
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setConfirmNew(false)} type="button" autoFocus>
+              <button ref={clearTaskCancelRef} className="btn btn-secondary" onClick={closeClearTask} type="button" autoFocus>
                 取消
               </button>
               <button className="btn btn-danger" onClick={doNewTask} type="button">
@@ -845,40 +1074,43 @@ export function MainView(props: MainViewProps) {
         </div>
       )}
 
-      {fileTreeOpen && activeWorkDir && (
+      {fileTreePresence.mounted && fileTree.workDir && (
         <FileTreeModal
-          workDir={activeWorkDir}
-          onClose={() => setFileTreeOpen(false)}
+          presence={fileTreePresence}
+          workDir={fileTree.workDir}
+          onClose={closeFileTree}
         />
       )}
 
-      {commandPaletteOpen && (
+      {commandPresence.mounted && (
         <CommandPalette
-          onClose={() => setCommandPaletteOpen(false)}
+          presence={commandPresence}
+          onClose={closeCommandPalette}
           sessions={sessions}
           modelList={modelList}
           activeSessionId={activeSessionId}
           activeModelId={config?.id ?? null}
           theme={props.theme ?? 'light'}
           onSelectSession={handleSelectSession}
-          onNewSession={() => void handleNewSession()}
+          onNewSession={() => handleNewSession(undefined, commandReturnFocusRef.current)}
           onDeleteSession={(id) => void handleDeleteSession(id)}
           onSetActiveModel={(id) => void handleSwitchModel(id)}
           onSetTheme={(t) => props.onThemeChange?.(t)}
-          onOpenSettings={(tab) => props.onOpenSettings(tab)}
-          onOpenFileTree={() => setFileTreeOpen(true)}
+          onOpenSettings={(tab) => props.onOpenSettings(tab, commandReturnFocusRef.current)}
+          onOpenFileTree={() => openFileTree(commandReturnFocusRef.current)}
           onToggleSidebar={props.onToggleSidebar}
           onToggleWorkspace={props.onToggleWorkspace}
           onTogglePlanMode={() => setPlanMode((v) => !v)}
-          onNewTask={handleNewTask}
+          onNewTask={() => handleNewTask(commandReturnFocusRef.current)}
         />
       )}
 
-      {createProjectOpen && createPortal(
+      {createProjectPresence.mounted && createPortal(
         <ProjectDialog
+          presence={createProjectPresence}
           mode="create"
           onCreate={handleCreateProject}
-          onClose={() => setCreateProjectOpen(false)}
+          onClose={closeCreateProject}
         />,
         document.body,
       )}

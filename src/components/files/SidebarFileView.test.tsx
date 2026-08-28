@@ -235,4 +235,21 @@ describe('SidebarFileView', () => {
     expect(container.querySelector('.new-entry-menu__input')).toBeTruthy();
     expect(mocks.listTree).toHaveBeenCalledTimes(1);
   });
+
+  it('marks the file view root with page-enter and page identity', async () => {
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+    const root = container.querySelector('.sidebar-file-view') as HTMLElement;
+    expect(root).toBeTruthy();
+    expect(root.dataset.motion).toBe('page-enter');
+    expect(root.dataset.page).toBe('files');
+  });
+
+  it('keeps the file view root stable during local updates', async () => {
+    const { container } = await render(<SidebarFileView workDir="/w" />);
+    const root = container.querySelector('.sidebar-file-view')!;
+    await act(async () => {
+      rowByName(container, 'b.ts').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('.sidebar-file-view')).toBe(root);
+  });
 });

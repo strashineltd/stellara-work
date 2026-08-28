@@ -46,14 +46,14 @@ export async function invokeTool(
   name: ToolName,
   args: ToolArgs,
   cwd: string,
-  _context?: ToolExecutionContext,
+  context?: ToolExecutionContext,
 ): Promise<ToolResult> {
   // MCP 桥接：mcp__ 开头的工具名路由到 mcpManager.callTool
   if (typeof name === 'string' && name.startsWith('mcp__')) {
     return mcpManager.callTool(name, args as Record<string, unknown>);
   }
 
-  const result = await invokeToolInternal(name, args, cwd);
+  const result = await invokeToolInternal(name, args, cwd, context);
   return result;
 }
 
@@ -61,6 +61,7 @@ async function invokeToolInternal(
   name: ToolName,
   args: ToolArgs,
   cwd: string,
+  context?: ToolExecutionContext,
 ): Promise<ToolResult> {
   switch (name) {
     case 'read_file':
@@ -100,7 +101,7 @@ async function invokeToolInternal(
     case 'memory_save':
       return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd);
     case 'dispatch_subagents':
-      return dispatchSubagents(args as DispatchSubagentsArgs, cwd);
+      return dispatchSubagents(args as DispatchSubagentsArgs, cwd, context);
     default:
       return { ok: false, output: '', error: `未知工具: ${name}` };
   }

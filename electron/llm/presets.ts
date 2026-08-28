@@ -11,8 +11,8 @@ import type { ModelPreset } from '../../shared/ipc';
  */
 
 export interface ModelPresetWithCapability extends ModelPreset {
-  /** 协议类型：responses、anthropic 或 chat-completions */
-  wireApi: 'responses' | 'anthropic' | 'chat-completions';
+  /** 协议类型：Responses 或 Anthropic Messages。 */
+  wireApi: 'responses' | 'anthropic';
   /** Responses 兼容状态 */
   compatibility: 'verified' | 'unverified' | 'incompatible';
   /** 是否可执行（verified 时可执行） */
@@ -88,9 +88,9 @@ export const MODEL_PRESETS: ModelPresetWithCapability[] = [
     baseUrl: 'https://api.moonshot.cn',
     model: 'kimi-k3',
     isCustom: false,
-    wireApi: 'chat-completions',
-    compatibility: 'verified',
-    executable: true,
+    wireApi: 'responses',
+    compatibility: 'incompatible',
+    executable: false,
     maxOutputTokens: 65536,
   },
   {
@@ -110,7 +110,7 @@ export const MODEL_PRESETS: ModelPresetWithCapability[] = [
     baseUrl: '',
     model: '',
     isCustom: true,
-    wireApi: 'responses', // 默认，实际由 baseUrl 自动推断
+    wireApi: 'responses',
     compatibility: 'unverified',
     executable: false,
   },

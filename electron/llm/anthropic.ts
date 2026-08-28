@@ -43,6 +43,8 @@ export interface AnthropicMessage {
 
 export interface AnthropicContent {
   type: 'text' | 'image' | 'tool_use' | 'tool_result';
+  /** Anthropic tool_use blocks use `id`; tool_result blocks use `tool_use_id`. */
+  id?: string;
   text?: string;
   source?: {
     type: 'base64';
@@ -325,14 +327,15 @@ export class AnthropicClient {
     let buffer = '';
     let lastChunkTime = Date.now();
     let receivedFirstChunk = false;
+    let idleError: Error | null = null;
 
     const checkIdle = (): void => {
       const now = Date.now();
       const elapsed = now - lastChunkTime;
       const timeout = receivedFirstChunk ? STREAM_IDLE_TIMEOUT_MS : STREAM_FIRST_CHUNK_TIMEOUT_MS;
       if (elapsed > timeout) {
-        reader.cancel().catch(() => {});
-        throw new Error(`流空闲超时 (${Math.round(elapsed / 1000)}s)`);
+        idleError = new Error(`流空闲超时 (${Math.round(elapsed / 1000)}s)`);
+        void reader.cancel();
       }
     };
 
@@ -346,6 +349,7 @@ export class AnthropicClient {
         }
 
         const { done, value } = await reader.read();
+        if (idleError) throw idleError;
         if (done) break;
 
         lastChunkTime = Date.now();

@@ -118,6 +118,10 @@ const api: ElectronAPI = {
       ipcRenderer.send('approval:respond', approvalId, approved);
     },
   },
+  context: {
+    getSnapshot: (sessionId: string) => ipcRenderer.invoke('context:getSnapshot', sessionId),
+    createCheckpoint: (sessionId: string) => ipcRenderer.invoke('context:createCheckpoint', sessionId),
+  },
   tools: {
     invoke: (name: ToolName, args: ToolArgs): Promise<ToolResult> =>
       ipcRenderer.invoke('tools:invoke', name, args),

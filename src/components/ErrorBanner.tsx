@@ -26,7 +26,7 @@ export function ErrorBanner({ message, meta, onOpenSettings, onSwitchModel, onRe
   const showRetry = meta?.retryable ?? true;
 
   return (
-    <div className={`error-banner ${meta ? `error-banner-${meta.kind}` : ''}`}>
+    <div className={`error-banner motion-feedback-enter ${meta ? `error-banner-${meta.kind}` : ''}`} role="alert">
       <div className="error-banner-header">
         <span className="error-icon"><Icon name="alert" size={17} /></span>
         <span className="error-text">

@@ -1,5 +1,8 @@
 import type { AttachmentMeta, SkillDef } from '../../../shared/ipc';
+import { useRef } from 'react';
 import { AttachmentPicker } from '../attachments/AttachmentPicker';
+import { usePresence } from '../../hooks/usePresence';
+import { presenceRootProps } from '../../lib/presence-ui';
 
 export interface SlashState {
   slashOpen: boolean;
@@ -32,6 +35,18 @@ interface InputAreaProps {
  * 底部输入区：textarea + slash 自动补全 + 附件（选择/拖拽/chip）+ plan toggle + 发送按钮
  */
 export function InputArea(props: InputAreaProps) {
+  const slashPresence = usePresence(props.slash.slashOpen, 120);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashOpenRef = useRef(props.slash.slashOpen);
+  slashOpenRef.current = props.slash.slashOpen;
+
+  function handleApply(skill: SkillDef) {
+    if (!slashOpenRef.current) return;
+    slashOpenRef.current = false;
+    props.onSlashApply(skill);
+    textareaRef.current?.focus();
+  }
+
   function handleChange(v: string) {
     props.onInputChange(v);
     // `/` 后没空格 → 显示补全菜单
@@ -48,8 +63,16 @@ export function InputArea(props: InputAreaProps) {
       className="main-input"
       aria-label="任务输入"
     >
-      {props.slash.slashOpen && (
-        <div className="slash-menu" id="slash-suggestions" role="listbox" aria-label="可用技能">
+      {slashPresence.mounted && (
+        <div
+          className="slash-menu"
+          id="slash-suggestions"
+          role="listbox"
+          aria-label="可用技能"
+          data-motion="menu"
+          data-side="top"
+          {...presenceRootProps(slashPresence)}
+        >
           {!props.slash.skillsLoaded && <div className="slash-item empty" role="status">正在加载技能…</div>}
           {props.slash.skillsLoaded && props.slash.slashItems.length === 0 && (
             <div className="slash-item empty" role="status">
@@ -64,7 +87,7 @@ export function InputArea(props: InputAreaProps) {
               role="option"
               aria-selected={i === props.slash.slashIdx}
               className={`slash-item ${i === props.slash.slashIdx ? 'active' : ''}`}
-              onClick={() => props.onSlashApply(s)}
+              onClick={() => handleApply(s)}
               onMouseEnter={() => props.onSlashIdxChange(i)}
             >
               <span className="slash-item-name">/{s.name}</span>
@@ -81,6 +104,7 @@ export function InputArea(props: InputAreaProps) {
         disabled={props.busy}
       />
       <textarea
+        ref={textareaRef}
         className="input-chat"
         placeholder={props.busy ? '任务正在执行，完成后可继续补充…' : '写下任务目标、涉及范围和完成标准，或输入 / 调用技能…'}
         aria-label="任务说明"

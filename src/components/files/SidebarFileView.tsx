@@ -79,7 +79,7 @@ export function SidebarFileView({ workDir, onOpenFullScreen }: SidebarFileViewPr
   }
 
   return (
-    <div className="sidebar-file-view">
+    <div className="sidebar-file-view" data-motion="page-enter" data-page="files">
       <div className="sidebar-file-view__toolbar">
         <button
           className="btn-icon btn-icon-small sidebar-file-view__refresh"

@@ -122,6 +122,20 @@ describe('SettingsShortcutsPanel', () => {
     expect(kbd?.classList.contains('rec')).toBe(true);
   });
 
+  it('keeps the recording status text visible while recording', async () => {
+    const { container } = await render(<SettingsShortcutsPanel onChanged={vi.fn()} />);
+
+    const row = container.querySelector('.settings-shortcut-row[data-action="toggleSidebar"]');
+    await fireClick(row);
+
+    const kbd = row?.querySelector('.kbd') as HTMLElement;
+    expect(kbd).toBeTruthy();
+    expect(kbd.textContent).toBe('按任意键…');
+    expect(kbd.classList.contains('rec')).toBe(true);
+    expect(kbd.getAttribute('aria-hidden')).toBeNull();
+    expect(kbd.style.display).not.toBe('none');
+  });
+
   it('commits a recorded combo via settings.update and notifies parent', async () => {
     const onChanged = vi.fn();
     mocks = installApi({ shortcuts: { toggleSidebar: 'Ctrl+Alt+X' } });

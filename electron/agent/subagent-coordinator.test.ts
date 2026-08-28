@@ -41,7 +41,7 @@ describe('SubagentCoordinator', () => {
 
     const defs: SubagentDef[] = [
       { id: 'sa-1', task: '写测试', role: 'verify' },
-      { id: 'sa-2', task: '重构代码', role: 'build' },
+      { id: 'sa-2', task: '重构代码', role: 'build', fileScopes: ['src/**'] },
     ];
 
     const result = await coordinator.dispatch(defs);

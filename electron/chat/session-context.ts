@@ -44,5 +44,10 @@ export async function resolveSessionModel(
     apiKey,
     workDir,
     isCustom: entry.id === 'custom',
+    wireApi: entry.wireApi ?? 'responses',
+    compatibility: entry.compatibility,
+    maxOutputTokens: entry.maxOutputTokens,
+    reasoningEffort: entry.reasoningEffort,
+    contextWindow: entry.contextWindow,
   };
 }

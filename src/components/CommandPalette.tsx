@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ModelListItem, SessionSummary, ThemeName } from '../../shared/ipc';
 import { Icon, type IconName } from './Icon';
 import type { SettingsTab } from './SettingsPanel';
+import { presenceRootProps, type PresenceMotionProps } from '../lib/presence-ui';
 
 export interface CommandItem {
   id: string;
@@ -14,8 +15,8 @@ export interface CommandItem {
   run: () => void | boolean | Promise<void | boolean>;
 }
 
-interface CommandPaletteProps {
-  onClose: () => void;
+interface CommandPaletteProps extends PresenceMotionProps {
+  onClose: (options?: { restoreFocus?: boolean }) => void;
   sessions: SessionSummary[];
   modelList: ModelListItem[];
   activeSessionId: string | null;
@@ -23,20 +24,27 @@ interface CommandPaletteProps {
   theme: ThemeName;
   // actions
   onSelectSession: (id: string) => void;
-  onNewSession: () => void;
+  onNewSession: () => void | boolean;
   onDeleteSession: (id: string) => void;
   onSetActiveModel: (id: string) => void;
   onSetTheme: (t: ThemeName) => void;
   onOpenSettings: (tab?: SettingsTab) => void;
-  onOpenFileTree: () => void;
+  onOpenFileTree: () => boolean;
   onToggleSidebar: () => void;
   onToggleWorkspace: () => void;
   onTogglePlanMode: () => void;
-  onNewTask: () => void;
+  onNewTask: () => boolean;
 }
 
 const GROUP_ORDER: CommandItem['group'][] = ['navigation', 'session', 'model', 'theme', 'ui'];
 const commandIcon = (name: IconName): IconName => name;
+const FOCUS_TRANSFER_COMMANDS = new Set([
+  'open-settings',
+  'manage-skills',
+  'open-file-tree',
+  'new-task',
+  'add-model',
+]);
 
 /** 模糊匹配：返回 -1（不匹配）或分数（越高越靠前） */
 function score(item: CommandItem, q: string): number {
@@ -56,10 +64,11 @@ export function CommandPalette(props: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // 自动 focus
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+  // Presence 重开不会重新挂载，因此每次 entering 都要重新聚焦。
+  useLayoutEffect(() => {
+    if (props.presence && props.presence.state !== 'entering') return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [props.presence?.state]);
 
   // 构建命令列表（每次 render 都重建，因为依赖 sessions/modelList/theme）
   const allCommands = useMemo<CommandItem[]>(() => {
@@ -90,7 +99,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         icon: commandIcon('file-tree'),
         group: 'navigation',
         keywords: ['files', 'tree', 'browse', '目录'],
-        run: () => { props.onOpenFileTree(); },
+        run: props.onOpenFileTree,
       },
       // session
       {
@@ -99,7 +108,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         icon: commandIcon('plus'),
         group: 'session',
         keywords: ['new', 'create', '会话'],
-        run: () => { props.onNewSession(); },
+        run: props.onNewSession,
       },
       {
         id: 'new-task',
@@ -107,7 +116,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         icon: commandIcon('file'),
         group: 'session',
         keywords: ['clear', 'reset', '清空'],
-        run: () => { props.onNewTask(); },
+        run: props.onNewTask,
       },
       ...props.sessions.slice(0, 10).map<CommandItem>((s) => ({
         id: `session-${s.id}`,
@@ -224,11 +233,18 @@ export function CommandPalette(props: CommandPaletteProps) {
   }, [selectedIdx]);
 
   async function runItem(item: CommandItem) {
+    if (props.presence?.state === 'closing') return;
     const result = await item.run();
-    if (result !== false) props.onClose();
+    if (result === false) return;
+    if (FOCUS_TRANSFER_COMMANDS.has(item.id) || (item.id === 'new-session' && result === true)) {
+      props.onClose({ restoreFocus: false });
+    } else {
+      props.onClose();
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
+    if (props.presence?.state === 'closing') return;
     if (e.key === 'Escape') {
       e.preventDefault();
       props.onClose();
@@ -275,12 +291,25 @@ export function CommandPalette(props: CommandPaletteProps) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={props.onClose}>
-      <div className="modal command-palette" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="modal-backdrop"
+      {...presenceRootProps(props.presence)}
+      onClick={() => {
+        if (props.presence?.state !== 'closing') props.onClose();
+      }}
+    >
+      <div
+        className="modal command-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="命令面板"
+        onClick={(e) => e.stopPropagation()}
+      >
         <input
           ref={inputRef}
           className="command-palette-input"
           type="text"
+          autoFocus
           placeholder="搜索命令，例如「主题」「新建任务」「切换模型」"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setSelectedIdx(0); }}

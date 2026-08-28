@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
-import { OpenAICompatClient } from '../electron/llm/openai-compat';
+import { testModelConnection } from '../electron/llm/client-factory';
 import type { ModelConfig } from '../shared/ipc';
 
 // Real providers are intentionally opt-in. Unit tests must not require a
@@ -43,12 +43,12 @@ describeIntegration('diagnose: API key connectivity', () => {
       apiKey,
       workDir: active.workDir,
       isCustom: false,
+      wireApi: active.wireApi ?? 'responses',
     };
 
     console.log(`[diag] model: ${config.label} (${config.model})`);
     console.log(`[diag] baseUrl: ${config.baseUrl}`);
-    const client = new OpenAICompatClient(config);
-    const result = await client.testConnection();
+    const result = await testModelConnection(config);
     console.log(`[diag] result: ${JSON.stringify(result)}`);
     expect(result.ok).toBe(true);
   }, 30000);

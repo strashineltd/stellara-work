@@ -1,85 +1,79 @@
-import type { OpenAITool, ToolResult } from '../../../shared/ipc';
-import type { DispatchSubagentsArgs } from '../../../shared/ipc';
+import type {
+  DispatchSubagentsArgs,
+  OpenAITool,
+  SubagentDef,
+  ToolExecutionContext,
+  ToolResult,
+} from '../../../shared/ipc';
 
 export interface SubagentRunner {
-  run(task: string, id: string): Promise<{ summary: string; ok: boolean }>;
-  /** 可选的批次总数上报：runner 借此在全部完成后发射汇总事件 */
-  setTotal?(total: number): void;
+  dispatch(subagents: SubagentDef[]): Promise<{
+    results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
+    conflicts: string[];
+    totalUsage: { promptTokens: number; completionTokens: number };
+  }>;
 }
 
-let runner: SubagentRunner | null = null;
+const runners = new Map<string, SubagentRunner>();
+const MAX_SUBAGENTS = 10;
 
-export function setSubagentRunner(r: SubagentRunner | null): void {
-  runner = r;
+/** 注册会话级子代理执行器，避免多个主会话互相覆盖。 */
+export function setSubagentRunner(sessionId: string, runner: SubagentRunner | null): void {
+  if (runner) runners.set(sessionId, runner);
+  else runners.delete(sessionId);
 }
 
-export function getSubagentRunner(): SubagentRunner | null {
-  return runner;
+export function getSubagentRunner(sessionId: string): SubagentRunner | null {
+  return runners.get(sessionId) ?? null;
 }
-
-const MAX_PARALLEL = 10;
-const MAX_SUBAGENTS = 20;
 
 export async function dispatchSubagents(
   args: DispatchSubagentsArgs,
   _cwd: string,
+  context?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const defs = args?.subagents;
   if (!Array.isArray(defs) || defs.length < 1 || defs.length > MAX_SUBAGENTS) {
     return { ok: false, output: '', error: `subagents 必须是 1-${MAX_SUBAGENTS} 项的非空数组` };
   }
   for (let i = 0; i < defs.length; i++) {
-    if (typeof defs[i].id !== 'string' || defs[i].id.trim() === '') {
+    const def = defs[i]!;
+    if (typeof def.id !== 'string' || def.id.trim() === '') {
       return { ok: false, output: '', error: `subagents[${i}].id 不能为空` };
     }
-    if (typeof defs[i].task !== 'string' || defs[i].task.trim() === '') {
+    if (typeof def.task !== 'string' || def.task.trim() === '') {
       return { ok: false, output: '', error: `subagents[${i}].task 不能为空` };
     }
+    if (def.role === 'build' && (!def.fileScopes || def.fileScopes.length === 0)) {
+      return { ok: false, output: '', error: `build 子代理 ${def.id} 必须声明 fileScopes` };
+    }
   }
-  if (new Set(defs.map((s) => s.id)).size !== defs.length) {
+  if (new Set(defs.map((item) => item.id)).size !== defs.length) {
     return { ok: false, output: '', error: 'subagents 的 id 必须唯一' };
   }
+  if (!context?.sessionId) {
+    return { ok: false, output: '', error: '缺少会话上下文，无法安全分发子代理' };
+  }
+
+  const runner = getSubagentRunner(context.sessionId);
   if (!runner) {
-    return { ok: false, output: '', error: '子代理执行器未设置（setSubagentRunner）' };
+    return { ok: false, output: '', error: `会话 ${context.sessionId} 的子代理执行器未设置` };
   }
 
-  const subagentRunner = runner;
-  const total = defs.length;
-  const results: Array<{ summary: string; ok: boolean }> = new Array(total);
-  let cursor = 0;
-
-  subagentRunner.setTotal?.(total);
-
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= total) return;
-      try {
-        results[index] = await subagentRunner.run(defs[index].task, defs[index].id);
-      } catch (err) {
-        results[index] = {
-          summary: err instanceof Error ? err.message : String(err),
-          ok: false,
-        };
-      }
-    }
-  };
-
-  await Promise.all(Array.from({ length: Math.min(total, MAX_PARALLEL) }, worker));
-
-  const failed = results.filter((r) => !r.ok).length;
-  const lines = defs.map((def, i) => {
-    const r = results[i];
-    const head = r.ok ? `## #${i + 1} ${def.id}` : `## #${i + 1} ${def.id}（失败）`;
-    return `${head}\n${r.summary}`;
+  const batch = await runner.dispatch(defs);
+  const lines = batch.results.map((result, index) => {
+    const def = defs.find((item) => item.id === result.id)!;
+    const state = result.ok ? '完成' : '失败';
+    return `## #${index + 1} ${result.id} · ${def.role ?? 'research'} · ${state}\n${result.summary}`;
   });
-  const output = `已启动 ${total} 个子代理（并行 ≤${MAX_PARALLEL}）\n\n${lines.join('\n')}`;
-
-  if (failed > 0) {
-    return { ok: false, output, error: `${failed} 个子代理失败` };
+  if (batch.conflicts.length > 0) {
+    lines.push(`## 冲突\n${batch.conflicts.map((item) => `- ${item}`).join('\n')}`);
   }
-  return { ok: true, output };
+  const failed = batch.results.filter((result) => !result.ok).length;
+  const output = `子代理批次完成：${batch.results.length - failed}/${batch.results.length} 成功\n\n${lines.join('\n\n')}`;
+  return failed > 0 || batch.conflicts.length > 0
+    ? { ok: false, output, error: `${failed} 个子代理失败，${batch.conflicts.length} 个冲突` }
+    : { ok: true, output };
 }
 
 export const dispatchSubagentsTools: OpenAITool[] = [
@@ -87,21 +81,26 @@ export const dispatchSubagentsTools: OpenAITool[] = [
     type: 'function',
     function: {
       name: 'dispatch_subagents',
-      description:
-        '把大任务拆分成多个独立子任务，并行分发给子代理执行（最多 10 个并行，超出排队）。每个子代理共享工作目录、独立上下文，完成后返回各子代理的汇总报告。',
+      description: '把独立子任务分发给会话级子代理。research/verify 最多 4 个并行，build 串行执行并检查文件范围冲突。',
       parameters: {
         type: 'object',
         properties: {
           subagents: {
             type: 'array',
-            description: '子代理任务列表（1-20 项），每项包含唯一 id 与任务描述',
+            minItems: 1,
+            maxItems: MAX_SUBAGENTS,
             items: {
               type: 'object',
               properties: {
-                id: { type: 'string', description: '子代理唯一标识（如 refactor-fs、write-tests）' },
-                task: { type: 'string', description: '该子代理要独立完成的具体任务' },
+                id: { type: 'string', description: '批次内唯一标识' },
+                task: { type: 'string', description: '具体、可独立验收的任务' },
+                role: { type: 'string', enum: ['research', 'build', 'verify'] },
+                modelId: { type: 'string', description: '可选模型 ID；缺省继承主模型' },
+                readOnly: { type: 'boolean', description: 'research/verify 默认 true' },
+                fileScopes: { type: 'array', items: { type: 'string' }, description: 'build 必填，可修改文件范围' },
+                expectedOutput: { type: 'string', description: '期望的结构化交付结果' },
               },
-              required: ['id', 'task'],
+              required: ['id', 'task', 'role'],
               additionalProperties: false,
             },
           },

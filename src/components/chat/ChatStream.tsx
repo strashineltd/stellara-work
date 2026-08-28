@@ -34,6 +34,21 @@ interface ChatStreamProps {
 }
 
 export function ChatStream(props: ChatStreamProps) {
+  function entryRenderMeta(entry: DisplayEntry, index: number) {
+    const sessionId = props.sessionId ?? null;
+    const key = entry.presentation?.key
+      ?? `detached:${sessionId ?? 'none'}:${index}:${entry.kind}`;
+    const enter = entry.presentation?.sessionId === sessionId
+      ? entry.presentation.enter
+      : undefined;
+    const className = [
+      'entry',
+      enter === 'discrete' ? 'entry--live' : '',
+      enter === 'status' ? 'entry--status-live' : '',
+    ].filter(Boolean).join(' ');
+    return { key, className };
+  }
+
   return (
     <main className="main-chat" id="task-stream" ref={props.chatRef} tabIndex={-1}>
       {props.pendingApproval && (
@@ -44,7 +59,7 @@ export function ChatStream(props: ChatStreamProps) {
         />
       )}
       {props.modelMissing && (
-        <div className="model-missing-banner">
+        <div className="model-missing-banner motion-feedback-enter" role="alert">
           <span>此会话引用的模型已被删除。</span>
           <button className="btn btn-secondary btn-small" onClick={props.onOpenSettings} type="button">
             去设置重新配置
@@ -55,8 +70,10 @@ export function ChatStream(props: ChatStreamProps) {
         <EmptyChat />
       ) : (
         <div className="messages">
-          {props.entries.map((e, i) => (
-            <div key={i} className="entry">
+          {props.entries.map((e, i) => {
+            const meta = entryRenderMeta(e, i);
+            return (
+            <div key={meta.key} className={meta.className} data-entry-key={meta.key}>
               {e.kind === 'user' && (
                 <UserEntry
                   content={e.content}
@@ -102,6 +119,7 @@ export function ChatStream(props: ChatStreamProps) {
               {e.kind === 'plan' && (
                 <PlanCard
                   steps={e.steps}
+                  running={props.busy}
                   awaitingApproval={!!props.pendingPlanApproval}
                   onApprove={() => props.onApprovePlan?.()}
                   onReject={() => props.onRejectPlan?.()}
@@ -124,7 +142,8 @@ export function ChatStream(props: ChatStreamProps) {
               {e.kind === 'report' && <ReportEntry entry={e} workDir={props.workDir} />}
               {e.kind === 'subagent_summary' && <SubagentSummaryReport results={e.results} workDir={props.workDir} />}
             </div>
-          ))}
+            );
+          })}
           {props.busy && (
             <div className="busy-actions">
               <button
@@ -267,7 +286,7 @@ function AssistantEntry({
         {content
           ? <MarkdownView content={content} workDir={workDir} />
           : busy
-            ? <span className="thinking">正在分析任务…</span>
+            ? <span className="thinking" role="status">正在分析任务…</span>
             : <span className="empty-placeholder">[该消息未生成内容]</span>}
         {canRetry && !busy && (
           <button className="btn btn-secondary btn-retry" onClick={onRetry} type="button">

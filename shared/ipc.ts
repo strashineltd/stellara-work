@@ -31,6 +31,9 @@ export type PresetModelId =
   | 'qwen3.8-max'
   | 'custom';
 
+/** v0.9.2 支持的供应商传输协议。OpenAI Chat Completions 已移除。 */
+export type WireApi = 'responses' | 'anthropic';
+
 export interface ModelPreset {
   id: PresetModelId;
   label: string;
@@ -40,8 +43,8 @@ export interface ModelPreset {
   /** 模型上下文窗口（token 数），默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
   contextWindow?: number;
   // v0.9.2 新增：Responses API 相关（可选，兼容旧代码）
-  /** 协议类型：responses（默认）、anthropic 或 chat-completions */
-  wireApi?: 'responses' | 'anthropic' | 'chat-completions';
+  /** 协议类型：内置模型固定 Responses；自定义模型可选 Anthropic。 */
+  wireApi?: WireApi;
   /** Responses 兼容状态 */
   compatibility?: 'verified' | 'unverified' | 'incompatible';
   /** 最大输出 token */
@@ -185,6 +188,8 @@ export interface ChatStreamEvent {
   totals?: { promptTokens: number; completionTokens: number };
   /** 会话内各工具调用次数（由调用方汇总） */
   toolCounts?: Record<string, number>;
+  /** Context Hub 的可序列化视图；UI 只展示，不自行推断门禁。 */
+  contextState?: ContextStateView;
   /** 子代理相关事件（subagent_start / subagent_progress / subagent_done / subagent_summary） */
   subagentId?: string;
   subagentTask?: string;
@@ -204,6 +209,17 @@ export interface ChatStreamEvent {
   planStepIds?: string[];
   /** 子代理关联的上下文版本（stale 检查用） */
   subagentContextRevision?: number;
+  subagentRole?: 'research' | 'build' | 'verify';
+  subagentModelId?: string;
+  /** Context Hub 计算出的输入预算状态。 */
+  contextUsage?: {
+    inputUsageRatio: number;
+    currentInputTokens: number;
+    usableInputBudget: number;
+    nearLimit: boolean;
+    hardLimited: boolean;
+    lastCompactedAt?: string;
+  };
 }
 
 /** 错误类型 — 用于分类 + 引导文案 */
@@ -568,6 +584,9 @@ export interface ModelListItem {
   isActive: boolean;
   createdAt: string;
   contextWindow?: number;
+  wireApi?: WireApi;
+  compatibility?: 'verified' | 'unverified' | 'incompatible';
+  verifiedAt?: string;
 }
 
 export interface SkillDef {
@@ -761,6 +780,31 @@ export interface ContextUsage {
   lastCompactedAt?: string;
 }
 
+/** 渲染层可安全消费的 Context Hub 快照。 */
+export interface ContextStateView {
+  sessionId: string;
+  revision: number;
+  workspaceRevision: number;
+  objective: string;
+  planSteps: Array<{ id: string; description: string; status: string }>;
+  usage: ContextUsage;
+  checkpoint: ContextCheckpoint | null;
+  modifiedFiles: string[];
+  unverifiedFiles: string[];
+  staleEvidence: Array<{ id: string; summary: string }>;
+  taskGate: { ok: boolean; reasons: string[] };
+  subagents: Array<{
+    id: string;
+    task: string;
+    role: 'research' | 'build' | 'verify';
+    modelId?: string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    contextRevision: number;
+    workspaceRevision: number;
+    resultSummary?: string;
+  }>;
+}
+
 /** 文件修改证据 */
 export interface FileModificationEvidence {
   filePath: string;
@@ -800,17 +844,14 @@ export interface ToolExecutionContext {
 /**
  * 根据 baseUrl 自动推断 wireApi 协议类型
  *
- * 规则：
- * - 包含 /responses → 'responses'
- * - 包含 /v1/messages 或 /anthropic → 'anthropic'
- * - 其他 → 'chat-completions'
+ * 规则：仅明确的 Anthropic Messages 地址推断为 anthropic，其余统一使用
+ * Responses API。绝不回退到 Chat Completions。
  */
-export function inferWireApiFromUrl(baseUrl: string): 'responses' | 'anthropic' | 'chat-completions' {
-  if (!baseUrl) return 'chat-completions';
+export function inferWireApiFromUrl(baseUrl: string): WireApi {
+  if (!baseUrl) return 'responses';
   const lower = baseUrl.toLowerCase();
-  if (lower.includes('/responses')) return 'responses';
   if (lower.includes('/v1/messages') || lower.includes('/anthropic')) return 'anthropic';
-  return 'chat-completions';
+  return 'responses';
 }
 
 // ============================================
@@ -842,6 +883,12 @@ export interface ElectronAPI {
     abort: (streamId: string) => void;
     /** 回应一次批准请求（true=同意，false=拒绝） */
     approve: (approvalId: string, approved: boolean) => void;
+  };
+  context: {
+    /** 恢复会话的结构化上下文、revision、验证门禁和最新检查点。 */
+    getSnapshot: (sessionId: string) => Promise<ContextStateView>;
+    /** 在当前 revision 创建一个可恢复检查点。 */
+    createCheckpoint: (sessionId: string) => Promise<ContextStateView>;
   };
   tools: {
     /** 直接调一个 tool（不通过 LLM，用于开发期 / 测试） */

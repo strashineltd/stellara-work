@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { setKey } from './secrets';
 import { getAppDataDir } from './data-dir';
-import type { ThemeName, McpServerConfig } from '../../shared/ipc';
+import type { ThemeName, McpServerConfig, WireApi } from '../../shared/ipc';
 
 let _overrideConfigDir: string | null = null;
 
@@ -33,8 +33,8 @@ export interface ModelEntry {
   /** 模型上下文窗口（token 数）。默认 256000；用户在 onboarding / settings 选 256K/512K/1M */
   contextWindow?: number;
   // v0.9.2 新增：Responses API 相关字段
-  /** 协议类型：responses（默认）、anthropic 或 chat-completions */
-  wireApi?: 'responses' | 'anthropic' | 'chat-completions';
+  /** 协议类型：Responses（默认）或 Anthropic Messages。 */
+  wireApi?: WireApi;
   /** 最大输出 token（供应商支持时生效） */
   maxOutputTokens?: number;
   /** reasoning effort（low/medium/high，供应商支持时生效） */
@@ -143,6 +143,11 @@ export async function upsertModel(entry: ModelEntry): Promise<AppConfig> {
       model: entry.model,
       workDir: entry.workDir,
       contextWindow: entry.contextWindow,
+      wireApi: entry.wireApi ?? existing?.wireApi ?? 'responses',
+      maxOutputTokens: entry.maxOutputTokens ?? existing?.maxOutputTokens,
+      reasoningEffort: entry.reasoningEffort ?? existing?.reasoningEffort,
+      compatibility: entry.compatibility ?? existing?.compatibility,
+      verifiedAt: entry.verifiedAt ?? existing?.verifiedAt,
     };
   } else {
     cfg.models.push(entry);

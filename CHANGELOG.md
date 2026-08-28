@@ -2,21 +2,22 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.9.2] - 2026-08-19
+## [0.9.2] - 2026-08-20
 
 ### Added · 新增
 
-- **Responses API**: native support for OpenAI Responses API; replaces Chat Completions as the primary protocol
+- **Responses API**: all built-in model traffic now uses the Responses API with no legacy protocol fallback
+- **Anthropic Messages**: custom models can explicitly select Anthropic Messages and use the full Agent tool loop
 - **Context Hub**: unified context management with checkpoints, verification evidence, and stale detection
 - **Subagent coordinator**: session-scoped subagent management with role-based concurrency (research/build/verify)
 - **Responses Agent Loop**: new agent loop using ResponseItem[] and function_call_output
 - **Tool execution context**: tools now track session/revision/plan step for audit
-- **Model presets**: DeepSeek-V4-Flash, Qwen3.8-Max (pending verification)
-- **UI enhancements**: Responses API badges, compatibility status, context checkpoint section, task gate, subagent roles
+- **Model presets**: DeepSeek-V4-Flash, Qwen3.8-Max, and GLM-5.3
+- **UI redesign**: calm light/dark workbench, protocol badges, live context revisions, checkpoints, task gate, and subagent roles
 
 ### Changed · 变更
 
-- All model calls now use `POST {baseUrl}/responses` instead of `/chat/completions`
+- Built-in model calls use `POST {baseUrl}/responses`; custom Anthropic configurations use `POST {baseUrl}/v1/messages`
 - Tool results use `function_call_output` instead of `tool_call_id`
 - Context events are now tracked with sequence/revision numbers
 - Subagent coordination moved from global runner to session-scoped coordinator

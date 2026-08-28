@@ -34,6 +34,11 @@ export async function loadModelsConfig(): Promise<ModelConfig | null> {
         apiKey: key,
         workDir: active.workDir as string | undefined,
         isCustom: false,
+        wireApi: (active.wireApi as ModelConfig['wireApi']) ?? 'responses',
+        compatibility: active.compatibility as ModelConfig['compatibility'],
+        maxOutputTokens: active.maxOutputTokens as number | undefined,
+        reasoningEffort: active.reasoningEffort as ModelConfig['reasoningEffort'],
+        contextWindow: active.contextWindow as number | undefined,
       };
     }
     // v1 格式（兜底，正常情况下启动时已迁走）

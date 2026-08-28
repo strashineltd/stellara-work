@@ -131,7 +131,7 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
 
 function WelcomePage({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
   return (
-    <div className="ob-page">
+    <div className="ob-page" data-motion="onboarding-step-enter" data-step="welcome">
       <div className="ob-card">
         <div className="ob-brand">
           <div className="ob-logo" aria-hidden="true">S</div>
@@ -207,7 +207,7 @@ function PickPage({
   onSkip: () => void;
 }) {
   return (
-    <div className="ob-page">
+    <div className="ob-page" data-motion="onboarding-step-enter" data-step="pick">
       <div className="ob-card">
         <div className="ob-brand ob-brand--tight">
           <div className="ob-steps" aria-hidden="true">
@@ -283,7 +283,7 @@ function ConnectionPage({
   const isReconfig = !!initialConfig;
 
   return (
-    <div className="ob-page">
+    <div className="ob-page" data-motion="onboarding-step-enter" data-step="connection">
       <div className="ob-card">
         <button className="btn btn-ghost ob-back" onClick={onBack} type="button">
           返回
@@ -347,16 +347,16 @@ function ConnectionPage({
 
         {/* Status */}
         {saveStatus === 'testing' && (
-          <div className="status-busy" role="status">正在测试连接…</div>
+          <div className="status-busy motion-feedback-enter" role="status">正在测试连接…</div>
         )}
         {saveStatus === 'saving' && (
-          <div className="status-busy" role="status">正在保存配置…</div>
+          <div className="status-busy motion-feedback-enter" role="status">正在保存配置…</div>
         )}
         {saveStatus === 'ok' && (
-          <div className="status-ok">连接成功 · 配置已保存</div>
+          <div className="status-ok motion-feedback-enter" role="status">连接成功 · 配置已保存</div>
         )}
         {saveStatus === 'fail' && (
-          <div className="status-fail">
+          <div className="status-fail motion-feedback-enter" role="alert">
             {saveError}
             <div className="status-fail-hint">
               连接测试失败。请检查：API 密钥 / Base URL / 网络。

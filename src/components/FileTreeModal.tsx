@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import type { FsNode } from '../../shared/ipc';
 import { FileTreeNode, formatSize } from './FileTreeNode';
 import { Icon } from './Icon';
 import { NewEntryMenu } from './files/NewEntryMenu';
+import { presenceRootProps, type PresenceMotionProps } from '../lib/presence-ui';
 
-interface FileTreeModalProps {
+interface FileTreeModalProps extends PresenceMotionProps {
   workDir: string;
   onClose: () => void;
 }
@@ -14,7 +15,7 @@ interface FileTreeModalProps {
  * - 左：树（可展开/折叠）
  * - 右：选中的文件预览
  */
-export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
+export function FileTreeModal({ workDir, onClose, presence }: FileTreeModalProps) {
   const [tree, setTree] = useState<FsNode | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([workDir]));
   const [selected, setSelected] = useState<string | null>(null);
@@ -22,12 +23,52 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const currentWorkDirRef = useRef<string | null>(workDir);
+  const treeRequestRef = useRef(0);
+  const previewRequestRef = useRef(0);
+
+  useLayoutEffect(() => {
+    currentWorkDirRef.current = workDir;
+    treeRequestRef.current += 1;
+    previewRequestRef.current += 1;
+    setTree(null);
+    setExpanded(new Set([workDir]));
+    setSelected(null);
+    setPreview(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+    setTreeError(null);
+
+    return () => {
+      if (currentWorkDirRef.current === workDir) currentWorkDirRef.current = null;
+      treeRequestRef.current += 1;
+      previewRequestRef.current += 1;
+    };
+  }, [workDir]);
+
+  useLayoutEffect(() => {
+    if (presence?.state === 'entering') {
+      closeButtonRef.current?.focus({ preventScroll: true });
+    }
+  }, [presence?.state]);
 
   const loadTree = useCallback(() => {
+    const requestWorkDir = workDir;
+    if (currentWorkDirRef.current !== requestWorkDir) return;
+    const request = ++treeRequestRef.current;
     setTreeError(null);
-    window.electronAPI.fs.listTree(workDir, 4)
-      .then((t) => setTree(t))
-      .catch((e) => setTreeError(e instanceof Error ? e.message : String(e)));
+    window.electronAPI.fs.listTree(requestWorkDir, 4)
+      .then((t) => {
+        if (currentWorkDirRef.current === requestWorkDir && treeRequestRef.current === request) {
+          setTree(t);
+        }
+      })
+      .catch((e) => {
+        if (currentWorkDirRef.current === requestWorkDir && treeRequestRef.current === request) {
+          setTreeError(e instanceof Error ? e.message : String(e));
+        }
+      });
   }, [workDir]);
 
   useEffect(() => {
@@ -36,24 +77,33 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && presence?.state !== 'closing') onClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, presence?.state]);
 
   const loadPreview = useCallback(async (path: string) => {
+    const requestWorkDir = workDir;
+    if (currentWorkDirRef.current !== requestWorkDir) return;
+    const request = ++previewRequestRef.current;
     setSelected(path);
     setPreview(null);
     setPreviewError(null);
     setPreviewLoading(true);
     try {
-      const r = await window.electronAPI.fs.readFile(workDir, path, 100 * 1024);
-      setPreview(r);
+      const r = await window.electronAPI.fs.readFile(requestWorkDir, path, 100 * 1024);
+      if (currentWorkDirRef.current === requestWorkDir && previewRequestRef.current === request) {
+        setPreview(r);
+      }
     } catch (e) {
-      setPreviewError(e instanceof Error ? e.message : String(e));
+      if (currentWorkDirRef.current === requestWorkDir && previewRequestRef.current === request) {
+        setPreviewError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
-      setPreviewLoading(false);
+      if (currentWorkDirRef.current === requestWorkDir && previewRequestRef.current === request) {
+        setPreviewLoading(false);
+      }
     }
   }, [workDir]);
 
@@ -67,7 +117,13 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div
+      className="modal-backdrop"
+      {...presenceRootProps(presence)}
+      onClick={() => {
+        if (presence?.state !== 'closing') onClose();
+      }}
+    >
       <div
         className="modal file-tree-modal"
         role="dialog"
@@ -78,8 +134,18 @@ export function FileTreeModal({ workDir, onClose }: FileTreeModalProps) {
         <div className="file-tree-header">
           <h3 id="file-tree-title">文件浏览 · {workDir}</h3>
           <div className="file-tree-header__actions">
-            <NewEntryMenu workDir={workDir} onCreated={loadTree} />
-            <button className="btn-icon" onClick={onClose} type="button" title="关闭" aria-label="关闭文件浏览" autoFocus>
+            <NewEntryMenu key={workDir} workDir={workDir} onCreated={loadTree} />
+            <button
+              ref={closeButtonRef}
+              className="btn-icon"
+              onClick={() => {
+                if (presence?.state !== 'closing') onClose();
+              }}
+              type="button"
+              title="关闭"
+              aria-label="关闭文件浏览"
+              autoFocus
+            >
               <Icon name="x" />
             </button>
           </div>

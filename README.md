@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A local-first, Codex-style desktop agent</strong> for Windows & macOS.<br/>
-  Bring your own OpenAI-compatible API key — your data stays on your machine.
+  Bring your own Responses API or Anthropic Messages API key — your workspaces stay local.
 </p>
 
 <p align="center">
@@ -56,12 +56,13 @@ Your API key, sessions, files, and configuration **never leave your machine**. S
 
 ## Downloads
 
-**Latest release: v0.9.1**
+**Latest release: v0.9.2**
 
 | Platform | Installer |
 |---|---|
-| macOS (Apple Silicon) | [Stellara Work-0.9.1-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
-| Windows (x64) | [Stellara Work-Setup-0.9.1.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Apple Silicon) | [Stellara Work-0.9.2-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Intel) | [Stellara Work-0.9.2-x64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| Windows (x64) | [Stellara Work-Setup-0.9.2-x64.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
 
 > **Note:** Builds are currently unsigned. On macOS, right-click → Open to bypass Gatekeeper. On Windows, click "More info → Run anyway" in SmartScreen.
 
@@ -111,7 +112,7 @@ npm run package:win  # build Windows NSIS installer
 | DeepSeek-V4-Flash | DeepSeek | ✅ Verified | Available |
 | Qwen3.8-Max | Alibaba Cloud | ⏳ Pending | Pending verification |
 | GLM-5.3 | Zhipu BigModel | ⏳ Pending | Pending verification |
-| Custom | yours | Any Responses API endpoint | Requires verification |
+| Custom | yours | Responses API or Anthropic Messages | Requires connection verification |
 
 > **Note:** GLM-5.2, Kimi-K3, and MiniMax-M3 configurations are preserved but marked as incompatible (no Responses API support). Custom endpoints must pass Function Calling verification to be enabled.
 

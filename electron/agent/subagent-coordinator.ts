@@ -29,8 +29,8 @@ import {
 
 /** 子代理执行器（注入外部实现） */
 export type SubagentRunner = (
-  task: string,
-  id: string,
+  definition: SubagentDef,
+  packet: SubagentContextPacket,
   signal: AbortSignal,
 ) => Promise<{ summary: string; ok: boolean }>;
 
@@ -255,7 +255,23 @@ export class SubagentCoordinator {
 
     try {
       // 执行（context packet 可选：用于调试或日志）
-      const result = await this.runner!(def.task, def.id, signal);
+      const context = this.contextHub.getContext();
+      const currentStep = context.plan.steps.find((step) => step.status === 'in_progress');
+      const packet: SubagentContextPacket = {
+        parentContextRevision: this.contextHub.getRevision(),
+        workspaceRevision: this.contextHub.getWorkspaceRevision(),
+        task: def.task,
+        role: def.role ?? 'research',
+        constraints: [...context.constraints],
+        relevantFiles: def.fileScopes ?? [],
+        relevantDecisions: context.decisions.map((decision) => ({
+          description: decision.description,
+          reason: decision.reason,
+        })),
+        planStep: currentStep ? { id: currentStep.id, description: currentStep.description } : undefined,
+        expectedOutput: def.expectedOutput ?? '返回结论、涉及文件、验证结果和未解决问题。',
+      };
+      const result = await this.runner!(def, packet, signal);
 
       // 更新状态为 completed
       if (state) {
@@ -319,6 +335,9 @@ export class SubagentCoordinator {
       if (typeof defs[i]!.task !== 'string' || defs[i]!.task.trim() === '') {
         return `subagents[${i}].task 不能为空`;
       }
+      if (defs[i]!.role === 'build' && (!defs[i]!.fileScopes || defs[i]!.fileScopes!.length === 0)) {
+        return `build 子代理 ${defs[i]!.id} 必须声明 fileScopes`;
+      }
     }
 
     if (new Set(defs.map(d => d.id)).size !== defs.length) {
@@ -339,12 +358,16 @@ export class SubagentCoordinator {
 
     for (let i = 0; i < buildDefs.length; i++) {
       for (let j = i + 1; j < buildDefs.length; j++) {
-        const scopesA = new Set(buildDefs[i]!.fileScopes);
-        const scopesB = new Set(buildDefs[j]!.fileScopes);
+        const scopesA = buildDefs[i]!.fileScopes ?? [];
+        const scopesB = buildDefs[j]!.fileScopes ?? [];
 
-        for (const file of scopesA) {
-          if (scopesB.has(file)) {
-            conflicts.push(`fileScopes 冲突: ${buildDefs[i]!.id} 和 ${buildDefs[j]!.id} 都包含 ${file}`);
+        for (const left of scopesA) {
+          for (const right of scopesB) {
+            const a = left.replaceAll('\\', '/').replace(/\/$/, '');
+            const b = right.replaceAll('\\', '/').replace(/\/$/, '');
+            if (a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)) {
+              conflicts.push(`fileScopes 冲突: ${buildDefs[i]!.id} 的 ${left} 与 ${buildDefs[j]!.id} 的 ${right} 重叠`);
+            }
           }
         }
       }

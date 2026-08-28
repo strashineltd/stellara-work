@@ -52,6 +52,9 @@ function render(ui: React.ReactElement) {
   return {
     container,
     getByText: (text: string) => Array.from(container.querySelectorAll<HTMLElement>('*')).find((element) => element.textContent === text) ?? null,
+    rerender: (next: React.ReactElement) => {
+      act(() => root!.render(next));
+    },
     unmount: () => {
       act(() => root!.unmount());
       document.body.removeChild(container);
@@ -99,6 +102,32 @@ describe('HomeDashboard', () => {
     // 视觉为纯箭头图标按钮，无文字
     expect(btn?.querySelector('.app-icon')).toBeTruthy();
     expect(btn?.textContent?.trim()).toBe('');
+  });
+
+  it('passes the send button as the task return target', () => {
+    const onSend = vi.fn();
+    const { container } = render(
+      <HomeDashboard section="home" {...BASE_PROPS} input="执行任务" onSend={onSend} />,
+    );
+    const button = container.querySelector('.dashboard-send-button') as HTMLButtonElement;
+
+    fireClick(button);
+
+    expect(onSend).toHaveBeenCalledWith(button);
+  });
+
+  it('passes the composer as the task return target for the keyboard shortcut', () => {
+    const onSend = vi.fn();
+    const { container } = render(
+      <HomeDashboard section="home" {...BASE_PROPS} input="执行任务" onSend={onSend} />,
+    );
+    const composer = container.querySelector('textarea') as HTMLTextAreaElement;
+
+    act(() => {
+      composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
+    });
+
+    expect(onSend).toHaveBeenCalledWith(composer);
   });
 
   it('falls back to recent projects when there are no sessions', () => {
@@ -233,5 +262,60 @@ describe('HomeDashboard', () => {
     const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} onPickAttachments={onPickAttachments} />);
     fireClick(container.querySelector('.attach-btn'));
     expect(onPickAttachments).toHaveBeenCalledOnce();
+  });
+
+  it('marks the home root with page-enter and page identity', () => {
+    const { container } = render(<HomeDashboard section="home" {...BASE_PROPS} />);
+    const main = container.querySelector('main.dashboard--home') as HTMLElement;
+    expect(main).toBeTruthy();
+    expect(main.dataset.motion).toBe('page-enter');
+    expect(main.dataset.page).toBe('home');
+  });
+
+  it('marks the projects root with page-enter and page identity', () => {
+    const { container } = render(<HomeDashboard section="projects" {...BASE_PROPS} />);
+    const main = container.querySelector('main.dashboard--projects') as HTMLElement;
+    expect(main).toBeTruthy();
+    expect(main.dataset.motion).toBe('page-enter');
+    expect(main.dataset.page).toBe('projects');
+  });
+
+  it('keeps the page root node stable across local updates', () => {
+    const { container, rerender } = render(<HomeDashboard section="home" {...BASE_PROPS} />);
+    const main = container.querySelector('main.dashboard--home') as HTMLElement;
+    rerender(<HomeDashboard section="home" {...BASE_PROPS} input="执行任务" busy={false} />);
+    expect(container.querySelector('main.dashboard--home')).toBe(main);
+  });
+
+  it('replaces the host root on home→projects while preserving banner snooze', () => {
+    vi.useFakeTimers();
+    try {
+      const { container, getByText, rerender } = render(
+        <HomeDashboard section="home" {...BASE_PROPS} modelMissing />,
+      );
+      expect(container.textContent).toContain('尚未配置模型');
+      fireClick(getByText('稍后提醒'));
+      expect(container.textContent).not.toContain('尚未配置模型');
+
+      const homeRoot = container.querySelector('main.dashboard--home') as HTMLElement;
+      rerender(<HomeDashboard section="projects" {...BASE_PROPS} modelMissing />);
+
+      const projectsRoot = container.querySelector('main.dashboard--projects') as HTMLElement;
+      expect(projectsRoot).toBeTruthy();
+      expect(projectsRoot.dataset.motion).toBe('page-enter');
+      expect(projectsRoot.dataset.page).toBe('projects');
+      expect(homeRoot.isConnected).toBe(false);
+
+      rerender(<HomeDashboard section="home" {...BASE_PROPS} modelMissing />);
+
+      const newHomeRoot = container.querySelector('main.dashboard--home') as HTMLElement;
+      expect(newHomeRoot).toBeTruthy();
+      expect(newHomeRoot).not.toBe(homeRoot);
+      expect(newHomeRoot.dataset.motion).toBe('page-enter');
+      expect(newHomeRoot.dataset.page).toBe('home');
+      expect(container.textContent).not.toContain('尚未配置模型');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
