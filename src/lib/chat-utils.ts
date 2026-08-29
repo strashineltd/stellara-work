@@ -94,20 +94,29 @@ export function applyStreamEventToEntries(
   }
   const copy = [...prev];
   if (ev.type === 'reasoning' && ev.content) {
-    // 思考过程：合并到上一个 reasoning 条目，保证"思考中"块连贯
+    // 思考过程：合并到上一个 reasoning 条目，保证"思考中"块连贯；
+    // 思考显示在回复之前（当前末尾是空 assistant 时插到它前面）
     const last = copy[copy.length - 1];
     if (last && last.kind === 'reasoning') {
       copy[copy.length - 1] = { ...last, content: last.content + ev.content };
+    } else if (last && last.kind === 'assistant' && !last.content) {
+      copy.splice(copy.length - 1, 0, presentEntry({ kind: 'reasoning', content: ev.content }, 'status'));
     } else {
       copy.push(presentEntry({ kind: 'reasoning', content: ev.content }, 'status'));
     }
     return copy;
   }
   if (ev.type === 'content' && ev.content) {
-    const last = copy[copy.length - 1];
-    if (last && last.kind === 'assistant') {
-      copy[copy.length - 1] = { ...last, content: last.content + ev.content };
+    // 追加到最后一个 assistant 条目（中间可能有 reasoning / tool_result 等块，
+    // 不能只看最后一条，否则 reasoning 之后的内容会被静默丢弃）
+    for (let i = copy.length - 1; i >= 0; i--) {
+      const entry = copy[i]!;
+      if (entry.kind === 'assistant') {
+        copy[i] = { ...entry, content: entry.content + ev.content };
+        return copy;
+      }
     }
+    // 没有进行中的 assistant（如切换会话后的残留事件）→ 丢弃，不污染当前视图
     return copy;
   }
   if (ev.type === 'tool_call' && ev.toolCall) {
@@ -209,7 +218,11 @@ export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
       assistantEntry.presentation = historyPresentation(m, 'assistant');
       out.push(assistantEntry);
       if (toolCalls) {
+        // 去重：DB 脏数据里同 id 可能重复（key 冲突会导致 React 渲染错乱）
+        const seen = new Set<string>();
         for (const tc of toolCalls) {
+          if (seen.has(tc.id)) continue;
+          seen.add(tc.id);
           out.push({
             kind: 'tool_call',
             id: tc.id,

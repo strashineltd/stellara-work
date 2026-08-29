@@ -51,6 +51,45 @@ describe('applyStreamEventToEntries — reasoning events', () => {
     expect(next).toHaveLength(2);
     expect(next![1]).toMatchObject({ kind: 'reasoning', content: '继续思考' });
   });
+
+  it('reasoning 插入到空 assistant 之前（思考显示在回复前）', () => {
+    const { next } = apply(
+      [{ kind: 'assistant', content: '' }],
+      { type: 'reasoning', content: '先思考' },
+    );
+    expect(next).toHaveLength(2);
+    expect(next![0]).toMatchObject({ kind: 'reasoning', content: '先思考' });
+    expect(next![1]).toMatchObject({ kind: 'assistant', content: '' });
+  });
+
+  it('reasoning 之后到达的 content 追加到 assistant，而不是被丢弃', () => {
+    // 回归：加 reasoning 展示后，content 只看最后一条导致回复丢失
+    let entries: DisplayEntry[] = [{ kind: 'assistant', content: '' }];
+    for (const ev of [
+      { type: 'reasoning', content: '思考中' },
+      { type: 'content', content: '你好！' },
+      { type: 'content', content: ' 👋' },
+    ] as ChatStreamEvent[]) {
+      const { next } = apply(entries, ev);
+      entries = next!;
+    }
+    expect(entries).toHaveLength(2);
+    expect(entries[1]!).toMatchObject({ kind: 'assistant', content: '你好！ 👋' });
+  });
+
+  it('工具调用之后的 content 仍追加到 assistant', () => {
+    let entries: DisplayEntry[] = [{ kind: 'assistant', content: '' }];
+    for (const ev of [
+      { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{}' } } },
+      { type: 'tool_result', toolResult: { name: 'read_file', toolCallId: 'c1', result: { ok: true, output: 'x' } } },
+      { type: 'content', content: '完成' },
+    ] as ChatStreamEvent[]) {
+      const { next } = apply(entries, ev);
+      entries = next!;
+    }
+    const assistant = entries.find((e) => e.kind === 'assistant');
+    expect(assistant).toMatchObject({ kind: 'assistant', content: '完成' });
+  });
 });
 
 describe('applyStreamEventToEntries — plan events', () => {
