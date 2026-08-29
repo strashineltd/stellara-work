@@ -1074,6 +1074,14 @@ async function runAnthropicLoopForIpc(
       mainWindow.webContents.send('chat-stream', { streamId, event });
     }
   };
+  // 记忆注入按项目检索：解析会话所属项目
+  let memoryProjectId: string | undefined;
+  try {
+    const { getSession } = await import('./store/db');
+    memoryProjectId = getSession(request.sessionId)?.projectId ?? undefined;
+  } catch {
+    // 会话解析失败时按个人记忆注入
+  }
 
   const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
   const last = messages[messages.length - 1];
@@ -1166,6 +1174,7 @@ async function runAnthropicLoopForIpc(
       activeSkill,
       extraTools,
       planExtraTools,
+      memoryProjectId,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1241,6 +1250,14 @@ async function runResponsesLoopForIpc(
       mainWindow.webContents.send('chat-stream', { streamId, event });
     }
   };
+  // 记忆注入按项目检索：解析会话所属项目
+  let memoryProjectId: string | undefined;
+  try {
+    const { getSession } = await import('./store/db');
+    memoryProjectId = getSession(request.sessionId)?.projectId ?? undefined;
+  } catch {
+    // 会话解析失败时按个人记忆注入
+  }
 
   const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
   const last = messages[messages.length - 1];
@@ -1339,6 +1356,7 @@ async function runResponsesLoopForIpc(
       activeSkill,
       extraTools: extraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
       planExtraTools: planExtraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
+      memoryProjectId,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

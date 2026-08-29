@@ -57,6 +57,8 @@ export interface ResponsesLoopOptions {
   extraTools?: ResponseFunctionTool[];
   /** plan 模式下额外注入的只读工具（如 planVisible 的 MCP 工具） */
   planExtraTools?: ResponseFunctionTool[];
+  /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
+  memoryProjectId?: string;
   /**
    * 危险工具被调用前的批准回调。
    * 返回 true 放行；false 拒绝。
@@ -176,6 +178,7 @@ export async function* runResponsesLoop(
     const { retrieveMemoriesForInjection } = await import('../memory/memory-injector');
     const { memories, promptBlock } = await retrieveMemoriesForInjection(userMessage, {
       maxMemories: 10,
+      projectId: options.memoryProjectId,
     });
     if (promptBlock) {
       systemPrompt += `\n\n${promptBlock}`;

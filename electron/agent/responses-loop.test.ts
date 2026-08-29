@@ -18,6 +18,8 @@ beforeEach(async () => {
   mockRequiresApproval.mockReset();
   mockRequiresApproval.mockResolvedValue(false);
   mockMcpCallTool.mockClear();
+  mockRetrieveMemories.mockClear();
+  mockRetrieveMemories.mockResolvedValue({ memories: [], promptBlock: null });
   streamQueue.length = 0;
   responseRequests.length = 0;
 });
@@ -38,7 +40,7 @@ const DEFAULT_MODEL: ModelConfig = {
 
 // 模拟 ResponsesClient 与 mcpManager（MCP 审批策略查询）
 // streamQueue：每个测试可注入自定义事件流（shift 一次后回落到默认流）
-const { mockRequiresApproval, mockMcpCallTool, streamQueue, defaultStreamEvents, responseRequests } = vi.hoisted(() => {
+const { mockRequiresApproval, mockMcpCallTool, mockRetrieveMemories, streamQueue, defaultStreamEvents, responseRequests } = vi.hoisted(() => {
   const defaultStreamEvents = [
     {
       type: 'response.output_text.delta',
@@ -62,11 +64,16 @@ const { mockRequiresApproval, mockMcpCallTool, streamQueue, defaultStreamEvents,
   return {
     mockRequiresApproval: vi.fn().mockResolvedValue(false),
     mockMcpCallTool: vi.fn().mockResolvedValue({ ok: true, output: 'ok' }),
+    mockRetrieveMemories: vi.fn().mockResolvedValue({ memories: [], promptBlock: null }),
     streamQueue: [] as Array<() => Array<Record<string, unknown>>>,
     defaultStreamEvents,
     responseRequests: [] as Array<{ tools?: Array<{ name: string }> }>,
   };
 });
+
+vi.mock('../memory/memory-injector', () => ({
+  retrieveMemoriesForInjection: mockRetrieveMemories,
+}));
 
 vi.mock('../llm/responses', () => {
   return {
@@ -297,6 +304,23 @@ describe('runResponsesLoop', () => {
       expect(onApproval).toHaveBeenCalledWith(
         expect.objectContaining({ function: expect.objectContaining({ name: 'write_file' }) }),
       );
+    });
+  });
+
+  it('记忆注入携带会话所属项目 id（按项目检索项目记忆）', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    for await (const _ev of runResponsesLoop('测试任务', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+      memoryProjectId: 'proj-1',
+    })) {
+      // 消费事件
+    }
+    expect(mockRetrieveMemories).toHaveBeenCalledWith('测试任务', {
+      maxMemories: 10,
+      projectId: 'proj-1',
     });
   });
 

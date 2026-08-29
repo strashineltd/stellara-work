@@ -9,12 +9,17 @@ import type { ModelConfig } from '../../shared/ipc';
 const mockCreate = vi.fn();
 
 // 模拟 mcpManager：仅需 requiresApproval（MCP 工具审批策略查询）
-const { mockRequiresApproval } = vi.hoisted(() => ({
+const { mockRequiresApproval, mockRetrieveMemories } = vi.hoisted(() => ({
   mockRequiresApproval: vi.fn().mockResolvedValue(false),
+  mockRetrieveMemories: vi.fn().mockResolvedValue({ memories: [], promptBlock: null }),
 }));
 
 vi.mock('../mcp/mcp-manager', () => ({
   mcpManager: { requiresApproval: mockRequiresApproval },
+}));
+
+vi.mock('../memory/memory-injector', () => ({
+  retrieveMemoriesForInjection: mockRetrieveMemories,
 }));
 
 const model: ModelConfig = {
@@ -33,6 +38,8 @@ beforeEach(async () => {
   mockCreate.mockReset();
   mockRequiresApproval.mockReset();
   mockRequiresApproval.mockResolvedValue(false);
+  mockRetrieveMemories.mockClear();
+  mockRetrieveMemories.mockResolvedValue({ memories: [], promptBlock: null });
   workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-anthropic-loop-'));
   await fs.writeFile(path.join(workDir, 'note.txt'), 'hello anthropic');
 });
@@ -116,6 +123,31 @@ describe('runAnthropicAgentLoop', () => {
       message.role === 'user' && Array.isArray(message.content)
         && message.content.some((block: { type?: string }) => block.type === 'tool_result'));
     expect(resultMessage.content[0].content).toContain('用户拒绝了此操作');
+  });
+
+  it('记忆注入携带会话所属项目 id', async () => {
+    mockCreate.mockResolvedValueOnce({
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+      usage: { input_tokens: 12, output_tokens: 4 },
+      content: [{ type: 'text', text: '完成' }],
+    });
+
+    const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+    for await (const _ev of runAnthropicAgentLoop('测试任务', {
+      model,
+      cwd: workDir,
+      sessionId: 'sub-session',
+      contextHub: hub,
+      allowSubagents: false,
+      client: { create: mockCreate },
+      memoryProjectId: 'proj-1',
+    })) {
+      // 消费事件
+    }
+    expect(mockRetrieveMemories).toHaveBeenCalledWith('测试任务', {
+      maxMemories: 10,
+      projectId: 'proj-1',
+    });
   });
 
   it('plan 模式下把 planExtraTools 注入请求工具列表', async () => {

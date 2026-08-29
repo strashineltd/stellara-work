@@ -1,3 +1,4 @@
+import log from 'electron-log/main';
 import type {
   ChatMessage,
   ChatStreamEvent,
@@ -29,6 +30,8 @@ export interface AnthropicLoopOptions {
   extraTools?: OpenAITool[];
   /** plan 模式下额外注入的只读工具（如 planVisible 的 MCP 工具） */
   planExtraTools?: OpenAITool[];
+  /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
+  memoryProjectId?: string;
   signal?: AbortSignal;
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
@@ -90,6 +93,38 @@ export async function* runAnthropicAgentLoop(
     options.activeSkill,
   );
   if (options.rolePrompt) system += `\n\n${options.rolePrompt}`;
+
+  // 注入相关记忆（个人 + 项目 + workspace + 高重要度偏好）
+  try {
+    const { retrieveMemoriesForInjection } = await import('../memory/memory-injector');
+    const { memories, promptBlock } = await retrieveMemoriesForInjection(userMessage, {
+      maxMemories: 10,
+      projectId: options.memoryProjectId,
+    });
+    if (promptBlock) {
+      system += `\n\n${promptBlock}`;
+      yield {
+        type: 'memory_context',
+        memories: memories.map((m) => ({
+          kind: m.kind,
+          content: m.content,
+          importance: m.importance,
+          source: m.source,
+        })),
+      };
+      for (const mem of memories) {
+        await options.contextHub.commitEvent('memory_injected', {
+          id: mem.id,
+          scope: mem.scope,
+          kind: mem.kind,
+          content: mem.content,
+          source: mem.source || 'session:current',
+        }, options.agentId ?? 'main');
+      }
+    }
+  } catch (err) {
+    log.warn('记忆注入失败，继续执行:', err);
+  }
 
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
