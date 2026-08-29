@@ -158,8 +158,21 @@ describe('SettingsSkillsPanel', () => {
     mocks = installApi(null);
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
-    expect(byText(container, '先配置模型（选择工作目录）或创建项目后即可使用')).toBeTruthy();
+    expect(byText(container, '先配置模型，再在首页创建项目')).toBeTruthy();
     expect(mocks.skillsList).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes configured model without project and guides to create a project', async () => {
+    mocks = installApi({ ...CONFIGURED, workDir: undefined });
+    mocks.projectsList.mockResolvedValue([]);
+    const onClose = vi.fn();
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} onClose={onClose} />);
+
+    expect(byText(container, '在首页创建项目（选择工作文件夹）后即可使用')).toBeTruthy();
+    const createBtn = container.querySelector('.settings-skill-goto-create-project');
+    expect(createBtn).toBeTruthy();
+    await fireClick(createBtn);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to the most recently updated project workDir when the model has none', async () => {

@@ -10,6 +10,8 @@ interface SettingsSkillsPanelProps {
   refreshKey?: number;
   /** 切换到设置面板的其他标签页（空状态引导用） */
   onSwitchTab?: (tab: import('../SettingsPanel').SettingsTab) => void;
+  /** 关闭设置面板（空状态引导去首页创建项目用） */
+  onClose?: () => void;
 }
 
 /** 「复制模板」按钮写入剪贴板的新技能文件模板（markdown frontmatter） */
@@ -30,8 +32,10 @@ function errorMessage(e: unknown): string {
  * 新建/编辑折叠表单（.md）、启用开关（写 frontmatter enabled）、内联删除确认、
  * 展开 prompt / 复制模板；下方渲染 MCP 服务器管理区块（SettingsMcpSection）。
  */
-export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab }: SettingsSkillsPanelProps) {
+export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab, onClose }: SettingsSkillsPanelProps) {
   const [workDir, setWorkDir] = useState<string | null>(null);
+  /** 是否已配置模型（区分引导文案：无模型 → 配置模型；有模型无项目 → 创建项目） */
+  const [hasModel, setHasModel] = useState(false);
   const [skills, setSkills] = useState<SkillDetailedItem[]>([]);
   const [skillErrors, setSkillErrors] = useState<SkillLoadError[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -71,6 +75,7 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab }: 
       try {
         // workDir 解析链：当前模型配置 → 最近更新项目的 workDir
         const list = await window.electronAPI.models.list();
+        setHasModel(!!list.configured);
         let dir = list.configured?.workDir ?? null;
         if (!dir) {
           const projects = await window.electronAPI.projects.list();
@@ -225,16 +230,36 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab }: 
       {!workDir && (
         <div className="empty-hint settings-skill-empty-hint">
           <span>
-            技能保存在工作目录的 <code>skills/</code> 文件夹中。先配置模型（选择工作目录）或创建项目后即可使用。
+            {hasModel ? (
+              <>
+                技能保存在项目工作目录的 <code>skills/</code> 文件夹中。在首页创建项目（选择工作文件夹）后即可使用。
+              </>
+            ) : (
+              <>
+                技能保存在工作目录的 <code>skills/</code> 文件夹中。先配置模型，再在首页创建项目（选择工作文件夹）即可使用。
+              </>
+            )}
           </span>
-          <button
-            className="btn btn-secondary btn-small settings-skill-goto-models"
-            onClick={() => onSwitchTab?.('models')}
-            type="button"
-          >
-            <Icon name="settings" size={14} />
-            去配置模型
-          </button>
+          {hasModel ? (
+            <button
+              className="btn btn-secondary btn-small settings-skill-goto-create-project"
+              onClick={onClose}
+              type="button"
+              title="关闭设置面板，在首页创建项目"
+            >
+              <Icon name="folder" size={14} />
+              去创建项目
+            </button>
+          ) : (
+            <button
+              className="btn btn-secondary btn-small settings-skill-goto-models"
+              onClick={() => onSwitchTab?.('models')}
+              type="button"
+            >
+              <Icon name="settings" size={14} />
+              去配置模型
+            </button>
+          )}
         </div>
       )}
 

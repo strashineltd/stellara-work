@@ -172,6 +172,7 @@ export function SettingsPanel({ initialTab = 'models', focusRequest = 0, onClose
                 refreshKey={refreshKey}
                 onChanged={() => setRefreshKey((k) => k + 1)}
                 onSwitchTab={setTab}
+                onClose={onClose}
               />
             )}
             {tab === 'shortcuts' && (
