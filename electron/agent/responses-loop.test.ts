@@ -15,6 +15,11 @@ beforeEach(async () => {
   getDb();
   initContextTables();
   createSession({ id: 'sess-001', title: 'Test', modelId: 'test' });
+  mockRequiresApproval.mockReset();
+  mockRequiresApproval.mockResolvedValue(false);
+  mockMcpCallTool.mockClear();
+  streamQueue.length = 0;
+  responseRequests.length = 0;
 });
 
 afterEach(async () => {
@@ -31,34 +36,57 @@ const DEFAULT_MODEL: ModelConfig = {
   isCustom: false,
 };
 
-// 模拟 ResponsesClient
+// 模拟 ResponsesClient 与 mcpManager（MCP 审批策略查询）
+// streamQueue：每个测试可注入自定义事件流（shift 一次后回落到默认流）
+const { mockRequiresApproval, mockMcpCallTool, streamQueue, defaultStreamEvents, responseRequests } = vi.hoisted(() => {
+  const defaultStreamEvents = [
+    {
+      type: 'response.output_text.delta',
+      output_index: 0,
+      content_index: 0,
+      delta: 'Hello',
+    },
+    {
+      type: 'response.completed',
+      response: {
+        id: 'resp-001',
+        object: 'response',
+        model: 'test',
+        status: 'completed',
+        output: [
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] },
+        ],
+      },
+    },
+  ];
+  return {
+    mockRequiresApproval: vi.fn().mockResolvedValue(false),
+    mockMcpCallTool: vi.fn().mockResolvedValue({ ok: true, output: 'ok' }),
+    streamQueue: [] as Array<() => Array<Record<string, unknown>>>,
+    defaultStreamEvents,
+    responseRequests: [] as Array<{ tools?: Array<{ name: string }> }>,
+  };
+});
+
 vi.mock('../llm/responses', () => {
   return {
     ResponsesClient: class {
-      async *createStream() {
-        yield {
-          type: 'response.output_text.delta',
-          output_index: 0,
-          content_index: 0,
-          delta: 'Hello',
-        };
-        yield {
-          type: 'response.completed',
-          response: {
-            id: 'resp-001',
-            object: 'response',
-            model: 'test',
-            status: 'completed',
-            output: [
-              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] },
-            ],
-          },
-        };
+      async *createStream(request: unknown) {
+        if (request && typeof request === 'object') responseRequests.push(request as { tools?: Array<{ name: string }> });
+        const events = streamQueue.length > 0 ? streamQueue.shift()!() : defaultStreamEvents;
+        for (const event of events) yield event;
       }
       cancel() {}
     },
   };
 });
+
+vi.mock('../mcp/mcp-manager', () => ({
+  mcpManager: {
+    requiresApproval: mockRequiresApproval,
+    callTool: mockMcpCallTool,
+  },
+}));
 
 describe('runResponsesLoop', () => {
   it('生成 content 事件', async () => {
@@ -169,5 +197,148 @@ describe('runResponsesLoop', () => {
     }
 
     expect(events).toContain('error');
+  });
+
+  describe('MCP 工具审批', () => {
+    /** 构造一轮 function_call 流：首次返回工具调用，之后回落默认流 → 循环自然结束 */
+    function functionCallStream(name: string): Array<Record<string, unknown>> {
+      return [
+        {
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: { type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: '{}', status: 'in_progress' },
+        },
+        {
+          type: 'response.function_call_arguments.done',
+          output_index: 0,
+          item_id: 'fc-1',
+          arguments: '{}',
+        },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-001',
+            object: 'response',
+            model: 'test',
+            status: 'completed',
+            output: [{ type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: '{}', status: 'completed' }],
+          },
+        },
+      ];
+    }
+
+    it('approval=always 时 MCP 工具调用先征求用户批准，拒绝后不执行', async () => {
+      mockRequiresApproval.mockResolvedValue(true);
+      streamQueue.push(() => functionCallStream('mcp__s1__write'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const onApproval = vi.fn().mockResolvedValue(false);
+      const events: string[] = [];
+
+      const gen = runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        onApproval,
+      });
+      for await (const event of gen) events.push(event.type);
+
+      expect(mockRequiresApproval).toHaveBeenCalledWith('mcp__s1__write');
+      expect(onApproval).toHaveBeenCalledTimes(1);
+      expect(onApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ function: expect.objectContaining({ name: 'mcp__s1__write' }) }),
+      );
+      expect(mockMcpCallTool).not.toHaveBeenCalled();
+      expect(events).toContain('done');
+    });
+
+    it('approval=never 时 MCP 工具直接执行，不征求批准', async () => {
+      mockRequiresApproval.mockResolvedValue(false);
+      streamQueue.push(() => functionCallStream('mcp__s1__write'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const onApproval = vi.fn();
+      const events: string[] = [];
+
+      const gen = runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        onApproval,
+      });
+      for await (const event of gen) events.push(event.type);
+
+      expect(onApproval).not.toHaveBeenCalled();
+      expect(mockMcpCallTool).toHaveBeenCalledWith('mcp__s1__write', {});
+      expect(events).toContain('tool_result');
+      expect(events).toContain('done');
+    });
+
+    it('内置危险工具不查询 MCP 策略，仍走审批', async () => {
+      streamQueue.push(() => functionCallStream('write_file'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const onApproval = vi.fn().mockResolvedValue(false);
+
+      for await (const _event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        onApproval,
+      })) {
+        // 消费事件
+      }
+
+      expect(mockRequiresApproval).not.toHaveBeenCalled();
+      expect(onApproval).toHaveBeenCalledTimes(1);
+      expect(onApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ function: expect.objectContaining({ name: 'write_file' }) }),
+      );
+    });
+  });
+
+  it('plan 模式下注入 planExtraTools 且不暴露执行工具', async () => {
+    streamQueue.push(() => [
+      {
+        type: 'response.output_text.delta',
+        output_index: 0,
+        content_index: 0,
+        delta: '1. 读取文件\n2. 完成',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp-001',
+          object: 'response',
+          model: 'test',
+          status: 'completed',
+          output: [
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '1. 读取文件\n2. 完成' }] },
+          ],
+        },
+      },
+    ]);
+
+    const hub = new ContextHub('sess-001', tmpDir);
+    const events: string[] = [];
+    const gen = runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+      planMode: true,
+      planExtraTools: [
+        { type: 'function', name: 'mcp__s1__read', description: 'read', parameters: { type: 'object' }, strict: false },
+      ],
+    });
+    for await (const event of gen) events.push(event.type);
+
+    expect(events).toContain('plan');
+    const firstRequest = responseRequests[0]!;
+    expect(firstRequest.tools!.some((t) => t.name === 'mcp__s1__read')).toBe(true);
+    expect(firstRequest.tools!.some((t) => t.name === 'write_file')).toBe(false);
   });
 });

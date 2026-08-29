@@ -339,4 +339,48 @@ describe('InputArea', () => {
     act(() => vi.advanceTimersByTime(1));
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('renders the active skill chip and clears it on click', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    let root: Root;
+    const onClear = vi.fn();
+    act(() => {
+      root = createRoot(container);
+      root.render(
+        <InputArea
+          input=""
+          busy={false}
+          planMode={false}
+          slash={EMPTY_SLASH}
+          hasWorkDir={true}
+          onInputChange={vi.fn()}
+          onPlanToggle={vi.fn()}
+          onSend={vi.fn()}
+          onSlashApply={vi.fn()}
+          onSlashOpen={vi.fn()}
+          onSlashClose={vi.fn()}
+          onSlashIdxChange={vi.fn()}
+          onLazyLoadSkills={vi.fn()}
+          attachments={[]}
+          onAttachmentsChange={vi.fn()}
+          onPickAttachments={vi.fn()}
+          onAddAttachmentPaths={vi.fn()}
+          activeSkill={{ name: 'code-review', description: '审查代码', prompt: '请审查' }}
+          onActiveSkillClear={onClear}
+        />,
+      );
+    });
+
+    const chip = container.querySelector('.active-skill-chip');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toContain('/code-review');
+
+    const clearBtn = container.querySelector('.active-skill-chip__clear') as HTMLButtonElement;
+    fireClick(clearBtn);
+    expect(onClear).toHaveBeenCalledTimes(1);
+
+    act(() => root!.unmount());
+    document.body.removeChild(container);
+  });
 });

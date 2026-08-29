@@ -14,6 +14,7 @@ import { ContextHub, type PlanStep, type TaskContext } from '../context/context-
 import { allTools, invokeTool, planModeTools } from './tools';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { parsePlanFromContent } from './plan-parser';
+import { mcpManager } from '../mcp/mcp-manager';
 
 export interface AnthropicLoopOptions {
   model: ModelConfig;
@@ -26,6 +27,8 @@ export interface AnthropicLoopOptions {
   skills?: SkillDef[];
   activeSkill?: SkillDef;
   extraTools?: OpenAITool[];
+  /** plan 模式下额外注入的只读工具（如 planVisible 的 MCP 工具） */
+  planExtraTools?: OpenAITool[];
   signal?: AbortSignal;
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
@@ -50,7 +53,9 @@ export async function* runAnthropicAgentLoop(
   const executableTools = options.allowSubagents === false
     ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
     : allTools;
-  let tools = (planMode ? planModeTools : [...executableTools, ...(options.extraTools ?? [])])
+  let tools = (planMode
+    ? [...planModeTools, ...(options.planExtraTools ?? [])]
+    : [...executableTools, ...(options.extraTools ?? [])])
     .map(toAnthropicTool);
   const messages: AnthropicMessage[] = [];
   const history = options.history ?? [];
@@ -203,7 +208,10 @@ export async function* runAnthropicAgentLoop(
         }
       }
 
-      if (DANGEROUS_TOOLS.has(name) && options.onApproval) {
+      // 内置危险工具或 MCP 审批策略要求时，等待用户批准（无 onApproval 时保持现有直通行为）
+      const requiresApproval =
+        DANGEROUS_TOOLS.has(name) || (name.startsWith('mcp__') && (await mcpManager.requiresApproval(name)));
+      if (requiresApproval && options.onApproval) {
         const approved = await options.onApproval({ id: callId, type: 'function', function: { name, arguments: argsJson } });
         if (!approved) {
           const output = JSON.stringify({ ok: false, error: '用户拒绝了此操作' });

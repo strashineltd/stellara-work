@@ -112,6 +112,8 @@ export function MainView(props: MainViewProps) {
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
+  // /skill 精确调用：选中的技能（发送一次后自动清除）
+  const [activeSkill, setActiveSkill] = useState<SkillDef | null>(null);
   // 本次任务注入的相关记忆（memory_context 事件）
   const [memoryContext, setMemoryContext] = useState<MemoryContextItem[]>([]);
   // 本次任务的上下文统计（usage/tool_result/summary 事件累计）
@@ -506,8 +508,11 @@ export function MainView(props: MainViewProps) {
         messages: history,
         planMode: usePlanMode,
         attachments: sentAttachments,
+        activeSkillName: activeSkill?.name,
       });
       setStreamId(result.streamId);
+      // 技能只对本次请求生效，发送成功后清除
+      setActiveSkill(null);
       for await (const ev of result.events) {
         const eventKey = nextLiveKey();
         setEntries((prev) => {
@@ -767,7 +772,9 @@ export function MainView(props: MainViewProps) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleSlashApply(skill: SkillDef) {
-    setInput(skill.prompt);
+    // 移除输入框中的 /skill 占位文本，激活技能（chip 显示；发送时随请求注入正文）
+    setInput((prev) => prev.replace(/^\/\S*\s*/, ''));
+    setActiveSkill(skill);
     setSlash((s) => ({ ...s, slashOpen: false }));
   }
 
@@ -981,6 +988,8 @@ export function MainView(props: MainViewProps) {
                 onSlashClose={() => setSlash((s) => ({ ...s, slashOpen: false }))}
                 onSlashIdxChange={(idx) => setSlash((s) => ({ ...s, slashIdx: idx }))}
                 onLazyLoadSkills={handleLoadSkills}
+                activeSkill={activeSkill}
+                onActiveSkillClear={() => setActiveSkill(null)}
               />
             </>
           ) : activeSection === 'memory' ? (

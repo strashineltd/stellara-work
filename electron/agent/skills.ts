@@ -13,6 +13,12 @@ export function formatSkillsForPrompt(skills: SkillDef[]): string {
   for (const s of skills) {
     lines.push(`- ${s.name}: ${s.description}`);
   }
+  lines.push(
+    '',
+    '使用技能的步骤：先用 read_file 读取 skills/ 目录下对应技能文件（文件名与技能名一致，.md 或 .json 格式；' +
+      '不确定文件名时先用 list_files 查看 skills/ 目录），完整阅读正文后再按其规则执行。',
+    '技能正文不会出现在本提示中——只有读取对应文件后才能获得完整的执行规则。',
+  );
   return lines.join('\n');
 }
 
@@ -144,6 +150,24 @@ export async function loadSkillsWithErrors(
 export async function loadSkills(workDir: string): Promise<SkillDef[]> {
   const { items } = await loadSkillsWithErrors(workDir);
   return items.filter((s) => s.enabled !== false);
+}
+
+/**
+ * 按引用查找技能（/skill 精确调用用）。
+ * 优先精确匹配 frontmatter name；其次按文件名（含/不含 .md/.json 后缀，
+ * 子目录技能取 basename）匹配。返回 null 表示未找到。
+ */
+export function findSkill(items: SkillDetailedItem[], ref: string): SkillDetailedItem | null {
+  if (!ref.trim()) return null;
+  const nameMatch = items.find((s) => s.name === ref);
+  if (nameMatch) return nameMatch;
+  const bare = ref.replace(/\.(md|json)$/, '');
+  const fileMatch = items.find((s) => {
+    if (s.file === ref || s.file === `${bare}.md` || s.file === `${bare}.json`) return true;
+    const base = s.file.split('/').pop() ?? '';
+    return base === ref || base === `${bare}.md` || base === `${bare}.json`;
+  });
+  return fileMatch ?? null;
 }
 
 /**

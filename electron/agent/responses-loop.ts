@@ -23,6 +23,7 @@ import type {
 } from '../../shared/responses';
 import { ResponsesClient } from '../llm/responses';
 import { allTools, planModeTools, invokeTool } from './tools';
+import { mcpManager } from '../mcp/mcp-manager';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { ContextHub, type TaskContext, type PlanStep } from '../context/context-hub';
 import { parsePlanFromContent } from './plan-parser';
@@ -54,6 +55,8 @@ export interface ResponsesLoopOptions {
   signal?: AbortSignal;
   /** 额外注入的工具（如 MCP 工具） */
   extraTools?: ResponseFunctionTool[];
+  /** plan 模式下额外注入的只读工具（如 planVisible 的 MCP 工具） */
+  planExtraTools?: ResponseFunctionTool[];
   /**
    * 危险工具被调用前的批准回调。
    * 返回 true 放行；false 拒绝。
@@ -207,7 +210,7 @@ export async function* runResponsesLoop(
     ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
     : allTools;
   let tools = planMode
-    ? planModeTools.map(t => convertToResponseTool(t))
+    ? [...planModeTools.map(t => convertToResponseTool(t)), ...(options.planExtraTools ?? [])]
     : [...executableTools.map(t => convertToResponseTool(t)), ...(options.extraTools ?? [])];
 
   // 主循环
@@ -407,8 +410,11 @@ export async function* runResponsesLoop(
         }
       }
 
-      // 检查是否需要审批
-      const needsApproval = forceApprovalMode || DANGEROUS_TOOLS.has(fc.name);
+      // 检查是否需要审批：强制审批模式 / 内置危险工具 / MCP 策略（approval 配置）
+      const needsApproval =
+        forceApprovalMode ||
+        DANGEROUS_TOOLS.has(fc.name) ||
+        (fc.name.startsWith('mcp__') && (await mcpManager.requiresApproval(fc.name)));
       if (needsApproval && onApproval) {
         const toolCall: ToolCall = {
           id: fc.call_id,

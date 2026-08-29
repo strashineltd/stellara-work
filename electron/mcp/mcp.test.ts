@@ -163,7 +163,27 @@ describe('mcp-tools', () => {
   it('mcpToolToOpenAITool handles missing description and schema', () => {
     const tool = mcpToolToOpenAITool('srv', { name: 'ping' });
     expect(tool.function.name).toBe('mcp__srv__ping');
-    expect(tool.function.description).toBe('');
+    // 空描述生成兜底文案（可读、可被模型理解）
+    expect(tool.function.description).toBe('工具 ping（来自 MCP 服务器 srv）');
+    expect(tool.function.parameters).toEqual({ type: 'object' });
+  });
+
+  it('mcpToolToOpenAITool trims whitespace-only descriptions', () => {
+    const tool = mcpToolToOpenAITool('srv', { name: 'ping', description: '   ' });
+    expect(tool.function.description).toBe('工具 ping（来自 MCP 服务器 srv）');
+  });
+
+  it('mcpToolToOpenAITool degrades oversized schemas to a loose object', () => {
+    const bigProperties: Record<string, unknown> = {};
+    for (let i = 0; i < 300; i++) {
+      bigProperties[`field_${i}`] = { type: 'string', description: 'x'.repeat(30) };
+    }
+    const tool = mcpToolToOpenAITool('srv', {
+      name: 'big',
+      description: 'Big tool',
+      inputSchema: { type: 'object', properties: bigProperties },
+    });
+    expect(JSON.stringify(tool.function.parameters).length).toBeLessThan(4096);
     expect(tool.function.parameters).toEqual({ type: 'object' });
   });
 
@@ -333,6 +353,23 @@ describe('McpManager', () => {
       expect(tools.map((t) => t.function.name)).toEqual(['mcp__s1__read']);
     });
 
+    it('planOnly 只返回 planVisible 服务器的工具', async () => {
+      await seed(
+        { ...stdioCfg, planVisible: true },
+        { ...httpCfg, planVisible: false },
+      );
+      const tools = await mcpManager.getEnabledTools(true);
+      expect(tools.map((t) => t.function.name)).toEqual(['mcp__s1__read', 'mcp__s1__write']);
+      // 只连接了 planVisible 的服务器
+      expect(mockClient).toHaveBeenCalledTimes(1);
+    });
+
+    it('planOnly 时非 planVisible 服务器即使启用也不返回', async () => {
+      await seed({ ...stdioCfg, planVisible: false });
+      expect(await mcpManager.getEnabledTools(true)).toEqual([]);
+      expect(mockClient).not.toHaveBeenCalled();
+    });
+
     it('caches connections across calls', async () => {
       await seed(stdioCfg);
       await mcpManager.getEnabledTools();
@@ -354,6 +391,41 @@ describe('McpManager', () => {
       await mcpManager.updateServer('s1', { tools: ['write'] });
       expect((await mcpManager.getEnabledTools()).map((t) => t.function.name)).toEqual(['mcp__s1__write']);
       expect(mockClient).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('requiresApproval', () => {
+    it('非 MCP 工具名不触发审批', async () => {
+      await seed(stdioCfg);
+      expect(await mcpManager.requiresApproval('read_file')).toBe(false);
+    });
+
+    it('服务器不存在时不触发审批（调用本身会失败）', async () => {
+      await seed(stdioCfg);
+      expect(await mcpManager.requiresApproval('mcp__nope__read')).toBe(false);
+    });
+
+    it('缺省策略为 always：全部工具需要审批', async () => {
+      await seed(stdioCfg);
+      expect(await mcpManager.requiresApproval('mcp__s1__read')).toBe(true);
+      expect(await mcpManager.requiresApproval('mcp__s1__write')).toBe(true);
+    });
+
+    it('approval=always 全部工具需要审批', async () => {
+      await seed({ ...stdioCfg, approval: 'always' });
+      expect(await mcpManager.requiresApproval('mcp__s1__read')).toBe(true);
+    });
+
+    it('approval=never 全部直接执行', async () => {
+      await seed({ ...stdioCfg, approval: 'never' });
+      expect(await mcpManager.requiresApproval('mcp__s1__read')).toBe(false);
+      expect(await mcpManager.requiresApproval('mcp__s1__write')).toBe(false);
+    });
+
+    it('approval=dangerous 仅列表内工具需要审批', async () => {
+      await seed({ ...stdioCfg, approval: 'dangerous', dangerousTools: ['write'] });
+      expect(await mcpManager.requiresApproval('mcp__s1__write')).toBe(true);
+      expect(await mcpManager.requiresApproval('mcp__s1__read')).toBe(false);
     });
   });
 

@@ -1089,19 +1089,26 @@ async function runAnthropicLoopForIpc(
   try {
     const cwd = model.workDir!;
 
-    // 加载 skills
+    // 加载 skills + /skill 精确调用目标
     let skills: import('../shared/ipc').SkillDef[] = [];
+    let activeSkill: import('../shared/ipc').SkillDef | undefined;
     try {
-      const { loadSkills } = await import('./agent/skills');
-      skills = await loadSkills(cwd);
+      const { loadSkillsWithErrors, findSkill } = await import('./agent/skills');
+      const { items } = await loadSkillsWithErrors(cwd);
+      skills = items.filter((s) => s.enabled !== false);
+      if (request.activeSkillName) {
+        activeSkill = findSkill(items.filter((s) => s.enabled !== false), request.activeSkillName) ?? undefined;
+      }
     } catch {
       // skills 加载失败不影响 agent 运行
     }
 
     let extraTools: import('../shared/ipc').OpenAITool[] = [];
+    let planExtraTools: import('../shared/ipc').OpenAITool[] = [];
     try {
       const { mcpManager } = await import('./mcp/mcp-manager');
       extraTools = await mcpManager.getEnabledTools();
+      planExtraTools = await mcpManager.getEnabledTools(true);
     } catch {
       // MCP 不可用不阻断 Agent
     }
@@ -1122,7 +1129,9 @@ async function runAnthropicLoopForIpc(
       planMode: request.planMode ?? false,
       platform: { platform: process.platform, arch: process.arch },
       skills,
+      activeSkill,
       extraTools,
+      planExtraTools,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1242,20 +1251,27 @@ async function runResponsesLoopForIpc(
   try {
     const cwd = model.workDir!;
 
-    // 加载 skills
+    // 加载 skills + /skill 精确调用目标
     let skills: import('../shared/ipc').SkillDef[] = [];
+    let activeSkill: import('../shared/ipc').SkillDef | undefined;
     try {
-      const { loadSkills } = await import('./agent/skills');
-      skills = await loadSkills(cwd);
+      const { loadSkillsWithErrors, findSkill } = await import('./agent/skills');
+      const { items } = await loadSkillsWithErrors(cwd);
+      skills = items.filter((s) => s.enabled !== false);
+      if (request.activeSkillName) {
+        activeSkill = findSkill(items.filter((s) => s.enabled !== false), request.activeSkillName) ?? undefined;
+      }
     } catch {
       // skills 加载失败不影响 agent 运行
     }
 
-    // 加载 MCP 工具
+    // 加载 MCP 工具（全量 + plan 模式可见的子集）
     let extraTools: import('../shared/ipc').OpenAITool[] = [];
+    let planExtraTools: import('../shared/ipc').OpenAITool[] = [];
     try {
       const { mcpManager } = await import('./mcp/mcp-manager');
       extraTools = await mcpManager.getEnabledTools();
+      planExtraTools = await mcpManager.getEnabledTools(true);
     } catch {
       // MCP 工具加载失败不影响 agent 运行
     }
@@ -1278,7 +1294,9 @@ async function runResponsesLoopForIpc(
       planMode: request.planMode ?? false,
       platform: { platform: process.platform, arch: process.arch },
       skills,
+      activeSkill,
       extraTools: extraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
+      planExtraTools: planExtraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

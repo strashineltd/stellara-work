@@ -3,6 +3,7 @@ import { useRef } from 'react';
 import { AttachmentPicker } from '../attachments/AttachmentPicker';
 import { usePresence } from '../../hooks/usePresence';
 import { presenceRootProps } from '../../lib/presence-ui';
+import { Icon } from '../Icon';
 
 export interface SlashState {
   slashOpen: boolean;
@@ -18,6 +19,9 @@ interface InputAreaProps {
   slash: SlashState;
   hasWorkDir: boolean;
   attachments: AttachmentMeta[];
+  /** /skill 激活的技能（chip 显示，发送后由调用方清除） */
+  activeSkill?: SkillDef | null;
+  onActiveSkillClear?: () => void;
   onInputChange: (value: string) => void;
   onPlanToggle: () => void;
   onSend: () => void;
@@ -103,6 +107,22 @@ export function InputArea(props: InputAreaProps) {
         onAddPaths={props.onAddAttachmentPaths}
         disabled={props.busy}
       />
+      {props.activeSkill && (
+        <div className="active-skill-chip" role="status">
+          <span className="active-skill-chip__label">技能</span>
+          <span className="active-skill-chip__name">/{props.activeSkill.name}</span>
+          <button
+            className="icon-btn active-skill-chip__clear"
+            aria-label={`取消技能 ${props.activeSkill.name}`}
+            title="取消技能"
+            onClick={props.onActiveSkillClear}
+            disabled={props.busy}
+            type="button"
+          >
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         className="input-chat"

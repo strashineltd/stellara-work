@@ -94,11 +94,16 @@ export class McpManager {
     this.cache.delete(serverId);
   }
 
-  async getEnabledTools(): Promise<OpenAITool[]> {
+  /**
+   * 获取注入 agent 的 MCP 工具。
+   * planOnly=true 时只返回 planVisible 服务器的工具（plan 模式下给 agent 做只读规划用）。
+   */
+  async getEnabledTools(planOnly = false): Promise<OpenAITool[]> {
     const servers = await this.listServers();
     const out: OpenAITool[] = [];
     for (const s of servers) {
       if (!s.enabled) continue;
+      if (planOnly && !s.planVisible) continue;
       try {
         const { tools } = await this.getEntry(s.id);
         const allowed =
@@ -109,6 +114,24 @@ export class McpManager {
       }
     }
     return out;
+  }
+
+  /**
+   * 查询一个工具调用是否需要用户批准。
+   * 非 MCP 工具（不以 mcp__ 开头）一律返回 false——内置工具的审批由
+   * agent loop 的 DANGEROUS_TOOLS 单独判断，这里只负责 MCP 部分。
+   * 策略：approval 缺省 always；dangerous 时仅 dangerousTools 列表内的工具需要批准。
+   */
+  async requiresApproval(fullName: string): Promise<boolean> {
+    const parsed = parseMcpToolName(fullName);
+    if (!parsed) return false;
+    const server = (await this.listServers()).find((s) => s.id === parsed.serverId);
+    // 服务器不存在时调用本身会失败，无需审批
+    if (!server) return false;
+    const policy = server.approval ?? 'always';
+    if (policy === 'never') return false;
+    if (policy === 'always') return true;
+    return (server.dangerousTools ?? []).includes(parsed.toolName);
   }
 
   async callTool(fullName: string, args: unknown): Promise<ToolResult> {

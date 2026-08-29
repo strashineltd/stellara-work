@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { McpServerConfig, McpTestResult, McpToolInfo } from '../../../shared/ipc';
+import type { McpApprovalPolicy, McpServerConfig, McpTestResult, McpToolInfo } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 
 interface SettingsMcpSectionProps {
@@ -43,6 +43,8 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
   const [toolsByServer, setToolsByServer] = useState<Record<string, McpToolInfo[]>>({});
   /** 勾选状态：null = 默认全选（tools 存 []）；Set = 白名单 */
   const [checkedByServer, setCheckedByServer] = useState<Record<string, Set<string> | null>>({});
+  /** dangerous 模式下"需审批工具"的编辑草稿（未保存时本地持有） */
+  const [dangerousDraftByServer, setDangerousDraftByServer] = useState<Record<string, string>>({});
 
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
@@ -140,6 +142,44 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
     setCheckedByServer((p) => ({ ...p, [server.id]: whitelist.length === 0 ? null : new Set(whitelist) }));
     void window.electronAPI.mcp
       .update(server.id, { tools: whitelist })
+      .catch((e) => setError(errorMessage(e)));
+    onChanged?.();
+  }
+
+  /** 更新服务器审批策略并即时保存 */
+  function changeApproval(server: McpServerConfig, approval: McpApprovalPolicy) {
+    setServers((prev) => prev.map((s) => (s.id === server.id ? { ...s, approval } : s)));
+    if (approval === 'dangerous') {
+      setDangerousDraftByServer((prev) => ({
+        ...prev,
+        [server.id]: (server.dangerousTools ?? []).join(', '),
+      }));
+    }
+    void window.electronAPI.mcp
+      .update(server.id, { approval })
+      .catch((e) => setError(errorMessage(e)));
+    onChanged?.();
+  }
+
+  /** 切换 plan 模式可见性并即时保存 */
+  function changePlanVisible(server: McpServerConfig, planVisible: boolean) {
+    setServers((prev) => prev.map((s) => (s.id === server.id ? { ...s, planVisible } : s)));
+    void window.electronAPI.mcp
+      .update(server.id, { planVisible })
+      .catch((e) => setError(errorMessage(e)));
+    onChanged?.();
+  }
+
+  /** 保存 dangerous 模式下需审批的工具名（逗号分隔，blur 时提交） */
+  function commitDangerousTools(server: McpServerConfig) {
+    const draft = (dangerousDraftByServer[server.id] ?? '').trim();
+    const tools = draft
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    setServers((prev) => prev.map((s) => (s.id === server.id ? { ...s, dangerousTools: tools } : s)));
+    void window.electronAPI.mcp
+      .update(server.id, { dangerousTools: tools })
       .catch((e) => setError(errorMessage(e)));
     onChanged?.();
   }
@@ -284,6 +324,42 @@ export function SettingsMcpSection({ onChanged, refreshKey = 0 }: SettingsMcpSec
                     </div>
                   </div>
                 )}
+                <div className="settings-mcp-approval">
+                  <label htmlFor={`mcp-approval-${server.id}`}>调用审批</label>
+                  <select
+                    id={`mcp-approval-${server.id}`}
+                    className="settings-mcp-approval__select"
+                    value={server.approval ?? 'always'}
+                    onChange={(e) => changeApproval(server, e.target.value as McpApprovalPolicy)}
+                  >
+                    <option value="always">全部工具需批准（默认）</option>
+                    <option value="dangerous">仅指定工具需批准</option>
+                    <option value="never">无需批准</option>
+                  </select>
+                </div>
+                {server.approval === 'dangerous' && (
+                  <div className="settings-mcp-dangerous">
+                    <label htmlFor={`mcp-dangerous-${server.id}`}>需批准的工具（逗号分隔）</label>
+                    <input
+                      id={`mcp-dangerous-${server.id}`}
+                      type="text"
+                      placeholder="例如 write, delete"
+                      value={dangerousDraftByServer[server.id] ?? (server.dangerousTools ?? []).join(', ')}
+                      onChange={(e) =>
+                        setDangerousDraftByServer((prev) => ({ ...prev, [server.id]: e.target.value }))
+                      }
+                      onBlur={() => commitDangerousTools(server)}
+                    />
+                  </div>
+                )}
+                <label className="settings-mcp-plan-visible">
+                  <input
+                    type="checkbox"
+                    checked={server.planVisible ?? false}
+                    onChange={(e) => changePlanVisible(server, e.target.checked)}
+                  />
+                  <span>plan 模式下可见（规划阶段可调用该服务器工具）</span>
+                </label>
               </div>
               <button
                 className={`settings-switch ${server.enabled ? 'on' : ''}`}

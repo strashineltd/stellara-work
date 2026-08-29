@@ -108,6 +108,8 @@ export interface ChatRequest {
   approvalTimeoutMs?: number;
   /** 本次发送附带的附件元数据（Agent 提示词注入附件说明） */
   attachments?: AttachmentMeta[];
+  /** /skill 精确调用：技能名称（或文件名）。主进程在 workDir/skills 中查找并注入正文。 */
+  activeSkillName?: string;
 }
 
 export interface ApprovalRequest {
@@ -620,6 +622,14 @@ export interface SkillListDetailedResponse {
 // MCP 相关
 // ============================================
 
+/**
+ * MCP 工具调用审批策略。
+ * - always：该服务器所有工具调用都需要用户批准（默认）
+ * - dangerous：仅 dangerousTools 列出的工具需要批准
+ * - never：全部直接执行（风险自负）
+ */
+export type McpApprovalPolicy = 'always' | 'dangerous' | 'never';
+
 export interface McpServerConfig {
   id: string;
   name: string;
@@ -635,6 +645,12 @@ export interface McpServerConfig {
   enabled: boolean;
   /** 空 = 全部 */
   tools?: string[];
+  /** 工具调用审批策略；缺省 always */
+  approval?: McpApprovalPolicy;
+  /** approval='dangerous' 时需审批的工具名列表（不含 mcp__ 前缀） */
+  dangerousTools?: string[];
+  /** plan 模式下是否向 agent 暴露该服务器的工具（默认 false） */
+  planVisible?: boolean;
 }
 
 export interface McpToolInfo {

@@ -2553,6 +2553,47 @@ html[data-platform='darwin'] .sidebar {
   box-shadow: var(--shadow-sm);
 }
 
+/* /skill 激活技能 chip */
+.active-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-bg-content);
+  font-size: 11px;
+  justify-self: start;
+}
+
+.active-skill-chip__label {
+  color: var(--color-text-faint);
+}
+
+.active-skill-chip__name {
+  font-weight: 600;
+  color: var(--color-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.active-skill-chip__clear {
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: none;
+  color: var(--color-text-faint);
+  cursor: pointer;
+}
+
+.active-skill-chip__clear:hover {
+  color: var(--color-danger);
+}
+
 .input-chat {
   width: 100%;
   min-height: 62px;
@@ -6465,6 +6506,81 @@ html[data-page-hidden] .kbd.rec {
 .settings-mcp-tools__hint {
   margin-top: 3px;
   color: var(--color-text-faint);
+}
+
+/* 调用审批策略选择 */
+.settings-mcp-approval {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-mcp-approval label {
+  font-size: 11px;
+  color: var(--color-text-soft);
+  white-space: nowrap;
+}
+
+.settings-mcp-approval__select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--color-text);
+  background: var(--color-bg-content);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.settings-mcp-approval__select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.settings-mcp-dangerous {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.settings-mcp-dangerous label {
+  font-size: 11px;
+  color: var(--color-text-soft);
+  white-space: nowrap;
+}
+
+.settings-mcp-dangerous input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--color-text);
+  background: var(--color-bg-content);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.settings-mcp-dangerous input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.settings-mcp-plan-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-soft);
+  cursor: pointer;
+}
+
+.settings-mcp-plan-visible input {
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
 }
 
 /* 添加表单触发器 */

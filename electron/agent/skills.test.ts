@@ -9,6 +9,7 @@ import {
   buildSkillMarkdown,
   mergeSkillFrontmatter,
   sanitizeSkillName,
+  findSkill,
 } from './skills';
 
 let tmpDir: string;
@@ -190,6 +191,13 @@ describe('formatSkillsForPrompt', () => {
     expect(text).toContain('审查代码');
     expect(text).toContain('写文档');
   });
+
+  it('明确指示先读取技能文件正文再执行', () => {
+    const text = formatSkillsForPrompt([{ name: 'code-review', description: '审查代码', prompt: '...' }]);
+    expect(text).toContain('read_file');
+    expect(text).toContain('skills/');
+    expect(text).toContain('技能正文不会出现在本提示中');
+  });
 });
 
 describe('loadSkills markdown format', () => {
@@ -242,6 +250,14 @@ describe('enabled flag', () => {
     await writeSkill('skills/old.json', JSON.stringify({ name: 'old', description: 'x', prompt: 'y' }));
     const res = await loadSkillsWithErrors(tmpDir);
     expect(res.items[0]!.enabled).toBeUndefined();
+  });
+
+  it('子目录技能的 enabled: false 同样被 loadSkills 过滤', async () => {
+    await writeSkill('skills/review/off.md', '---\nname: off\ndescription: 关闭\nenabled: false\n---\n正文');
+    await writeSkill('skills/review/on.md', '---\nname: on\ndescription: 开启\n---\n正文');
+    const all = await loadSkillsWithErrors(tmpDir);
+    expect(all.items.find((s) => s.name === 'off')!.enabled).toBe(false);
+    expect((await loadSkills(tmpDir)).map((s) => s.name)).toEqual(['on']);
   });
 });
 
@@ -297,6 +313,31 @@ describe('mergeSkillFrontmatter', () => {
     expect(merged).toContain('# 注释');
     expect(merged).toContain('description: 新描述');
     expect(merged).not.toContain('旧描述');
+  });
+});
+
+describe('findSkill', () => {
+  const items = [
+    { name: 'code-review', description: 'd', prompt: 'p', format: 'md' as const, file: 'code-review.md' },
+    { name: '架构审查', description: 'd', prompt: 'p', format: 'md' as const, file: 'review/architecture.md' },
+    { name: 'legacy', description: 'd', prompt: 'p', format: 'json' as const, file: 'legacy.json' },
+  ];
+
+  it('按 frontmatter name 精确匹配', () => {
+    expect(findSkill(items, 'code-review')?.file).toBe('code-review.md');
+    expect(findSkill(items, '架构审查')?.file).toBe('review/architecture.md');
+  });
+
+  it('按文件名匹配（含/不含扩展名）', () => {
+    expect(findSkill(items, 'legacy.json')?.file).toBe('legacy.json');
+    expect(findSkill(items, 'legacy')?.file).toBe('legacy.json');
+    expect(findSkill(items, 'architecture')?.file).toBe('review/architecture.md');
+  });
+
+  it('未找到返回 null；空引用返回 null', () => {
+    expect(findSkill(items, 'nonexistent')).toBeNull();
+    expect(findSkill(items, '')).toBeNull();
+    expect(findSkill(items, '   ')).toBeNull();
   });
 });
 
