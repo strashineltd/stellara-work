@@ -6,6 +6,8 @@ describe('BUILD_MODE_SYSTEM_PROMPT', () => {
     expect(BUILD_MODE_SYSTEM_PROMPT).toContain('先读后改');
     expect(BUILD_MODE_SYSTEM_PROMPT).toContain('先搜后读');
     expect(BUILD_MODE_SYSTEM_PROMPT).toContain('改完必验');
+    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('需求不明先澄清');
+    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('行动先说明');
   });
 
   it('contains verification guidance', () => {
