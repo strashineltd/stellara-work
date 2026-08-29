@@ -23,6 +23,36 @@ function apply(prev: DisplayEntry[], ev: ChatStreamEvent, present?: PresentEntry
   return { next, setPendingApproval, setPendingPlanApproval };
 }
 
+describe('applyStreamEventToEntries — reasoning events', () => {
+  it('reasoning event pushes a reasoning entry', () => {
+    const { next } = apply([], { type: 'reasoning', content: '第一步：分析需求' });
+    expect(next).toHaveLength(1);
+    expect(next![0]).toMatchObject({ kind: 'reasoning', content: '第一步：分析需求' });
+  });
+
+  it('consecutive reasoning deltas merge into the same entry', () => {
+    let entries: DisplayEntry[] = [];
+    for (const ev of [
+      { type: 'reasoning', content: '第一步' },
+      { type: 'reasoning', content: '第二步' },
+    ] as ChatStreamEvent[]) {
+      const { next } = apply(entries, ev);
+      entries = next!;
+    }
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!).toMatchObject({ kind: 'reasoning', content: '第一步第二步' });
+  });
+
+  it('reasoning after content starts a new entry', () => {
+    const { next } = apply(
+      [{ kind: 'assistant', content: '正文' }],
+      { type: 'reasoning', content: '继续思考' },
+    );
+    expect(next).toHaveLength(2);
+    expect(next![1]).toMatchObject({ kind: 'reasoning', content: '继续思考' });
+  });
+});
+
 describe('applyStreamEventToEntries — plan events', () => {
   it('plan event pushes a plan entry with all steps pending', () => {
     const { next } = apply([], {

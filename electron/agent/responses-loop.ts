@@ -270,7 +270,8 @@ export async function* runResponsesLoop(
           assistantText += result.content ?? '';
           yield { type: 'content', content: result.content };
         } else if (result.type === 'reasoning') {
-          // reasoning 事件（UI 可选展示）
+          // 思考过程透传给 UI（折叠展示）
+          if (result.content) yield { type: 'reasoning', content: result.content };
         } else if (result.type === 'function_call' && result.functionCall) {
           functionCalls.set(result.functionCall.call_id, result.functionCall);
         } else if (result.type === 'completed') {
@@ -674,7 +675,7 @@ function handleStreamEvent(
       return { type: 'content', content: event.delta };
 
     case 'response.reasoning_text.delta':
-      return { type: 'reasoning' };
+      return { type: 'reasoning', content: event.delta };
 
     case 'response.output_item.done':
       if (event.item.type !== 'function_call') return { type: 'content', content: '' };

@@ -134,6 +134,7 @@ export interface UsageInfo {
 export interface ChatStreamEvent {
   type:
     | 'content'
+    | 'reasoning'
     | 'tool_call'
     | 'tool_result'
     | 'error'

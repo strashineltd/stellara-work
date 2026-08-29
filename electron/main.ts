@@ -1085,12 +1085,20 @@ async function runAnthropicLoopForIpc(
     userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
   }
 
-  const contextHub = new ContextHub(
-    request.sessionId,
-    model.workDir || '.',
-    model.contextWindow || 256000,
-    model.maxOutputTokens || 16384,
-  );
+  // 防御：初始化失败（如数据库表缺失）时向 UI 回传错误，而不是无事件挂起
+  let contextHub: ContextHub;
+  try {
+    contextHub = new ContextHub(
+      request.sessionId,
+      model.workDir || '.',
+      model.contextWindow || 256000,
+      model.maxOutputTokens || 16384,
+    );
+  } catch (err) {
+    send({ type: 'error', error: `会话上下文初始化失败：${err instanceof Error ? err.message : String(err)}` });
+    send({ type: 'done' });
+    return;
+  }
   const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
   attachContextEvents(contextHub, send);
 
@@ -1245,12 +1253,20 @@ async function runResponsesLoopForIpc(
   }
 
   // 创建 ContextHub 和 SubagentCoordinator
-  const contextHub = new ContextHub(
-    request.sessionId,
-    model.workDir || '.',
-    model.contextWindow || 256000,
-    model.maxOutputTokens || 16384,
-  );
+  // 防御：初始化失败（如数据库表缺失）时向 UI 回传错误，而不是无事件挂起
+  let contextHub: ContextHub;
+  try {
+    contextHub = new ContextHub(
+      request.sessionId,
+      model.workDir || '.',
+      model.contextWindow || 256000,
+      model.maxOutputTokens || 16384,
+    );
+  } catch (err) {
+    send({ type: 'error', error: `会话上下文初始化失败：${err instanceof Error ? err.message : String(err)}` });
+    send({ type: 'done' });
+    return;
+  }
 
   const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
 
@@ -1656,8 +1672,11 @@ app.whenReady().then(async () => {
     log.error('config 迁移失败', err);
   }
   try {
-    const { initDb, getDb } = await import('./store/db');
+    const { initDb, initContextTables, getDb } = await import('./store/db');
     initDb();
+    // Context Hub 表（response_items / context_events / checkpoints）：
+    // 未初始化会导致 chat:start 在 ContextHub 构造时崩溃且无事件回传
+    initContextTables();
     // Memory OS: 初始化记忆存储
     const { setMemoryDb } = await import('./memory/memory-store');
     setMemoryDb(getDb);

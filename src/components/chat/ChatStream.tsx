@@ -91,6 +91,12 @@ export function ChatStream(props: ChatStreamProps) {
                   workDir={props.workDir}
                 />
               )}
+              {e.kind === 'reasoning' && (
+                <details className="reasoning-block" open>
+                  <summary>思考中…</summary>
+                  <pre className="reasoning-block__content">{e.content}</pre>
+                </details>
+              )}
               {e.kind === 'tool_call' && <ToolCallCard name={e.name} args={e.args} />}
               {e.kind === 'tool_result' && e.meta?.kind === 'edit' && (
                 <DiffCard path={e.meta.path} workDir={props.workDir} before={e.meta.before} after={e.meta.after} />

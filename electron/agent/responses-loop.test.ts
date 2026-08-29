@@ -300,6 +300,48 @@ describe('runResponsesLoop', () => {
     });
   });
 
+  it('透传 reasoning 思考事件给 UI', async () => {
+    streamQueue.push(() => [
+      {
+        type: 'response.reasoning_text.delta',
+        output_index: 0,
+        content_index: 0,
+        delta: '思考中：先分析需求',
+      },
+      {
+        type: 'response.output_text.delta',
+        output_index: 0,
+        content_index: 0,
+        delta: 'Hello',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp-001',
+          object: 'response',
+          model: 'test',
+          status: 'completed',
+          output: [
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] },
+          ],
+        },
+      },
+    ]);
+
+    const hub = new ContextHub('sess-001', tmpDir);
+    const reasoning: string[] = [];
+    for await (const ev of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      if (ev.type === 'reasoning' && ev.content) reasoning.push(ev.content);
+    }
+
+    expect(reasoning).toEqual(['思考中：先分析需求']);
+  });
+
   it('plan 模式下注入 planExtraTools 且不暴露执行工具', async () => {
     streamQueue.push(() => [
       {

@@ -18,6 +18,7 @@ export interface EntryPresentation {
 export type DisplayEntry = (
   | { kind: 'user'; content: string; attachments?: AttachmentMeta[] }
   | { kind: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | { kind: 'reasoning'; content: string }
   | { kind: 'tool_call'; id: string; name: string; args: string }
   | { kind: 'tool_result'; toolCallId?: string; name: string; ok: boolean; output: string; error?: string; meta?: ToolResultMeta }
   | { kind: 'error'; message: string; meta?: import('../../shared/ipc').ErrorMeta }
@@ -92,6 +93,16 @@ export function applyStreamEventToEntries(
     return null;
   }
   const copy = [...prev];
+  if (ev.type === 'reasoning' && ev.content) {
+    // 思考过程：合并到上一个 reasoning 条目，保证"思考中"块连贯
+    const last = copy[copy.length - 1];
+    if (last && last.kind === 'reasoning') {
+      copy[copy.length - 1] = { ...last, content: last.content + ev.content };
+    } else {
+      copy.push(presentEntry({ kind: 'reasoning', content: ev.content }, 'status'));
+    }
+    return copy;
+  }
   if (ev.type === 'content' && ev.content) {
     const last = copy[copy.length - 1];
     if (last && last.kind === 'assistant') {

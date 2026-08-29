@@ -2353,6 +2353,46 @@ html[data-platform='darwin'] .sidebar {
   white-space: pre-wrap;
 }
 
+/* 模型思考过程（reasoning）折叠块 */
+.reasoning-block {
+  margin: 2px 0 6px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-soft);
+  font-size: var(--fs-xs);
+}
+
+.reasoning-block summary {
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--color-text-faint);
+  font-weight: 600;
+  user-select: none;
+  list-style: none;
+}
+
+.reasoning-block summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+
+.reasoning-block[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.reasoning-block__content {
+  max-height: 240px;
+  margin: 0;
+  padding: 0 10px 8px;
+  overflow: auto;
+  color: var(--color-text-faint);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
 /* Markdown is treated as document content, not a chat bubble. */
 .md-content {
   color: var(--color-text);
