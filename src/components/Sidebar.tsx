@@ -86,6 +86,10 @@ export function Sidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [search, setSearch] = useState('');
+  /** 内容搜索匹配的 session id（sessions.search 异步结果） */
+  const [contentMatchIds, setContentMatchIds] = useState<string[]>([]);
+  /** 项目筛选：'all' | 'unassigned' | 项目 id */
+  const [projectFilter, setProjectFilter] = useState<string>('all');
   const [sessionMenu, setSessionMenu] = useState<SessionMenuState | null>(null);
   const [projectMenu, setProjectMenu] = useState<ProjectMenuState | null>(null);
   const [projectMenuSourceRemoved, setProjectMenuSourceRemoved] = useState(false);
@@ -120,11 +124,32 @@ export function Sidebar({
     });
   }, [projects]);
 
-  // 按项目分组会话
+  // 内容搜索：防抖 300ms 调主进程（LIKE 匹配消息内容 + 标题）
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) {
+      setContentMatchIds([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void window.electronAPI.sessions.search(q)
+        .then(setContentMatchIds)
+        .catch(() => setContentMatchIds([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // 按项目分组会话（支持内容搜索与项目筛选）
   const { projectGroups, unassigned } = useMemo(() => {
-    const filtered = search
-      ? sessions.filter((s) => s.title.toLowerCase().includes(search.toLowerCase()))
-      : sessions;
+    const query = search.trim().toLowerCase();
+    const matchIds = new Set(contentMatchIds);
+    const filtered = sessions.filter((s) => {
+      if (projectFilter === 'unassigned' && s.projectId) return false;
+      if (projectFilter !== 'all' && projectFilter !== 'unassigned' && s.projectId !== projectFilter) return false;
+      if (!query) return true;
+      // 标题即时匹配；内容匹配依赖异步结果
+      return s.title.toLowerCase().includes(query) || matchIds.has(s.id);
+    });
     const knownProjectIds = new Set(projects.map((project) => project.id));
 
     const groupMap = new Map<string, SessionSummary[]>();
@@ -144,7 +169,7 @@ export function Sidebar({
       projectGroups: groupMap,
       unassigned: unassignedList,
     };
-  }, [projects, sessions, search]);
+  }, [projects, sessions, search, contentMatchIds, projectFilter]);
 
   // 搜索时展开包含匹配项的分组，避免在 render/useMemo 中更新 state。
   useEffect(() => {
@@ -750,17 +775,34 @@ export function Sidebar({
         )}
       </div>
 
+      {/* 项目筛选 */}
+      <div className="sidebar-filter">
+        <select
+          className="sidebar-filter-select"
+          value={projectFilter}
+          onChange={(e) => setProjectFilter(e.target.value)}
+          aria-label="按项目筛选工作记录"
+        >
+          <option value="all">全部项目</option>
+          <option value="unassigned">未关联项目</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Project tree */}
       <ul className="session-list">
         {/* 有项目的会话分组 */}
         {renderedProjects.map((p) => {
+          if (projectFilter !== 'all' && projectFilter !== p.id) return null;
           const sessionsInProject = projectGroups.get(p.id) || [];
           const sourceMissing = projectMenuSourceMissing && projectMenu?.project.id === p.id;
           return renderProjectGroup(p, sessionsInProject, sourceMissing);
         })}
 
-        {/* 未分组会话 */}
-        {unassigned.length > 0 && (
+        {/* 未分组会话（筛选到具体项目时不显示） */}
+        {unassigned.length > 0 && (projectFilter === 'all' || projectFilter === 'unassigned') && (
           <li className="project-group">
             <div
               className={`project-header${expanded['__unassigned__'] ? ' project-header--expanded' : ''}`}

@@ -596,6 +596,12 @@ function registerIpcHandlers(): void {
     }));
   });
 
+  handle('sessions:search', async (_e, query: string): Promise<string[]> => {
+    if (typeof query !== 'string') return [];
+    const { searchSessions } = await import('./store/db');
+    return searchSessions(query);
+  });
+
   handle('sessions:get', async (_e, id: string) => {
     const { getSession, getMessages } = await import('./store/db');
     const session = getSession(id);

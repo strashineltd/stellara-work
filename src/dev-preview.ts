@@ -146,6 +146,7 @@ export function installDevPreviewApi(): void {
     },
     sessions: {
       list: async () => sessions,
+      search: async () => [],
       get: async (id) => {
         const summary = sessions.find((session) => session.id === id) ?? sessions[0]!;
         return { session: sessionFromSummary(summary), messages: id === 'ui-review' ? previewRows : [] };

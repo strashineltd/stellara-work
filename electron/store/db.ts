@@ -244,6 +244,28 @@ export function listSessions(): Session[] {
   return rows.map(rowToSession);
 }
 
+/**
+ * 内容搜索会话：在 messages 表里 LIKE 匹配（标题、消息内容），
+ * 返回匹配的 session id（按 updated_at 倒序）。query 空返回 []。
+ */
+export function searchSessions(query: string): string[] {
+  const q = query.trim();
+  if (!q) return [];
+  const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const pattern = `%${escaped}%`;
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT m.session_id FROM messages m
+       WHERE m.content LIKE ? ESCAPE '\\'
+       UNION
+       SELECT id FROM sessions WHERE title LIKE ? ESCAPE '\\'`,
+    )
+    .all(pattern, pattern) as Array<{ session_id: string }>;
+  const ids = new Set(rows.map((r) => r.session_id));
+  // 按更新时间倒序（listSessions 已排序）
+  return listSessions().filter((s) => ids.has(s.id)).map((s) => s.id);
+}
+
 export function getSession(id: string): Session | null {
   const row = getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : null;

@@ -938,6 +938,8 @@ export interface ElectronAPI {
   };
   sessions: {
     list: () => Promise<SessionSummary[]>;
+    /** 内容搜索：匹配标题与消息内容，返回匹配的 session id（按更新时间倒序） */
+    search: (query: string) => Promise<string[]>;
     get: (id: string) => Promise<{ session: Session; messages: MessageRow[] }>;
     create: (args: CreateSessionArgs) => Promise<Session>;
     delete: (id: string) => Promise<void>;

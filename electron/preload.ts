@@ -148,6 +148,7 @@ const api: ElectronAPI = {
   },
   sessions: {
     list: (): Promise<SessionSummary[]> => ipcRenderer.invoke('sessions:list'),
+    search: (query: string): Promise<string[]> => ipcRenderer.invoke('sessions:search', query),
     get: (id: string) => ipcRenderer.invoke('sessions:get', id),
     create: (args: CreateSessionArgs): Promise<Session> => ipcRenderer.invoke('sessions:create', args),
     delete: (id: string) => ipcRenderer.invoke('sessions:delete', id),

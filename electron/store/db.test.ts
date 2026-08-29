@@ -5,7 +5,7 @@ import os from 'node:os';
 import Database from 'better-sqlite3';
 import {
   initDb, listSessions, getSession, createSession, deleteSession, renameSession,
-  getMessages, appendMessage, saveMessages, bumpSession, _setDbPath,
+  getMessages, appendMessage, saveMessages, bumpSession, searchSessions, _setDbPath,
   createProject, getProject, listProjects, renameProject, deleteProject, moveSession, updateProjectFile,
   countAllMessages,
 } from './db';
@@ -139,6 +139,33 @@ describe('db', () => {
     expect(msgs[0]?.content).toBe('new1');
     expect(msgs[1]?.content).toBe('new2');
     expect(getSession('s1')?.messageCount).toBe(2);
+  });
+
+  it('searchSessions matches message content and title', () => {
+    createSession({ id: 's1', title: 'First', modelId: 'm1' });
+    createSession({ id: 's2', title: 'Second', modelId: 'm1' });
+    appendMessage({ sessionId: 's1', position: 0, role: 'user', content: '我想要重构登录模块', createdAt: Date.now() });
+    appendMessage({ sessionId: 's2', position: 0, role: 'user', content: '写个测试', createdAt: Date.now() });
+
+    // 内容匹配
+    expect(searchSessions('重构')).toEqual(['s1']);
+    // 标题匹配
+    expect(searchSessions('Second')).toEqual(['s2']);
+    // 空 query → []
+    expect(searchSessions('')).toEqual([]);
+    expect(searchSessions('   ')).toEqual([]);
+    // 无匹配 → []
+    expect(searchSessions('不存在的内容')).toEqual([]);
+  });
+
+  it('searchSessions escapes LIKE wildcards', () => {
+    createSession({ id: 's1', title: 'T', modelId: 'm1' });
+    createSession({ id: 's2', title: 'T', modelId: 'm1' });
+    appendMessage({ sessionId: 's1', position: 0, role: 'user', content: '进度 100%', createdAt: Date.now() });
+    appendMessage({ sessionId: 's2', position: 0, role: 'user', content: '进度 100x', createdAt: Date.now() });
+    // % 作为字面量匹配（转义生效），不匹配 100x
+    expect(searchSessions('100%')).toEqual(['s1']);
+    expect(searchSessions('100x')).toEqual(['s2']);
   });
 
   it('renameSession updates title and bumps updatedAt', async () => {
