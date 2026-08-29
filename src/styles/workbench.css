@@ -303,6 +303,18 @@ kbd {
   color: var(--color-danger);
 }
 
+/* 技能面板空状态：引导行 + 去配置模型按钮 */
+.settings-skill-empty-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-skill-empty-hint .settings-skill-goto-models {
+  white-space: nowrap;
+}
+
 .badge,
 .badge-warn {
   display: inline-flex;

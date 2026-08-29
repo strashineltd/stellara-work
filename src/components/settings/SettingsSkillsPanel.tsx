@@ -8,6 +8,8 @@ interface SettingsSkillsPanelProps {
   onChanged?: () => void;
   /** 外部数据变更信号（其他窗口广播 settings-changed 时递增） */
   refreshKey?: number;
+  /** 切换到设置面板的其他标签页（空状态引导用） */
+  onSwitchTab?: (tab: import('../SettingsPanel').SettingsTab) => void;
 }
 
 /** 「复制模板」按钮写入剪贴板的新技能文件模板（markdown frontmatter） */
@@ -28,7 +30,7 @@ function errorMessage(e: unknown): string {
  * 新建/编辑折叠表单（.md）、启用开关（写 frontmatter enabled）、内联删除确认、
  * 展开 prompt / 复制模板；下方渲染 MCP 服务器管理区块（SettingsMcpSection）。
  */
-export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkillsPanelProps) {
+export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab }: SettingsSkillsPanelProps) {
   const [workDir, setWorkDir] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillDetailedItem[]>([]);
   const [skillErrors, setSkillErrors] = useState<SkillLoadError[]>([]);
@@ -67,8 +69,13 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
   useEffect(() => {
     void (async () => {
       try {
+        // workDir 解析链：当前模型配置 → 最近更新项目的 workDir
         const list = await window.electronAPI.models.list();
-        const dir = list.configured?.workDir ?? null;
+        let dir = list.configured?.workDir ?? null;
+        if (!dir) {
+          const projects = await window.electronAPI.projects.list();
+          dir = projects.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.workDir ?? null;
+        }
         setWorkDir(dir);
         if (!dir) return;
         await refreshSkills(dir);
@@ -216,8 +223,18 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
       )}
 
       {!workDir && (
-        <div className="empty-hint">
-          请先配置模型并选择项目，然后在项目下创建 <code>skills/</code> 目录放置技能文件。
+        <div className="empty-hint settings-skill-empty-hint">
+          <span>
+            技能保存在工作目录的 <code>skills/</code> 文件夹中。先配置模型（选择工作目录）或创建项目后即可使用。
+          </span>
+          <button
+            className="btn btn-secondary btn-small settings-skill-goto-models"
+            onClick={() => onSwitchTab?.('models')}
+            type="button"
+          >
+            <Icon name="settings" size={14} />
+            去配置模型
+          </button>
         </div>
       )}
 

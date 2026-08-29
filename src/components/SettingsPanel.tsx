@@ -168,7 +168,11 @@ export function SettingsPanel({ initialTab = 'models', focusRequest = 0, onClose
               <SettingsAppPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
             )}
             {tab === 'skills' && (
-              <SettingsSkillsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+              <SettingsSkillsPanel
+                refreshKey={refreshKey}
+                onChanged={() => setRefreshKey((k) => k + 1)}
+                onSwitchTab={setTab}
+              />
             )}
             {tab === 'shortcuts' && (
               <SettingsShortcutsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />

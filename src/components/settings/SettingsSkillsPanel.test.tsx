@@ -32,10 +32,12 @@ function installApi(configured: ConfiguredModel | null) {
     skillsUpdate: vi.fn().mockResolvedValue(undefined),
     skillsDelete: vi.fn().mockResolvedValue(undefined),
     skillsInit: vi.fn().mockResolvedValue(['code-review.md', 'test-writer.md']),
+    projectsList: vi.fn().mockResolvedValue([]),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
       models: { list: mocks.list },
+      projects: { list: mocks.projectsList },
       skills: {
         list: mocks.skillsList,
         listDetailed: mocks.skillsList,
@@ -156,8 +158,29 @@ describe('SettingsSkillsPanel', () => {
     mocks = installApi(null);
     const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
 
-    expect(byText(container, '请先配置模型并选择项目')).toBeTruthy();
+    expect(byText(container, '先配置模型（选择工作目录）或创建项目后即可使用')).toBeTruthy();
     expect(mocks.skillsList).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the most recently updated project workDir when the model has none', async () => {
+    mocks = installApi(null);
+    mocks.projectsList.mockResolvedValue([
+      { id: 'old', name: 'Old', workDir: '/old/dir', updatedAt: 100 },
+      { id: 'recent', name: 'Recent', workDir: '/recent/dir', updatedAt: 200 },
+    ]);
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    expect(mocks.skillsList).toHaveBeenCalledWith('/recent/dir');
+    expect(container.querySelector('.settings-skill-empty-hint')).toBeNull();
+  });
+
+  it('guides to the models tab when no workDir is available', async () => {
+    mocks = installApi(null);
+    const onSwitchTab = vi.fn();
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} onSwitchTab={onSwitchTab} />);
+
+    await fireClick(container.querySelector('.settings-skill-goto-models'));
+    expect(onSwitchTab).toHaveBeenCalledWith('models');
   });
 
   it('keeps the create-skill button visible without a workDir and prompts to pick a project', async () => {
