@@ -118,6 +118,10 @@ export async function* runResponsesLoop(
   let forceApprovalMode = false;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  /** 连续输出截断次数（reasoning 吃满 max_output_tokens 时每轮都会截断） */
+  let incompleteCount = 0;
+  /** 本轮输出被截断（截断后需续接，不走"任务完成"分支） */
+  let truncated = false;
 
   // 初始化 ResponsesClient
   const client = new ResponsesClient({
@@ -223,6 +227,16 @@ export async function* runResponsesLoop(
       return;
     }
 
+    // 连续截断保护：reasoning 吃满输出预算时每轮都会截断，避免无限循环
+    if (incompleteCount >= 3) {
+      yield {
+        type: 'error',
+        error: '连续多次输出被截断（reasoning + 输出超出单次生成上限）。请在模型设置中调大 max_output_tokens，或降低 reasoning effort',
+        errorMeta: { kind: 'invalid_request', hint: '连续多次输出被截断，请调大 max_output_tokens 或降低思考强度', retryable: false },
+      };
+      return;
+    }
+
     // 检查硬阈值
     if (contextHub.isHardLimited()) {
       yield {
@@ -296,9 +310,12 @@ export async function* runResponsesLoop(
           failed = true;
           errorMessage = result.error || '未知错误';
         } else if (result.type === 'incomplete') {
-          // 输出截断
-          yield { type: 'content', content: '\n\n[输出截断]' };
+          // 输出截断：透传原因并计数（reasoning/输出共用 max_output_tokens 预算）
           responseItems = result.items || [];
+          incompleteCount += 1;
+          truncated = true;
+          const reason = result.reason === 'max_output_tokens' ? '已达单次输出上限' : '输出被中断';
+          yield { type: 'content', content: `\n\n[输出截断：${reason}，继续生成…]` };
         }
       }
     } catch (err) {
@@ -323,6 +340,11 @@ export async function* runResponsesLoop(
 
     // 如果没有 Function Call，任务完成
     if (functionCalls.size === 0) {
+      if (truncated) {
+        // 输出被截断：续接（把已有 items 继续发给模型），不走任务完成分支
+        truncated = false;
+        continue;
+      }
       if (planMode) {
         const parsed = parsePlanFromContent(assistantText);
         if (!parsed) {
@@ -669,6 +691,8 @@ function handleStreamEvent(
   items?: ResponseItem[];
   usage?: import('../../shared/responses').ResponseUsage;
   error?: string;
+  /** incomplete 截断原因（max_output_tokens / content_filter 等） */
+  reason?: string;
 } {
   switch (event.type) {
     case 'response.output_text.delta':
@@ -704,6 +728,7 @@ function handleStreamEvent(
       return {
         type: 'incomplete',
         items: event.response.output,
+        reason: event.incomplete_details?.reason,
       };
 
     default:

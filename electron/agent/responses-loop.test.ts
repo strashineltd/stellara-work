@@ -342,6 +342,69 @@ describe('runResponsesLoop', () => {
     expect(reasoning).toEqual(['思考中：先分析需求']);
   });
 
+  it('输出截断时提示原因并继续生成', async () => {
+    streamQueue.push(() => [
+      {
+        type: 'response.incomplete',
+        response: {
+          id: 'resp-001',
+          object: 'response',
+          model: 'test',
+          status: 'incomplete',
+          output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '部分内容' }] }],
+        },
+        incomplete_details: { reason: 'max_output_tokens' },
+      },
+    ]);
+
+    const hub = new ContextHub('sess-001', tmpDir);
+    const events: string[] = [];
+    const gen = runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    });
+    for await (const ev of gen) {
+      if (ev.type === 'content') events.push(ev.content);
+    }
+
+    // 截断提示 + 第二轮回落默认流正常结束
+    expect(events.some((c) => c.includes('[输出截断：已达单次输出上限'))).toBe(true);
+    expect(events.some((c) => c.includes('Hello'))).toBe(true);
+  });
+
+  it('连续三次截断后停止并引导调大 max_output_tokens', async () => {
+    const truncated = () => [
+      {
+        type: 'response.incomplete',
+        response: {
+          id: 'resp-001',
+          object: 'response',
+          model: 'test',
+          status: 'incomplete',
+          output: [],
+        },
+        incomplete_details: { reason: 'max_output_tokens' },
+      },
+    ];
+    streamQueue.push(truncated, truncated, truncated);
+
+    const hub = new ContextHub('sess-001', tmpDir);
+    const events: string[] = [];
+    const gen = runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    });
+    for await (const ev of gen) {
+      if (ev.type === 'error' && ev.error) events.push(ev.error);
+    }
+
+    expect(events.some((e) => e.includes('连续多次输出被截断'))).toBe(true);
+  });
+
   it('plan 模式下注入 planExtraTools 且不暴露执行工具', async () => {
     streamQueue.push(() => [
       {

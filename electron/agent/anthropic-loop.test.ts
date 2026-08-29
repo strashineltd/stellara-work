@@ -144,4 +144,42 @@ describe('runAnthropicAgentLoop', () => {
     const request = mockCreate.mock.calls[0]![0];
     expect(request.tools.some((tool: { name: string }) => tool.name === 'mcp__s1__read')).toBe(true);
   });
+
+  it('连续三次 max_tokens 截断后停止并引导调大输出上限', async () => {
+    const truncated = {
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'max_tokens',
+      usage: { input_tokens: 12, output_tokens: 4096 },
+      content: [{ type: 'text', text: '部分内容' }],
+    };
+    mockCreate.mockResolvedValue(truncated);
+
+    const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+    const events: string[] = [];
+    for await (const ev of runAnthropicAgentLoop('任务', {
+      model,
+      cwd: workDir,
+      sessionId: 'sub-session',
+      contextHub: hub,
+      allowSubagents: false,
+      client: { create: mockCreate },
+    })) {
+      if (ev.type === 'error' && ev.error) events.push(ev.error);
+    }
+
+    expect(events.some((e) => e.includes('连续多次输出被截断'))).toBe(true);
+    // 截断提示也出现过
+    const contents: string[] = [];
+    const gen2 = runAnthropicAgentLoop('任务', {
+      model,
+      cwd: workDir,
+      sessionId: 'sub-session',
+      contextHub: new ContextHub('sub-session-2', workDir, 256000, 16384, { persist: false }),
+      allowSubagents: false,
+      client: { create: mockCreate },
+    });
+    for await (const ev of gen2) {
+      if (ev.type === 'content' && ev.content) contents.push(ev.content);
+    }
+    expect(contents.some((c) => c.includes('[输出截断'))).toBe(true);
+  });
 });

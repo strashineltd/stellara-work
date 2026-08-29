@@ -94,8 +94,18 @@ export async function* runAnthropicAgentLoop(
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let toolCalls = 0;
+  /** 连续输出截断次数（reasoning 吃满 max_tokens 时每轮都会截断） */
+  let incompleteCount = 0;
 
   for (let iteration = 0; iteration < (options.maxIterations ?? 200); iteration++) {
+    if (incompleteCount >= 3) {
+      yield {
+        type: 'error',
+        error: '连续多次输出被截断（reasoning + 输出超出单次生成上限）。请在模型设置中调大 max_output_tokens，或降低 reasoning effort',
+        errorMeta: { kind: 'invalid_request', hint: '连续多次输出被截断，请调大 max_output_tokens 或降低思考强度', retryable: false },
+      };
+      return;
+    }
     if (options.signal?.aborted) {
       yield { type: 'error', error: '用户中断', errorMeta: { kind: 'user_aborted', hint: '请求已取消', retryable: false } };
       return;
@@ -122,6 +132,14 @@ export async function* runAnthropicAgentLoop(
       totals: { promptTokens: totalInputTokens, completionTokens: totalOutputTokens },
     };
 
+    // 输出截断：reasoning + 输出共用 max_tokens 预算，截断后提示并续接
+    if (response.stop_reason === 'max_tokens') {
+      incompleteCount += 1;
+      yield { type: 'content', content: '\n\n[输出截断：已达单次输出上限，继续生成…]' };
+    } else {
+      incompleteCount = 0;
+    }
+
     const assistantContent = response.content.length > 0 ? response.content : [{ type: 'text', text: '' } satisfies AnthropicContent];
     messages.push({ role: 'assistant', content: assistantContent });
     for (const block of assistantContent) {
@@ -138,6 +156,10 @@ export async function* runAnthropicAgentLoop(
 
     const uses = assistantContent.filter((block) => block.type === 'tool_use' && (block.id || block.tool_use_id) && block.name);
     if (uses.length === 0) {
+      if (response.stop_reason === 'max_tokens') {
+        // 输出被截断：续接（messages 已含部分文本，继续生成），不走任务完成分支
+        continue;
+      }
       if (planMode) {
         const planText = assistantContent.filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
         const parsed = parsePlanFromContent(planText);
