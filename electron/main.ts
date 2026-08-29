@@ -542,12 +542,21 @@ function registerIpcHandlers(): void {
       const selection = await verifyProjectSelection(args.workDir, args.entryFile.trim());
       entryFile = selection.path;
     }
-    return createProject({
+    const project = createProject({
       id: uuid(),
       name: args.name.trim().slice(0, 50),
       workDir: args.workDir.trim(),
       entryFile,
     });
+    // 新项目自动初始化内置技能模板（幂等；失败不影响项目创建）
+    try {
+      const { initBuiltinSkills } = await import('./agent/skills');
+      const created = await initBuiltinSkills(project.workDir ?? args.workDir.trim());
+      if (created.length > 0) log.info(`已为新项目初始化内置技能：${created.join(', ')}`);
+    } catch (err) {
+      log.warn('内置技能初始化失败（忽略）', err);
+    }
+    return project;
   });
 
   handle('projects:updateFile', async (_e, id: string, selection: ProjectFileSelection) => {
@@ -772,6 +781,12 @@ function registerIpcHandlers(): void {
     await assertWorkDirAllowed(workDir);
     const { loadSkillsWithErrors } = await import('./agent/skills');
     return loadSkillsWithErrors(workDir);
+  });
+
+  handle('skills:initBuiltins', async (_e, workDir: string): Promise<string[]> => {
+    await assertWorkDirAllowed(workDir);
+    const { initBuiltinSkills } = await import('./agent/skills');
+    return initBuiltinSkills(workDir);
   });
 
   handle('skills:create', async (_e, workDir: string, input: { name: string; description: string; prompt: string }) => {

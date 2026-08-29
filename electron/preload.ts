@@ -172,6 +172,7 @@ const api: ElectronAPI = {
   skills: {
     list: (workDir: string) => ipcRenderer.invoke('skills:list', workDir),
     listDetailed: (workDir: string) => ipcRenderer.invoke('skills:listDetailed', workDir),
+    initBuiltins: (workDir: string): Promise<string[]> => ipcRenderer.invoke('skills:initBuiltins', workDir),
     create: (workDir: string, skill: { name: string; description: string; prompt: string }) =>
       ipcRenderer.invoke('skills:create', workDir, skill),
     update: (workDir: string, file: string, patch: { name?: string; description?: string; prompt?: string; enabled?: boolean }) =>

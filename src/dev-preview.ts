@@ -214,6 +214,7 @@ export function installDevPreviewApi(): void {
           { file: 'broken.md', reason: '格式解析失败' },
         ],
       }),
+      initBuiltins: async () => ['code-review.md', 'test-writer.md', 'debug-issue.md'],
       create: async () => ({ file: 'preview-skill.md' }),
       update: async () => {},
       delete: async () => {},

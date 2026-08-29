@@ -6217,6 +6217,16 @@ html[data-page-hidden] .kbd.rec {
   margin-bottom: 0;
 }
 
+.settings-skill-init-notice {
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-content);
+  font-size: 12px;
+  color: var(--color-text-soft);
+}
+
 /* 技能搜索框 */
 .settings-skill-search {
   display: flex;

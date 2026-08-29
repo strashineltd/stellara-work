@@ -37,6 +37,8 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [templateCopied, setTemplateCopied] = useState(false);
+  /** 初始化内置技能的结果提示 */
+  const [initNotice, setInitNotice] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState<'new' | 'edit' | null>(null);
   const [formName, setFormName] = useState('');
@@ -121,6 +123,22 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
       setTimeout(() => setTemplateCopied(false), 2000);
     } catch {
       setError('复制模板失败：剪贴板不可用');
+    }
+  }
+
+  async function initBuiltins() {
+    if (!workDir) return;
+    try {
+      const created = await window.electronAPI.skills.initBuiltins(workDir);
+      setInitNotice(
+        created.length > 0
+          ? `已创建内置技能：${created.join('、')}`
+          : '内置技能已存在，未重复创建',
+      );
+      await refreshSkills(workDir);
+      onChanged?.();
+    } catch (e) {
+      setError(errorMessage(e));
     }
   }
 
@@ -222,6 +240,16 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
           {templateCopied ? '已复制' : '复制模板'}
         </button>
         <button
+          className="btn btn-secondary settings-skill-init-builtins"
+          onClick={() => void initBuiltins()}
+          type="button"
+          disabled={!workDir}
+          title="初始化内置技能模板（code-review / test-writer / debug-issue）到 skills/ 目录，已存在则跳过"
+        >
+          <Icon name="tool" size={14} />
+          初始化内置技能
+        </button>
+        <button
           className="btn btn-primary settings-skill-create"
           onClick={openCreate}
           type="button"
@@ -231,6 +259,12 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
           新建技能
         </button>
       </div>
+
+      {initNotice && (
+        <div className="settings-skill-init-notice motion-feedback-enter" role="status">
+          {initNotice}
+        </div>
+      )}
 
       {workDir && (
         <>

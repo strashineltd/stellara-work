@@ -10,6 +10,8 @@ import {
   mergeSkillFrontmatter,
   sanitizeSkillName,
   findSkill,
+  initBuiltinSkills,
+  BUILTIN_SKILLS,
 } from './skills';
 
 let tmpDir: string;
@@ -338,6 +340,38 @@ describe('findSkill', () => {
     expect(findSkill(items, 'nonexistent')).toBeNull();
     expect(findSkill(items, '')).toBeNull();
     expect(findSkill(items, '   ')).toBeNull();
+  });
+});
+
+describe('initBuiltinSkills', () => {
+  it('创建全部内置技能文件并可被 loadSkills 加载', async () => {
+    const created = await initBuiltinSkills(tmpDir);
+    expect(created.sort()).toEqual(['code-review.md', 'debug-issue.md', 'test-writer.md']);
+
+    for (const file of created) {
+      const text = await fs.readFile(path.join(tmpDir, 'skills', file), 'utf-8');
+      expect(text).toContain('---');
+    }
+
+    const skills = await loadSkills(tmpDir);
+    expect(skills.map((s) => s.name).sort()).toEqual(['code-review', 'debug-issue', 'test-writer']);
+    expect(BUILTIN_SKILLS.every((s) => s.description && s.prompt)).toBe(true);
+  });
+
+  it('幂等：已存在同名文件时跳过且不覆盖用户内容', async () => {
+    await writeSkill('skills/code-review.md', '---\nname: code-review\ndescription: 用户修改\n---\n用户自定义内容');
+    const created = await initBuiltinSkills(tmpDir);
+    expect(created.sort()).toEqual(['debug-issue.md', 'test-writer.md']);
+    const text = await fs.readFile(path.join(tmpDir, 'skills', 'code-review.md'), 'utf-8');
+    expect(text).toContain('用户自定义内容');
+  });
+
+  it('skills 目录不存在时自动创建', async () => {
+    const dir = path.join(tmpDir, 'fresh-project');
+    const created = await initBuiltinSkills(dir);
+    expect(created).toHaveLength(BUILTIN_SKILLS.length);
+    const stat = await fs.stat(path.join(dir, 'skills'));
+    expect(stat.isDirectory()).toBe(true);
   });
 });
 

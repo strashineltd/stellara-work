@@ -253,3 +253,69 @@ export function mergeSkillFrontmatter(original: string, patch: SkillPatch): stri
 export function sanitizeSkillName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '-').trim();
 }
+
+// ============================================
+// 内置技能模板
+// ============================================
+
+/** 内置技能规格（新建项目时自动初始化到 workDir/skills/，可删除或禁用） */
+export interface BuiltinSkillSpec {
+  name: string;
+  description: string;
+  prompt: string;
+}
+
+export const BUILTIN_SKILLS: BuiltinSkillSpec[] = [
+  {
+    name: 'code-review',
+    description: '审查代码变更，输出按严重程度排序的问题清单与修复建议',
+    prompt: `你是资深代码审查专家。审查流程：
+1. 用 git_status 查看当前变更，git_diff 查看具体改动
+2. 逐个文件检查：正确性、边界条件、错误处理、安全（路径/命令注入）、性能
+3. 用 search_content 追溯相关符号的使用方式，确认改动与既有约定一致
+4. 输出审查报告：问题按严重程度排序（严重/建议/风格），每条附文件与行号、问题描述、修复建议
+
+只读审查，不修改文件。`,
+  },
+  {
+    name: 'test-writer',
+    description: '为目标代码编写单元测试并确保全部通过',
+    prompt: `你是测试工程师。流程：
+1. 用 read_file 读取目标文件，理解函数接口与依赖
+2. 用 list_files + read_file 查看项目现有测试，遵循既有测试约定（框架、目录结构、命名）
+3. 编写测试：正常路径 + 边界条件 + 错误分支；用 mock 隔离外部依赖
+4. 运行测试命令确认全部通过；失败则修复测试或代码后重跑
+5. 汇报：新增测试文件/用例数、覆盖率变化、测试结果`,
+  },
+  {
+    name: 'debug-issue',
+    description: '定位并修复程序 bug，最小改动验证后总结根因',
+    prompt: `你是调试专家。流程：
+1. 复现：阅读报错信息与复现步骤，用 read_file 定位相关代码
+2. 假设驱动：列出可能原因，用 search_content 追溯数据流，用 run_command 运行最小复现
+3. 最小改动修复，运行相关测试验证
+4. 总结根因与修复方案，指出同类风险点`,
+  },
+];
+
+/**
+ * 初始化内置技能到 workDir/skills/（幂等）。
+ * 已存在同名文件时跳过；返回实际创建的文件名列表。
+ */
+export async function initBuiltinSkills(workDir: string): Promise<string[]> {
+  const skillsDir = path.join(workDir, 'skills');
+  await fs.mkdir(skillsDir, { recursive: true });
+  const created: string[] = [];
+  for (const spec of BUILTIN_SKILLS) {
+    const file = `${spec.name}.md`;
+    try {
+      // wx 独占创建：已存在抛 EEXIST，跳过不覆盖用户修改
+      await fs.writeFile(path.join(skillsDir, file), buildSkillMarkdown(spec), { encoding: 'utf-8', flag: 'wx' });
+      created.push(file);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'EEXIST') continue;
+      throw e;
+    }
+  }
+  return created;
+}
