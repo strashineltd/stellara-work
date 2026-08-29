@@ -72,7 +72,12 @@ function installApi(configured: ConfiguredModel | null) {
   Object.defineProperty(window, 'electronAPI', {
     value: {
       models: { list: mocks.list },
-      skills: { list: mocks.skillsList, listDetailed: mocks.skillsListDetailed },
+      skills: {
+        list: mocks.skillsList,
+        listDetailed: mocks.skillsListDetailed,
+        listBuiltins: vi.fn().mockResolvedValue([]),
+        initBuiltins: vi.fn().mockResolvedValue([]),
+      },
       fs: { openPath: mocks.openPath },
       mcp: {
         list: mocks.mcpList,

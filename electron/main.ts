@@ -789,6 +789,11 @@ function registerIpcHandlers(): void {
     return initBuiltinSkills(workDir);
   });
 
+  handle('skills:listBuiltins', async (): Promise<import('../shared/ipc').BuiltinSkillInfo[]> => {
+    const { BUILTIN_SKILLS } = await import('./agent/skills');
+    return BUILTIN_SKILLS.map(({ name, description }) => ({ name, description }));
+  });
+
   handle('skills:create', async (_e, workDir: string, input: { name: string; description: string; prompt: string }) => {
     await assertWorkDirAllowed(workDir);
     const { buildSkillMarkdown, sanitizeSkillName } = await import('./agent/skills');

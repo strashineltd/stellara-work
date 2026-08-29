@@ -31,6 +31,7 @@ function installApi(configured: ConfiguredModel | null) {
     skillsCreate: vi.fn().mockResolvedValue({ file: 'new-skill.md' }),
     skillsUpdate: vi.fn().mockResolvedValue(undefined),
     skillsDelete: vi.fn().mockResolvedValue(undefined),
+    skillsInit: vi.fn().mockResolvedValue(['code-review.md', 'test-writer.md']),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
@@ -38,6 +39,11 @@ function installApi(configured: ConfiguredModel | null) {
       skills: {
         list: mocks.skillsList,
         listDetailed: mocks.skillsList,
+        listBuiltins: vi.fn().mockResolvedValue([
+          { name: 'code-review', description: '审查代码变更' },
+          { name: 'test-writer', description: '编写单元测试' },
+        ]),
+        initBuiltins: mocks.skillsInit,
         create: mocks.skillsCreate,
         update: mocks.skillsUpdate,
         delete: mocks.skillsDelete,
@@ -318,5 +324,21 @@ describe('SettingsSkillsPanel', () => {
     expect(mocks.skillsDelete).not.toHaveBeenCalledWith(WORKDIR, 'subdir-review.md');
     expect(container.querySelector('.settings-skill-row[data-skill="review/subdir-review.md"]')).toBeNull();
     expect(container.querySelector('.settings-skill-row[data-skill="code-review.md"]')).toBeTruthy();
+  });
+
+  it('shows builtin skill cards in the empty state and initializes them on click', async () => {
+    mocks = installApi(CONFIGURED);
+    mocks.skillsList.mockResolvedValue({ items: [], errors: [] });
+    const { container } = await render(<SettingsSkillsPanel onChanged={vi.fn()} />);
+
+    const card = container.querySelector('.settings-builtin-card');
+    expect(card).toBeTruthy();
+    expect(card!.querySelectorAll('.settings-builtin-item__name').length).toBe(2);
+    expect(byText(container, '/code-review')).toBeTruthy();
+    expect(byText(container, '/test-writer')).toBeTruthy();
+
+    await fireClick(container.querySelector('.settings-builtin-init'));
+    expect(mocks.skillsInit).toHaveBeenCalledWith(WORKDIR);
+    expect(mocks.skillsList).toHaveBeenLastCalledWith(WORKDIR);
   });
 });

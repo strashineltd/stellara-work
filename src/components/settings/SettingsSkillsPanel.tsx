@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SkillDetailedItem, SkillLoadError } from '../../../shared/ipc';
+import type { BuiltinSkillInfo, SkillDetailedItem, SkillLoadError } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 import { SettingsMcpSection } from './SettingsMcpSection';
 
@@ -39,6 +39,8 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
   const [templateCopied, setTemplateCopied] = useState(false);
   /** 初始化内置技能的结果提示 */
   const [initNotice, setInitNotice] = useState<string | null>(null);
+  /** 内置技能模板列表（空状态展示，来源主进程 BUILTIN_SKILLS） */
+  const [builtins, setBuiltins] = useState<BuiltinSkillInfo[]>([]);
 
   const [showForm, setShowForm] = useState<'new' | 'edit' | null>(null);
   const [formName, setFormName] = useState('');
@@ -74,6 +76,7 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
         setError(errorMessage(e));
       }
     })();
+    window.electronAPI.skills.listBuiltins().then(setBuiltins).catch(() => {});
   }, [refreshKey]);
 
   function toggleSkill(file: string) {
@@ -348,15 +351,43 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0 }: SettingsSkill
             )}
             <div className="settings-group">
               {skills.length === 0 && !skillsLoading && (
-                <div className="settings-item">
-                  <div className="settings-item__grow">
-                    <div className="settings-item__hint">
-                      当前 workDir 下没有 skill 文件。点击「新建技能」创建 <code>.md</code> 技能，
-                      或把 <code>name.md</code>（frontmatter 声明 <code>name</code> /{' '}
-                      <code>description</code>，正文为 prompt）放入 <code>{`${workDir}/skills/`}</code>。
+                <>
+                  {builtins.length > 0 && (
+                    <div className="settings-item settings-builtin-card">
+                      <div className="settings-item__grow">
+                        <div className="settings-item__title">内置技能模板</div>
+                        <div className="settings-item__hint">
+                          一键生成到 <code>skills/</code> 目录，之后可自由修改或删除
+                        </div>
+                        <div className="settings-builtin-list">
+                          {builtins.map((b) => (
+                            <div key={b.name} className="settings-builtin-item">
+                              <span className="settings-builtin-item__name">{`/${b.name}`}</span>
+                              <span className="settings-builtin-item__desc">{b.description}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          className="btn btn-secondary btn-small settings-builtin-init"
+                          onClick={() => void initBuiltins()}
+                          type="button"
+                        >
+                          <Icon name="tool" size={14} />
+                          全部生成到 skills/
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="settings-item">
+                    <div className="settings-item__grow">
+                      <div className="settings-item__hint">
+                        也可以点击「新建技能」创建 <code>.md</code> 技能，
+                        或把 <code>name.md</code>（frontmatter 声明 <code>name</code> /{' '}
+                        <code>description</code>，正文为 prompt）放入 <code>{`${workDir}/skills/`}</code>。
+                      </div>
                     </div>
                   </div>
-                </div>
+                </>
               )}
               {filtered.length === 0 && skills.length > 0 && (
                 <div className="settings-item">

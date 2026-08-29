@@ -606,6 +606,12 @@ export interface SkillLoadError {
   reason: string;
 }
 
+/** 内置技能模板信息（skills:listBuiltins 返回，UI 空状态展示用） */
+export interface BuiltinSkillInfo {
+  name: string;
+  description: string;
+}
+
 /** listDetailed 返回的技能项：SkillDef + 相对 skills/ 的文件路径 */
 export type SkillDetailedItem = SkillDef & {
   /** 相对 skills/ 的路径（如 'review/code-review.md' 或 'code-review.md'） */
@@ -969,6 +975,8 @@ export interface ElectronAPI {
     listDetailed: (workDir: string) => Promise<SkillListDetailedResponse>;
     /** 初始化内置技能模板到 workDir/skills/（幂等），返回实际创建的文件名列表 */
     initBuiltins: (workDir: string) => Promise<string[]>;
+    /** 内置技能模板列表（名称 + 描述，UI 空状态展示） */
+    listBuiltins: () => Promise<BuiltinSkillInfo[]>;
     /** 创建技能文件 skills/{name}.md（name 自动清洗非法字符），返回文件名 */
     create: (workDir: string, skill: { name: string; description: string; prompt: string }) => Promise<{ file: string }>;
     /** 更新技能文件（仅 .md；旧 .json 格式仅支持删除） */

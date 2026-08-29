@@ -6227,6 +6227,41 @@ html[data-page-hidden] .kbd.rec {
   color: var(--color-text-soft);
 }
 
+/* 空状态：内置技能模板卡片 */
+.settings-builtin-card {
+  margin-bottom: 6px;
+}
+
+.settings-builtin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.settings-builtin-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-content);
+}
+
+.settings-builtin-item__name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-accent);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.settings-builtin-item__desc {
+  font-size: 11px;
+  color: var(--color-text-soft);
+}
+
 /* 技能搜索框 */
 .settings-skill-search {
   display: flex;

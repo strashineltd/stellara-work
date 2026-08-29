@@ -215,6 +215,11 @@ export function installDevPreviewApi(): void {
         ],
       }),
       initBuiltins: async () => ['code-review.md', 'test-writer.md', 'debug-issue.md'],
+      listBuiltins: async () => [
+        { name: 'code-review', description: '审查代码变更，输出按严重程度排序的问题清单与修复建议' },
+        { name: 'test-writer', description: '为目标代码编写单元测试并确保全部通过' },
+        { name: 'debug-issue', description: '定位并修复程序 bug，最小改动验证后总结根因' },
+      ],
       create: async () => ({ file: 'preview-skill.md' }),
       update: async () => {},
       delete: async () => {},
