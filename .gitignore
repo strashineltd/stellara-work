@@ -62,3 +62,6 @@ coverage/
 .mimocode/
 .superpowers/
 skills/
+
+# Worktrees (dev isolation)
+.worktrees/
