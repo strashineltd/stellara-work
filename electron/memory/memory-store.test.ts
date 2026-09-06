@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { saveMemory, deleteAllMemories, setMemoryDb } from './memory-store';
+import { saveMemory, deleteAllMemories, setMemoryDb, listMemories, searchMemories } from './memory-store';
 
 describe('memory-store', () => {
   let db: Database.Database;
@@ -31,5 +31,20 @@ describe('memory-store', () => {
 
   it('deleteAllMemories 空库返回 0', () => {
     expect(deleteAllMemories()).toBe(0);
+  });
+
+  it('saves and searches memories with kind web', async () => {
+    const m = saveMemory({
+      scope: 'personal',
+      kind: 'web',
+      content: 'Electron 43 支持 WebContentsView（调研结论）',
+      importance: 0.7,
+      tags: ['electron'],
+    });
+    expect(m.kind).toBe('web');
+    const byKind = listMemories({ kind: 'web' });
+    expect(byKind.some((x) => x.id === m.id)).toBe(true);
+    const found = searchMemories({ query: 'WebContentsView' });
+    expect(found.some((x) => x.id === m.id)).toBe(true);
   });
 });

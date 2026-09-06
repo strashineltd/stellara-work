@@ -545,7 +545,7 @@ export interface Memory {
   id: string;
   scope: 'personal' | 'project' | 'workspace';
   scopeId?: string;
-  kind: 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting';
+  kind: 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting' | 'web';
   content: string;
   source?: string;
   importance: number;

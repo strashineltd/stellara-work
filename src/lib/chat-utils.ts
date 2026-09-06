@@ -236,14 +236,23 @@ export function messagesToEntries(msgs: MessageRow[]): DisplayEntry[] {
         }
       }
     } else if (m.role === 'tool') {
-      let meta: ToolResultMeta | undefined;
-      try { if (m.meta) meta = JSON.parse(m.meta); } catch { /* ignore */ }
+      // 持久化的 meta 可能是 {ok} 占位（无 ToolResultMeta）或完整 ToolResultMeta：
+      // 只有带 kind 的才算 meta，否则置 undefined 让 ChatStream 走通用卡片分支
       const isError = m.content.startsWith('Error:');
+      let meta: ToolResultMeta | undefined;
+      let ok = !isError;
+      if (m.meta) {
+        try {
+          const parsed = JSON.parse(m.meta) as { ok?: boolean; kind?: string };
+          if (typeof parsed.ok === 'boolean') ok = parsed.ok;
+          if (parsed.kind) meta = parsed as ToolResultMeta;
+        } catch { /* 解析失败保持默认 */ }
+      }
       out.push({
         kind: 'tool_result',
         toolCallId: m.toolCallId,
         name: m.toolName ?? 'tool',
-        ok: !isError,
+        ok,
         output: isError ? m.content.slice('Error:'.length).trim() : m.content,
         meta,
         presentation: historyPresentation(m, `tool-result:${m.toolCallId ?? m.toolName ?? 'tool'}`),
@@ -293,6 +302,7 @@ export function entriesToMessages(entries: DisplayEntry[], sessionId: string): M
         last.toolCalls = JSON.stringify(calls);
       }
     } else if (e.kind === 'tool_result') {
+      const metaWithOk = e.meta ? JSON.stringify({ ...e.meta, ok: e.ok }) : JSON.stringify({ ok: e.ok });
       out.push({
         sessionId,
         position: pos++,
@@ -300,7 +310,7 @@ export function entriesToMessages(entries: DisplayEntry[], sessionId: string): M
         content: e.output,
         toolCallId: e.toolCallId,
         toolName: e.name,
-        meta: JSON.stringify(e.meta),
+        meta: metaWithOk,
         createdAt: now,
       });
     }

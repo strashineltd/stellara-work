@@ -1676,7 +1676,7 @@ async function extractMemoriesFromSession(
 ): Promise<void> {
   try {
     const { getMessages, getSession } = await import('./store/db');
-    const { extractMemories } = await import('./memory/memory-extractor');
+    const { extractMemories, buildBrowserMaterial } = await import('./memory/memory-extractor');
     const { summarizeWithModel } = await import('./llm/client-factory');
 
     const messages = getMessages(request.sessionId);
@@ -1701,7 +1701,9 @@ async function extractMemoriesFromSession(
       content: m.content,
     }));
 
-    const saved = await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall);
+    const browserMaterial = buildBrowserMaterial(messages);
+
+    const saved = await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall, browserMaterial);
     if (saved.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('memories-extracted', { sessionId: request.sessionId, count: saved.length });
     }

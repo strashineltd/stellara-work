@@ -22,9 +22,9 @@ vi.mock('./memory-store', () => ({
   findDuplicateMemory: vi.fn(() => null),
 }));
 
-import { extractMemories, saveManualMemory } from './memory-extractor';
+import { buildBrowserMaterial, extractMemories, saveManualMemory } from './memory-extractor';
 import { saveMemory, findDuplicateMemory } from './memory-store';
-import type { ChatMessage } from '../../shared/ipc';
+import type { ChatMessage, MessageRow } from '../../shared/ipc';
 
 const mockSaveMemory = vi.mocked(saveMemory);
 const mockFindDuplicate = vi.mocked(findDuplicateMemory);
@@ -249,5 +249,81 @@ describe('saveManualMemory', () => {
         tags: ['important'],
       }),
     );
+  });
+});
+
+function toolRow(partial: Partial<MessageRow>): MessageRow {
+  return {
+    sessionId: 's', position: 0, role: 'tool', content: '', createdAt: 0,
+    ...partial,
+  } as MessageRow;
+}
+
+describe('buildBrowserMaterial', () => {
+  it('keeps web_search and browser_* rows with [工具名] prefix; skips other tools and failed results', () => {
+    const rows: MessageRow[] = [
+      toolRow({ toolName: 'web_search', content: '搜到 A', meta: JSON.stringify({ ok: true }) }),
+      toolRow({ toolName: 'browser_navigate', content: '已导航', meta: JSON.stringify({ ok: true }) }),
+      toolRow({ toolName: 'browser_snapshot', content: '页面正文', meta: JSON.stringify({ ok: true }) }),
+      toolRow({ toolName: 'read_file', content: '不该出现', meta: JSON.stringify({ ok: true }) }),
+      toolRow({ toolName: 'browser_navigate', content: '失败', meta: JSON.stringify({ ok: false }) }),
+    ];
+    const out = buildBrowserMaterial(rows);
+    expect(out).toContain('[web_search] 搜到 A');
+    expect(out).toContain('[browser_navigate] 已导航');
+    expect(out).toContain('[browser_snapshot] 页面正文');
+    expect(out).not.toContain('不该出现');
+    expect(out).not.toContain('失败');
+  });
+
+  it('keeps tool rows without meta', () => {
+    const out = buildBrowserMaterial([toolRow({ toolName: 'browser_act', content: '已点击' })]);
+    expect(out).toContain('[browser_act] 已点击');
+  });
+
+  it('truncates at 30000 chars with a marker', () => {
+    const big = 'x'.repeat(40000);
+    const out = buildBrowserMaterial([toolRow({ toolName: 'web_search', content: big })]);
+    expect(out.length).toBeLessThanOrEqual(30000 + 6);
+    expect(out).toContain('…[已截断]');
+  });
+
+  it('returns empty string for no browser rows', () => {
+    expect(buildBrowserMaterial([])).toBe('');
+    expect(buildBrowserMaterial([toolRow({ toolName: 'read_file', content: 'x' })])).toBe('');
+  });
+});
+
+describe('extractMemories with browserMaterial', () => {
+  it('appends the material block to the transcript and accepts kind web', async () => {
+    let transcriptSent = '';
+    const llmCall = vi.fn().mockImplementation(async (_sys: string, user: string) => {
+      transcriptSent = user;
+      return JSON.stringify([{ kind: 'web', content: '调研结论', importance: 0.6, tags: ['web'] }]);
+    });
+    const saved = await extractMemories(
+      [{ role: 'user', content: '帮我调研 Electron' }],
+      'personal', undefined, 'session:s1',
+      llmCall,
+      'material-line-1',
+    );
+    expect(transcriptSent).toContain('--- 本次会话的网页浏览材料（仅供提炼事实，非用户发言）---');
+    expect(transcriptSent).toContain('material-line-1');
+    expect(saved.length).toBe(1);
+    expect(saved[0]!.kind).toBe('web');
+  });
+
+  it('does not append the block when browserMaterial is empty', async () => {
+    let transcriptSent = '';
+    const llmCall = vi.fn().mockImplementation(async (_sys: string, user: string) => {
+      transcriptSent = user;
+      return '[]';
+    });
+    await extractMemories(
+      [{ role: 'user', content: '这个项目使用 Electron 和 React 技术栈，我对它的架构和性能优化方案很感兴趣，请帮我详细分析一下' }],
+      'personal', undefined, 'session:s1', llmCall,
+    );
+    expect(llmCall).toHaveBeenCalled();
+    expect(transcriptSent).not.toContain('网页浏览材料');
   });
 });

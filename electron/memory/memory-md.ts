@@ -1,6 +1,6 @@
 import type { Memory } from '../../shared/ipc';
 
-const KIND_ORDER = ['fact', 'preference', 'decision', 'codebase', 'requirement', 'meeting'] as const;
+const KIND_ORDER = ['fact', 'preference', 'decision', 'codebase', 'requirement', 'meeting', 'web'] as const;
 const KIND_LABELS: Record<Memory['kind'], string> = {
   fact: '事实',
   preference: '偏好',
@@ -8,6 +8,7 @@ const KIND_LABELS: Record<Memory['kind'], string> = {
   codebase: '代码库',
   requirement: '需求',
   meeting: '会议',
+  web: '网页',
 };
 
 function frontmatter(m: Memory): string {

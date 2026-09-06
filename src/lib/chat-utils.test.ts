@@ -329,7 +329,7 @@ describe('attachments round-trip (user entries)', () => {
     const rows: MessageRow[] = [
       { sessionId: 's', position: 0, role: 'user', content: 'hi', createdAt: 1 },
       { sessionId: 's', position: 1, role: 'assistant', content: 'ok', createdAt: 2 },
-      { sessionId: 's', position: 2, role: 'tool', content: 'out', toolCallId: 'tc-1', toolName: 'read_file', createdAt: 3 },
+      { sessionId: 's', position: 2, role: 'tool', content: 'out', toolCallId: 'tc-1', toolName: 'read_file', meta: '{"ok":true}', createdAt: 3 },
     ];
     const entries = messagesToEntries(rows);
     const round = entriesToMessages(entries, 's');
@@ -339,5 +339,83 @@ describe('attachments round-trip (user entries)', () => {
   it('buildHistory passes user attachments through', () => {
     const history = buildHistory([{ kind: 'user', content: '看图', attachments: [IMG_ATT] }]);
     expect(history[0]).toEqual({ role: 'user', content: '看图', attachments: [IMG_ATT] });
+  });
+
+  it('persists ok inside tool_result meta JSON', () => {
+    const entries: DisplayEntry[] = [
+      { kind: 'tool_result', toolCallId: 'tc-1', name: 'web_search', ok: false, output: 'boom', error: 'network' },
+    ];
+    const rows = entriesToMessages(entries, 's');
+    const row = rows.find((r) => r.role === 'tool')!;
+    expect(row.toolName).toBe('web_search');
+    const meta = JSON.parse(row.meta ?? '{}') as { ok?: boolean };
+    expect(meta.ok).toBe(false);
+  });
+
+  it('messagesToEntries strips {ok}-only meta on reload (kindless meta => undefined)', () => {
+    const rows: MessageRow[] = [
+      {
+        sessionId: 's', position: 0, role: 'tool', content: 'done', toolCallId: 'tc-1', toolName: 'web_search',
+        meta: JSON.stringify({ ok: true }), createdAt: 1,
+      },
+    ];
+    const entries = messagesToEntries(rows);
+    const tool = entries[0];
+    expect(tool.kind).toBe('tool_result');
+    if (tool.kind === 'tool_result') {
+      expect(tool.meta).toBeUndefined();
+      expect(tool.ok).toBe(true);
+    }
+  });
+
+  it('messagesToEntries keeps ToolResultMeta with kind on reload', () => {
+    const rows: MessageRow[] = [
+      {
+        sessionId: 's', position: 0, role: 'tool', content: 'ran', toolCallId: 'tc-2', toolName: 'bash',
+        meta: JSON.stringify({ ok: true, kind: 'command', command: 'ls', stdout: 'a', stderr: '', exitCode: 0, durationMs: 5 }),
+        createdAt: 1,
+      },
+    ];
+    const entries = messagesToEntries(rows);
+    const tool = entries[0];
+    expect(tool.kind).toBe('tool_result');
+    if (tool.kind === 'tool_result') {
+      expect(tool.meta).toEqual({ ok: true, kind: 'command', command: 'ls', stdout: 'a', stderr: '', exitCode: 0, durationMs: 5 });
+      expect(tool.ok).toBe(true);
+    }
+  });
+
+  it('messagesToEntries fallback: plain output without meta reconstructs as ok (not inverted)', () => {
+    const rows: MessageRow[] = [
+      {
+        sessionId: 's', position: 0, role: 'tool', content: 'plain success output', toolCallId: 'tc-1', toolName: 'web_search',
+        createdAt: 1,
+      },
+    ];
+    const entries = messagesToEntries(rows);
+    const tool = entries[0];
+    expect(tool.kind).toBe('tool_result');
+    if (tool.kind === 'tool_result') {
+      expect(tool.ok).toBe(true);
+      expect(tool.meta).toBeUndefined();
+      expect(tool.output).toBe('plain success output');
+    }
+  });
+
+  it('messagesToEntries fallback: Error: output without meta reconstructs as failure (not inverted)', () => {
+    const rows: MessageRow[] = [
+      {
+        sessionId: 's', position: 0, role: 'tool', content: 'Error: boom', toolCallId: 'tc-2', toolName: 'web_search',
+        createdAt: 1,
+      },
+    ];
+    const entries = messagesToEntries(rows);
+    const tool = entries[0];
+    expect(tool.kind).toBe('tool_result');
+    if (tool.kind === 'tool_result') {
+      expect(tool.ok).toBe(false);
+      expect(tool.meta).toBeUndefined();
+      expect(tool.output).toBe('boom');
+    }
   });
 });

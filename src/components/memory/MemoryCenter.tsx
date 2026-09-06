@@ -23,6 +23,7 @@ const KIND_OPTIONS: Array<{ value: Memory['kind']; label: string }> = [
   { value: 'codebase', label: '代码库' },
   { value: 'requirement', label: '需求' },
   { value: 'meeting', label: '会议' },
+  { value: 'web', label: '网页' },
 ];
 
 const byUpdatedDesc = (a: Memory, b: Memory) => b.updatedAt - a.updatedAt;

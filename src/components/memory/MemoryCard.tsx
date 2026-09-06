@@ -22,6 +22,7 @@ const KIND_LABELS: Record<string, string> = {
   codebase: '代码库',
   requirement: '需求',
   meeting: '会议',
+  web: '网页',
 };
 
 const SCOPE_LABELS: Record<string, string> = {

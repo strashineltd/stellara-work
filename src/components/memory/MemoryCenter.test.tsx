@@ -792,4 +792,11 @@ describe('MemoryCenter', () => {
     await flushAsync();
     expect(container.querySelector('.memory-center')).toBe(root);
   });
+
+  it('offers the 网页 kind filter option', async () => {
+    const { container } = await renderCenter();
+    const opt = container.querySelector('select') as HTMLSelectElement | null;
+    const hasWeb = Array.from(opt?.options ?? []).some((o) => o.value === 'web' && o.textContent === '网页');
+    expect(hasWeb).toBe(true);
+  });
 });

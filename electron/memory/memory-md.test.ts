@@ -51,6 +51,13 @@ describe('memoriesToExport', () => {
     expect(doc).toContain('低重要事实');
     expect(doc).toContain('偏好');
   });
+
+  it('groups web memories under the 网页 section in export', () => {
+    const web = { ...base, id: 'w', kind: 'web', importance: 0.6, content: 'Tavily 调研结论' };
+    const doc = memoriesToExport([web]);
+    expect(doc).toContain('## 网页');
+    expect(doc).toContain('Tavily 调研结论');
+  });
 });
 
 describe('file names', () => {
