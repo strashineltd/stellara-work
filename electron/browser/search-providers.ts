@@ -113,15 +113,30 @@ export class BraveProvider implements ISearchProvider {
   }
 }
 
-export async function searchWeb(query: string, count: number, providers: ISearchProvider[]): Promise<SearchResult[]> {
-  const seen = new Set<string>(); const out: SearchResult[] = [];
+/** 聚合搜索：按 provider 顺序取结果并去重；used 为实际贡献了结果的 provider 名（保序） */
+export async function searchWeb(
+  query: string,
+  count: number,
+  providers: ISearchProvider[],
+): Promise<{ results: SearchResult[]; used: string[] }> {
+  const seen = new Set<string>();
+  const out: SearchResult[] = [];
+  const used: string[] = [];
   for (const p of providers) {
+    let contributed = 0;
     try {
       for (const r of await p.search(query, count)) {
-        if (!seen.has(r.url) && out.length < count) { seen.add(r.url); out.push(r); }
+        if (!seen.has(r.url) && out.length < count) {
+          seen.add(r.url);
+          out.push(r);
+          contributed++;
+        }
       }
-    } catch { /* next provider */ }
+    } catch {
+      /* next provider */
+    }
+    if (contributed > 0) used.push(p.name);
     if (out.length >= count) break;
   }
-  return out;
+  return { results: out, used };
 }
