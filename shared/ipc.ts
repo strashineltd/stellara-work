@@ -366,6 +366,7 @@ export interface BrowserConfigView {
   execJsEnabled: boolean;
   hasTavilyKey: boolean;
   hasBraveKey: boolean;
+  loginAllowlist: string[];
 }
 
 export interface TaskCompleteArgs {
@@ -943,7 +944,7 @@ export interface ElectronAPI {
     list: (sessionId: string) => Promise<Array<{ id: string; url: string; title: string; active?: boolean }>>;
     getSnapshot: (sessionId: string, tabId: string) => Promise<{ markdown: string }>;
     getConfig: () => Promise<BrowserConfigView>;
-    updateConfig: (partial: { searchProvider?: string; execJsEnabled?: boolean }) => Promise<void>;
+    updateConfig: (partial: { searchProvider?: string; execJsEnabled?: boolean; loginAllowlist?: string[] }) => Promise<void>;
     setSearchKey: (provider: 'tavily' | 'brave', key: string) => Promise<void>;
     clearSearchKey: (provider: 'tavily' | 'brave') => Promise<void>;
   };

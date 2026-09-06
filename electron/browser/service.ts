@@ -107,6 +107,18 @@ function sanitizeSessionId(id: string): string {
   return s || 'default';
 }
 
+/** cookie.domain（可能带前导点）→ 小写、去前导点 */
+function normalizeCookieDomain(domain: string): string {
+  return (domain ?? '').toLowerCase().replace(/^\./, '');
+}
+
+/** 允许列表匹配：allowlist 项精确匹配或作为 cookie 域的子域后缀 */
+export function isAllowlistedCookie(domain: string, allowlist: string[]): boolean {
+  const d = normalizeCookieDomain(domain);
+  if (!d) return false;
+  return allowlist.some((item) => d === item || d.endsWith('.' + item));
+}
+
 function markUntrusted(output: string): string {
   return UNTRUSTED_MARKER + output;
 }
@@ -189,6 +201,25 @@ export class BrowserService {
       }
     }
     this.createdPartitions.clear();
+  }
+
+  async clearNonAllowlistedCookies(allowlist: string[]): Promise<void> {
+    const electron = lazyElectron();
+    for (const name of this.createdPartitions) {
+      try {
+        const sess = this.partitionSessions.get(name) ?? electron.session.fromPartition(name);
+        const cookies = await sess.cookies.get({});
+        for (const cookie of cookies as Array<{ domain?: string; name: string; path?: string; secure?: boolean }>) {
+          const domain = cookie.domain ?? '';
+          if (isAllowlistedCookie(domain, allowlist)) continue;
+          const scheme = cookie.secure ? 'https://' : 'http://';
+          const url = `${scheme}${domain}${cookie.path ?? '/'}`;
+          await sess.cookies.remove(url, cookie.name);
+        }
+      } catch (e) {
+        this.opts.onPartitionClearError?.(name, e);
+      }
+    }
   }
 
   isExecJsEnabled(): boolean {

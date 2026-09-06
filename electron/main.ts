@@ -988,11 +988,12 @@ function registerIpcHandlers(): void {
       execJsEnabled: app.browser?.execJsEnabled ?? false,
       hasTavilyKey: !!keys[0],
       hasBraveKey: !!keys[1],
+      loginAllowlist: app.browser?.loginAllowlist ?? [],
     };
   });
 
-  handle('browser:updateConfig', async (_e, partial: { searchProvider?: string; execJsEnabled?: boolean }) => {
-    const { loadConfig, saveConfig } = await import('./config/config-v2');
+  handle('browser:updateConfig', async (_e, partial: { searchProvider?: string; execJsEnabled?: boolean; loginAllowlist?: string[] }) => {
+    const { loadConfig, saveConfig, normalizeAllowlist } = await import('./config/config-v2');
     const cfg = await loadConfig();
     const provider = partial.searchProvider;
     const execJs = partial.execJsEnabled;
@@ -1002,14 +1003,16 @@ function registerIpcHandlers(): void {
     if (execJs !== undefined && typeof execJs !== 'boolean') {
       throw new Error('参数无效');
     }
-    cfg.app = {
-      ...cfg.app,
-      browser: {
-        ...(cfg.app.browser ?? {}),
-        ...(provider !== undefined ? { searchProvider: provider as 'auto' | 'duck' | 'tavily' | 'brave' } : {}),
-        ...(execJs !== undefined ? { execJsEnabled: execJs } : {}),
-      },
-    };
+    const next = { ...cfg.app, browser: { ...(cfg.app.browser ?? {}) } };
+    if (provider !== undefined) next.browser.searchProvider = provider as 'auto' | 'duck' | 'tavily' | 'brave';
+    if (execJs !== undefined) next.browser.execJsEnabled = execJs;
+    if (partial.loginAllowlist !== undefined) {
+      if (!Array.isArray(partial.loginAllowlist)) throw new Error('无效的登录保留域名');
+      const normalized = normalizeAllowlist(partial.loginAllowlist);
+      if (normalized === null) throw new Error('无效的登录保留域名');
+      next.browser.loginAllowlist = normalized;
+    }
+    cfg.app = next;
     await saveConfig(cfg);
     const { browserService } = await import('./browser/service');
     browserService.setExecJsEnabled(cfg.app.browser?.execJsEnabled);
@@ -1838,6 +1841,25 @@ app.whenReady().then(async () => {
     }
     return chatStreams.requestApproval(streamId, approvalId, 60_000);
   });
+});
+
+let browserQuitCleanupDone = false;
+app.on('before-quit', (e) => {
+  if (browserQuitCleanupDone) return;
+  e.preventDefault();
+  browserQuitCleanupDone = true;
+  void (async () => {
+    try {
+      const { loadConfig } = await import('./config/config-v2');
+      const { browserService } = await import('./browser/service');
+      const cfg = await loadConfig();
+      await browserService.clearNonAllowlistedCookies(cfg.app?.browser?.loginAllowlist ?? []);
+    } catch (err) {
+      log.warn('退出时清理 Cookie 失败（忽略）', err);
+    } finally {
+      app.quit();
+    }
+  })();
 });
 
 app.on('window-all-closed', () => {

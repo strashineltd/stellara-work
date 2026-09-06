@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BrowserService, shouldApprove, isTypeableElement, FORM_CONTROL_SELECTOR } from './service';
+import { BrowserService, shouldApprove, isTypeableElement, FORM_CONTROL_SELECTOR, isAllowlistedCookie } from './service';
 import { TabPool } from './tabs';
 
 vi.mock('node:dns/promises', () => ({
@@ -612,5 +612,84 @@ describe('browser service capabilities (B group)', () => {
     expect(svc.isExecJsEnabled()).toBe(true);
     const svc2 = new BrowserService(new TabPool(), { execJsEnabled: false });
     expect(svc2.isExecJsEnabled()).toBe(false);
+  });
+});
+
+describe('isAllowlistedCookie', () => {
+  it('matches exact and subdomain suffixes; rejects others', () => {
+    expect(isAllowlistedCookie('.github.com', ['github.com'])).toBe(true);
+    expect(isAllowlistedCookie('x.github.com', ['github.com'])).toBe(true);
+    expect(isAllowlistedCookie('evil-github.com', ['github.com'])).toBe(false);
+    expect(isAllowlistedCookie('gitlab.com', ['github.com'])).toBe(false);
+  });
+});
+
+describe('clearNonAllowlistedCookies', () => {
+  function fakeCookies(cookies: Array<{ domain: string; name: string; path: string; secure?: boolean }>) {
+    const removed: Array<{ url: string; name: string }> = [];
+    const session = {
+      cookies: {
+        get: vi.fn().mockResolvedValue(cookies),
+        remove: vi.fn().mockImplementation((url: string, name: string) => {
+          removed.push({ url, name });
+          return Promise.resolve();
+        }),
+      },
+    };
+    return { session, removed };
+  }
+
+  function makeServiceWithSession(session: Record<string, any>) {
+    const pool = new TabPool();
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(makeWebContents(session).wc) });
+    return svc;
+  }
+
+  it('keeps allowlisted cookies (exact + subdomain) and removes the rest', async () => {
+    const { session, removed } = fakeCookies([
+      { domain: '.github.com', name: 'sid', path: '/' },
+      { domain: 'x.github.com', name: 's', path: '/' },
+      { domain: '.gitlab.com', name: 'gl', path: '/' },
+    ]);
+    const svc = makeServiceWithSession({ session });
+    await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
+    await svc.clearNonAllowlistedCookies(['github.com']);
+    expect(session.cookies.remove).toHaveBeenCalledTimes(1);
+    expect(removed[0]).toEqual({ url: 'http://.gitlab.com/', name: 'gl' });
+  });
+
+  it('empty allowlist removes everything', async () => {
+    const { session, removed } = fakeCookies([
+      { domain: '.github.com', name: 'sid', path: '/' },
+      { domain: '.gitlab.com', name: 'gl', path: '/' },
+    ]);
+    const svc = makeServiceWithSession({ session });
+    await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
+    await svc.clearNonAllowlistedCookies([]);
+    expect(session.cookies.remove).toHaveBeenCalledTimes(2);
+    expect(removed.length).toBe(2);
+  });
+
+  it('uses https url for secure cookies', async () => {
+    const { session, removed } = fakeCookies([
+      { domain: '.github.com', name: 'sid', path: '/', secure: true },
+    ]);
+    const svc = makeServiceWithSession({ session });
+    await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
+    await svc.clearNonAllowlistedCookies([]);
+    expect(removed[0]!.url).toBe('https://.github.com/');
+  });
+
+  it('reports per-partition failures via onPartitionClearError without blocking others', async () => {
+    const bad = { cookies: { get: vi.fn().mockRejectedValue(new Error('boom')) } };
+    const pool = new TabPool();
+    const errors: Array<{ name: string; err: unknown }> = [];
+    const svc = new BrowserService(pool, {
+      createWindow: () => makeWindow(makeWebContents(bad).wc),
+      onPartitionClearError: (name, err) => errors.push({ name, err }),
+    });
+    await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
+    await svc.clearNonAllowlistedCookies([]);
+    expect(errors.length).toBeGreaterThanOrEqual(1);
   });
 });

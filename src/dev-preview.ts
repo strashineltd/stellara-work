@@ -124,7 +124,7 @@ export function installDevPreviewApi(): void {
     browser: {
       list: async () => [],
       getSnapshot: async () => ({ markdown: '' }),
-      getConfig: async () => ({ searchProvider: 'auto', execJsEnabled: false, hasTavilyKey: false, hasBraveKey: false }),
+      getConfig: async () => ({ searchProvider: 'auto', execJsEnabled: false, hasTavilyKey: false, hasBraveKey: false, loginAllowlist: [] }),
       updateConfig: async () => {},
       setSearchKey: async () => {},
       clearSearchKey: async () => {},

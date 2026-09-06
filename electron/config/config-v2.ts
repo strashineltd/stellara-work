@@ -6,6 +6,30 @@ import type { ThemeName, McpServerConfig, WireApi } from '../../shared/ipc';
 
 let _overrideConfigDir: string | null = null;
 
+/** 域名规范化：小写、去协议/路径/端口/尾点；非法返回 null */
+export function normalizeAllowlistDomain(input: string): string | null {
+  let d = (input ?? '').trim().toLowerCase();
+  if (!d) return null;
+  d = d.replace(/^https?:\/\//, '');
+  d = d.split('/')[0]!.split(':')[0]!.replace(/\.$/, '');
+  if (!d || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) return null;
+  return d;
+}
+
+/** 整批规范化：空项剔除、去重；任一项非法返回 null */
+export function normalizeAllowlist(list: string[]): string[] | null {
+  const out: string[] = [];
+  for (const raw of list) {
+    const d = normalizeAllowlistDomain(raw);
+    if (d === null) {
+      if (!(raw ?? '').trim()) continue;
+      return null;
+    }
+    if (!out.includes(d)) out.push(d);
+  }
+  return out;
+}
+
 function configDir(): string {
   return _overrideConfigDir ?? getAppDataDir();
 }
@@ -53,7 +77,11 @@ export interface AppConfig {
     shortcuts?: Partial<Record<string, string>>;
     theme?: ThemeName;
     workspaceMode?: 'sidebar' | 'tabs';
-    browser?: { searchProvider?: 'auto' | 'duck' | 'tavily' | 'brave'; execJsEnabled?: boolean };
+    browser?: {
+      searchProvider?: 'auto' | 'duck' | 'tavily' | 'brave';
+      execJsEnabled?: boolean;
+      loginAllowlist?: string[];
+    };
   };
   mcpServers: McpServerConfig[];
   schemaVersion: 1;

@@ -3,11 +3,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsBrowserPanel } from './SettingsBrowserPanel';
 
-const BASE = { searchProvider: 'auto', execJsEnabled: false, hasTavilyKey: false, hasBraveKey: false };
+const BASE = { searchProvider: 'auto', execJsEnabled: false, hasTavilyKey: false, hasBraveKey: false, loginAllowlist: [] as string[] };
+
+interface BrowserMocks {
+  getConfig: ReturnType<typeof vi.fn>;
+  updateConfig: ReturnType<typeof vi.fn>;
+  setSearchKey: ReturnType<typeof vi.fn>;
+  clearSearchKey: ReturnType<typeof vi.fn>;
+}
+
+let mocks: BrowserMocks;
 
 function installApi(overrides: Partial<typeof BASE> = {}) {
   const config = { ...BASE, ...overrides };
-  const mocks = {
+  mocks = {
     getConfig: vi.fn().mockResolvedValue(config),
     updateConfig: vi.fn().mockResolvedValue(undefined),
     setSearchKey: vi.fn().mockResolvedValue(undefined),
@@ -42,8 +51,6 @@ async function render(ui: React.ReactElement) {
 }
 
 describe('SettingsBrowserPanel', () => {
-  let mocks: ReturnType<typeof installApi>['mocks'];
-
   beforeEach(() => {
     document.body.innerHTML = '';
   });
@@ -86,6 +93,43 @@ describe('SettingsBrowserPanel', () => {
     mocks = installApi({ searchProvider: 'tavily' }).mocks;
     const { container, unmount } = await render(<SettingsBrowserPanel />);
     expect(container.textContent).toContain('尚未配置');
+    unmount();
+  });
+
+  it('adds a valid domain to the allowlist via updateConfig', async () => {
+    installApi({ loginAllowlist: [] });
+    const { container, unmount } = await render(<SettingsBrowserPanel />);
+    const input = container.querySelector('input[placeholder="例如 github.com"]') as HTMLInputElement | null;
+    const setVal = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => { setVal?.call(input, 'https://Github.com/login'); input?.dispatchEvent(new Event('input', { bubbles: true })); });
+    const add = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('添加'));
+    await act(async () => { add?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(mocks.updateConfig).toHaveBeenCalledWith({ loginAllowlist: ['github.com'] });
+    unmount();
+  });
+
+  it('rejects invalid input without calling updateConfig', async () => {
+    installApi({ loginAllowlist: [] });
+    const { container, unmount } = await render(<SettingsBrowserPanel />);
+    const input = container.querySelector('input[placeholder="例如 github.com"]') as HTMLInputElement | null;
+    const setVal = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => { setVal?.call(input, 'a b.com'); input?.dispatchEvent(new Event('input', { bubbles: true })); });
+    const add = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('添加'));
+    await act(async () => { add?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(mocks.updateConfig).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('无效的登录保留域名');
+    unmount();
+  });
+
+  it('removes an allowlist chip via updateConfig', async () => {
+    installApi({ loginAllowlist: ['github.com'] });
+    const { container, unmount } = await render(<SettingsBrowserPanel />);
+    const del = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('删除'));
+    await act(async () => { del?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(mocks.updateConfig).toHaveBeenCalledWith({ loginAllowlist: [] });
     unmount();
   });
 });

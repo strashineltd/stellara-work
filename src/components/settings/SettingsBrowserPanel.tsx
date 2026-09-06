@@ -14,13 +14,24 @@ const DEFAULT_CONFIG: BrowserConfigView = {
   execJsEnabled: false,
   hasTavilyKey: false,
   hasBraveKey: false,
+  loginAllowlist: [],
 };
+
+// 渲染进程侧的轻量域名规范化（UX 校验，主进程 handler 会再次校验）
+export function normalizeDomainForAllowlist(input: string): string | null {
+  let d = (input ?? '').trim().toLowerCase();
+  if (!d) return null;
+  d = d.replace(/^https?:\/\//, '').split('/')[0]!.split(':')[0]!.replace(/\.$/, '');
+  if (!d || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) return null;
+  return d;
+}
 
 export function SettingsBrowserPanel({ refreshKey = 0, onChanged }: { refreshKey?: number; onChanged?: () => void }) {
   const [config, setConfig] = useState<BrowserConfigView>(DEFAULT_CONFIG);
   const [keys, setKeys] = useState<{ tavily: string; brave: string }>({ tavily: '', brave: '' });
   const [saved, setSaved] = useState<{ tavily: boolean; brave: boolean }>({ tavily: false, brave: false });
   const [error, setError] = useState<string | null>(null);
+  const [allowlistInput, setAllowlistInput] = useState('');
   // 其他窗口改了浏览器配置 → 主进程广播 settings-changed → 本地递增 refresh 触发重新拉取
   const [localRefresh, setLocalRefresh] = useState(0);
 
@@ -73,6 +84,26 @@ export function SettingsBrowserPanel({ refreshKey = 0, onChanged }: { refreshKey
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  function addAllowlistDomain() {
+    const d = normalizeDomainForAllowlist(allowlistInput);
+    if (!d) {
+      setError('无效的登录保留域名');
+      return;
+    }
+    const next = config.loginAllowlist.includes(d) ? config.loginAllowlist : [...config.loginAllowlist, d];
+    setConfig((c) => ({ ...c, loginAllowlist: next }));
+    void window.electronAPI.browser.updateConfig({ loginAllowlist: next }).then(() => {
+      setAllowlistInput('');
+      onChanged?.();
+    }).catch((e: Error) => setError(e.message));
+  }
+
+  function removeAllowlistDomain(d: string) {
+    const next = config.loginAllowlist.filter((x) => x !== d);
+    setConfig((c) => ({ ...c, loginAllowlist: next }));
+    void window.electronAPI.browser.updateConfig({ loginAllowlist: next }).then(() => onChanged?.()).catch((e: Error) => setError(e.message));
   }
 
   const provider = config.searchProvider;
@@ -166,6 +197,39 @@ export function SettingsBrowserPanel({ refreshKey = 0, onChanged }: { refreshKey
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="settings-section" aria-label="登录保留站点">
+        <div className="settings-section__title">登录保留站点</div>
+        <div className="settings-group">
+          <div className="settings-item">
+            <div className="settings-item__grow">
+              <div className="settings-item__label">保留登录状态</div>
+              <div className="settings-item__hint">这些站点的登录状态会在退出应用时保留，其他站点的 Cookie 会在退出时自动清除</div>
+            </div>
+          </div>
+          <div className="settings-item__ops settings-allowlist-row">
+            <input
+              type="text"
+              placeholder="例如 github.com"
+              value={allowlistInput}
+              onChange={(e) => setAllowlistInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addAllowlistDomain(); }}
+              aria-label="登录保留域名"
+            />
+            <button type="button" className="btn btn-secondary" onClick={addAllowlistDomain}>添加</button>
+          </div>
+          {config.loginAllowlist.length > 0 && (
+            <div className="settings-item__ops settings-allowlist-chips settings-allowlist-row">
+              {config.loginAllowlist.map((d) => (
+                <span className="settings-chip" key={d}>
+                  {d}
+                  <button type="button" className="settings-chip__remove" onClick={() => removeAllowlistDomain(d)} aria-label={`删除 ${d}`}>删除</button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </div>

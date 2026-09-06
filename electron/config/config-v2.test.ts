@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { loadConfig, saveConfig, addModel, migrateFromV1, _setConfigDir } from './config-v2';
+import { normalizeAllowlistDomain, normalizeAllowlist } from './config-v2';
 import type { McpServerConfig } from '../../shared/ipc';
 import { _setSecretsDir, _setCipher, getKey, setKey } from './secrets';
 
@@ -225,6 +226,34 @@ describe('config-v2', () => {
     await saveConfig(legacy);
     const loaded = await loadConfig();
     expect(loaded.app.browser).toBeUndefined();
+  });
+
+  describe('login allowlist normalization', () => {
+    it('normalizes domains: protocol, path, port, case, trailing dot', () => {
+      expect(normalizeAllowlistDomain('https://Github.com/login')).toBe('github.com');
+      expect(normalizeAllowlistDomain('http://a.com:8080/x')).toBe('a.com');
+      expect(normalizeAllowlistDomain('example.com.')).toBe('example.com');
+      expect(normalizeAllowlistDomain('  github.com  ')).toBe('github.com');
+    });
+
+    it('rejects invalid domains', () => {
+      expect(normalizeAllowlistDomain('')).toBeNull();
+      expect(normalizeAllowlistDomain('a b.com')).toBeNull();
+      expect(normalizeAllowlistDomain('https://a b.com/x')).toBeNull();
+    });
+
+    it('normalizes a batch, dropping empties and deduping; rejects if any item is invalid', () => {
+      expect(normalizeAllowlist(['https://A.com', 'a.com', ''])).toEqual(['a.com']);
+      expect(normalizeAllowlist(['github.com', 'x b.com'])).toBeNull();
+    });
+
+    it('round-trips loginAllowlist through save/load', async () => {
+      const cfg = await loadConfig();
+      cfg.app = { ...cfg.app, browser: { loginAllowlist: ['github.com', 'gitlab.com'] } };
+      await saveConfig(cfg);
+      const loaded = await loadConfig();
+      expect(loaded.app.browser?.loginAllowlist).toEqual(['github.com', 'gitlab.com']);
+    });
   });
 });
 
