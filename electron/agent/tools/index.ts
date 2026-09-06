@@ -52,6 +52,7 @@ export const planModeTools: OpenAITool[] = [
   browserPlanTools.find((t) => t.function.name === 'browser_snapshot')!,
   browserPlanTools.find((t) => t.function.name === 'browser_extract')!,
   // web_fetch 不进 plan mode（会发起外部请求）
+  webSearchTools[0], // web_search（只读联网搜索）
   // memory_search 也不进 plan mode
 ];
 

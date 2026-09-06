@@ -20,6 +20,7 @@ import type {
 } from '../../shared/ipc';
 
 const MAX_SCREENSHOT_B64 = 5 * 1024 * 1024;
+const ACT_DEBOUNCE_MS = 1000;
 
 /**
  * 审批矩阵。browser_act / browser_exec_js 由 Agent 循环的 DANGEROUS_TOOLS
@@ -49,6 +50,13 @@ export interface BrowserServiceOptions {
   requestApproval?: RequestApprovalFn;
   /** 测试注入窗口工厂（生产环境走 lazy-require('electron')） */
   createWindow?: () => any;
+  settleDelayMs?: number;
+  /**
+   * 单分区清理失败回调（Spec §5：失败记日志不阻断）。
+   * 不用 electron-log/main 顶层导入：该模块在模块顶层 require('electron')，
+   * vitest 无 Electron 二进制会拿到二进制路径字符串，破坏测试；由 main.ts 注入 log 包装。
+   */
+  onPartitionClearError?: (name: string, err: unknown) => void;
 }
 
 export interface SessionBrowser {
@@ -140,6 +148,10 @@ export class BrowserService {
   private activeTabs = new Map<string, string>();  // sessionId -> tabId
   private lastDomain = new Map<string, string>();  // tabId -> hostname
   private knownIds = new Map<string, Set<string>>();
+  private createdPartitions = new Set<string>();
+  private partitionSessions = new Map<string, any>();
+  private lastActAt = new Map<string, number>();
+  private navDoneAt = new Map<string, number>();
 
   constructor(
     private tabPool: TabPool = new TabPool(),
@@ -148,6 +160,35 @@ export class BrowserService {
 
   setRequestApproval(fn: RequestApprovalFn | undefined): void {
     this.opts.requestApproval = fn;
+  }
+
+  setExecJsEnabled(v: boolean | undefined): void {
+    this.opts.execJsEnabled = v;
+  }
+
+  setPartitionClearErrorHandler(fn: ((name: string, err: unknown) => void) | undefined): void {
+    this.opts.onPartitionClearError = fn;
+  }
+
+  createdPartitionsForTest(): string[] {
+    return [...this.createdPartitions];
+  }
+
+  async clearPartitions(): Promise<void> {
+    const electron = lazyElectron();
+    for (const name of this.createdPartitions) {
+      try {
+        // 优先用窗口创建时捕获的 session（测试注入的 fake session 也走这里）；
+        // 无窗口记录时回退到 electron.session.fromPartition（生产兜底）。
+        const sess = this.partitionSessions.get(name) ?? electron.session.fromPartition(name);
+        await sess.clearStorageData();
+        await sess.clearCache();
+      } catch (e) {
+        // 单个分区清理失败不阻断其余分区；失败原因交给注入的日志回调（Spec §5）
+        this.opts.onPartitionClearError?.(name, e);
+      }
+    }
+    this.createdPartitions.clear();
   }
 
   isExecJsEnabled(): boolean {
@@ -196,6 +237,8 @@ export class BrowserService {
     if (existing && typeof existing.isDestroyed === 'function' && !existing.isDestroyed()) {
       return existing;
     }
+    const partition = `persist:stellara-browser-${sanitizeSessionId(sessionId)}`;
+    this.createdPartitions.add(partition);
     let win: any;
     if (this.opts.createWindow) {
       win = this.opts.createWindow();
@@ -204,7 +247,7 @@ export class BrowserService {
       win = new electron.BrowserWindow({
         show: false,
         webPreferences: {
-          partition: `persist:stellara-browser-${sanitizeSessionId(sessionId)}`,
+          partition,
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
@@ -212,6 +255,8 @@ export class BrowserService {
       });
     }
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    const sess = win.webContents?.session;
+    if (sess) this.partitionSessions.set(partition, sess);
     // 禁用下载
     try {
       win.webContents.session.on('will-download', (e: any) => e.preventDefault());
@@ -341,10 +386,21 @@ export class BrowserService {
     const win = this.getOrCreateWindow(sessionId, tabId);
     await withTimeout(win.webContents.loadURL(url), NAVIGATE_TIMEOUT_MS, '导航超时，可重试');
     this.lastDomain.set(tabId, host);
+    this.navDoneAt.set(tabId, Date.now());
     const tab = this.tabPool.select(sessionId, tabId);
     tab.url = url;
     tab.title = url;
     return { ok: true, output: `已导航: ${url}` };
+  }
+
+  private async waitForSettle(_sessionId: string, tabId: string): Promise<void> {
+    const doneAt = this.navDoneAt.get(tabId);
+    if (!doneAt) return;
+    const delay = this.opts.settleDelayMs ?? 2000;
+    const elapsed = Date.now() - doneAt;
+    if (elapsed < delay) {
+      await new Promise((r) => setTimeout(r, delay - elapsed));
+    }
   }
 
   private async doSnapshot(
@@ -358,6 +414,7 @@ export class BrowserService {
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
+    await this.waitForSettle(sessionId, args.tabId);
     const win = this.getOrCreateWindow(sessionId, args.tabId);
     const html = await withTimeout(
       this.execJsInIsolatedWorld(win, 'document.documentElement.outerHTML.slice(0,500000)'),
@@ -374,6 +431,11 @@ export class BrowserService {
     args: BrowserActArgs,
     _ctx?: ToolExecutionContext,
   ): Promise<ToolResult> {
+    const now = Date.now();
+    const last = this.lastActAt.get(sessionId) ?? 0;
+    if (now - last < ACT_DEBOUNCE_MS) {
+      return { ok: false, output: '', error: '操作过于频繁（1 秒 1 次），请稍后重试' };
+    }
     const known = this.knownIds.get(args.tabId) ?? new Set<string>();
     const v = validateActArgs(args, known);
     if (!v.ok) return { ok: false, output: '', error: v.error ?? '参数无效' };
@@ -476,6 +538,10 @@ export class BrowserService {
     };
     const out = await withTimeout(run(), ACT_TIMEOUT_MS, '操作超时，可重试');
     if (!out.ok) return out;
+    // back/reload 是浏览器级操作（不发页面 JS），不参与 1 秒防抖冷却
+    if (args.action !== 'back' && args.action !== 'reload') {
+      this.lastActAt.set(sessionId, Date.now());
+    }
     return { ok: true, output: markUntrusted(out.output) };
   }
 
@@ -490,6 +556,7 @@ export class BrowserService {
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
+    await this.waitForSettle(sessionId, args.tabId);
     const win = this.getOrCreateWindow(sessionId, args.tabId);
     const html = await withTimeout(
       this.execJsInIsolatedWorld(win, 'document.documentElement.outerHTML.slice(0,500000)'),

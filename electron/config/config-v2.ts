@@ -53,7 +53,7 @@ export interface AppConfig {
     shortcuts?: Partial<Record<string, string>>;
     theme?: ThemeName;
     workspaceMode?: 'sidebar' | 'tabs';
-    browser?: { searchProvider?: 'auto' | 'duck' | 'tavily' | 'brave' };
+    browser?: { searchProvider?: 'auto' | 'duck' | 'tavily' | 'brave'; execJsEnabled?: boolean };
   };
   mcpServers: McpServerConfig[];
   schemaVersion: 1;

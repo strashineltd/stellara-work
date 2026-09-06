@@ -31,6 +31,7 @@ import type {
   Memory,
   McpServerConfig,
   ContextStateView,
+  BrowserConfigView,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -686,6 +687,12 @@ function registerIpcHandlers(): void {
   handle('settings:clearAllData', async () => {
     const { wipeAllData } = await import('./config/wipe-data');
     await wipeAllData();
+    try {
+      const { browserService } = await import('./browser/service');
+      await browserService.clearPartitions();
+    } catch (e) {
+      log.warn('清理浏览器分区失败（忽略）', e);
+    }
     broadcastSettingsChanged();
   });
 
@@ -693,6 +700,12 @@ function registerIpcHandlers(): void {
     if (level === 'all') {
       const { wipeAllData } = await import('./config/wipe-data');
       await wipeAllData();
+      try {
+        const { browserService } = await import('./browser/service');
+        await browserService.clearPartitions();
+      } catch (e) {
+        log.warn('清理浏览器分区失败（忽略）', e);
+      }
       broadcastSettingsChanged();
       return { cleared: 'all' as const };
     }
@@ -962,6 +975,60 @@ function registerIpcHandlers(): void {
     const result = await browserService.get(sessionId).snapshot({ tabId });
     if (!result.ok) throw new Error(result.error ?? '获取快照失败');
     return { markdown: result.output };
+  });
+
+  handle('browser:getConfig', async (): Promise<BrowserConfigView> => {
+    const [{ loadConfig }, { getKey }] = await Promise.all([import('./config/config-v2'), import('./config/secrets')]);
+    const cfg = await loadConfig();
+    const app = cfg.app ?? {};
+    // getKey 是同步只读 API（secrets.ts）
+    const keys = [getKey('browser-tavily'), getKey('browser-brave')];
+    return {
+      searchProvider: app.browser?.searchProvider ?? 'auto',
+      execJsEnabled: app.browser?.execJsEnabled ?? false,
+      hasTavilyKey: !!keys[0],
+      hasBraveKey: !!keys[1],
+    };
+  });
+
+  handle('browser:updateConfig', async (_e, partial: { searchProvider?: string; execJsEnabled?: boolean }) => {
+    const { loadConfig, saveConfig } = await import('./config/config-v2');
+    const cfg = await loadConfig();
+    const provider = partial.searchProvider;
+    const execJs = partial.execJsEnabled;
+    if (provider !== undefined && !['auto', 'duck', 'tavily', 'brave'].includes(provider)) {
+      throw new Error('无效的搜索服务');
+    }
+    if (execJs !== undefined && typeof execJs !== 'boolean') {
+      throw new Error('参数无效');
+    }
+    cfg.app = {
+      ...cfg.app,
+      browser: {
+        ...(cfg.app.browser ?? {}),
+        ...(provider !== undefined ? { searchProvider: provider as 'auto' | 'duck' | 'tavily' | 'brave' } : {}),
+        ...(execJs !== undefined ? { execJsEnabled: execJs } : {}),
+      },
+    };
+    await saveConfig(cfg);
+    const { browserService } = await import('./browser/service');
+    browserService.setExecJsEnabled(cfg.app.browser?.execJsEnabled);
+    broadcastSettingsChanged();
+  });
+
+  handle('browser:setSearchKey', async (_e, provider: string, key: string) => {
+    if (provider !== 'tavily' && provider !== 'brave') throw new Error('无效的搜索服务');
+    if (typeof key !== 'string' || !key.trim()) throw new Error('Key 不能为空');
+    const { setKey } = await import('./config/secrets');
+    await setKey(`browser-${provider}`, key.trim());
+    broadcastSettingsChanged();
+  });
+
+  handle('browser:clearSearchKey', async (_e, provider: string) => {
+    if (provider !== 'tavily' && provider !== 'brave') throw new Error('无效的搜索服务');
+    const { deleteKey } = await import('./config/secrets');
+    await deleteKey(`browser-${provider}`);
+    broadcastSettingsChanged();
   });
 }
 
@@ -1737,10 +1804,20 @@ app.whenReady().then(async () => {
   createWindow();
   installAppMenu(() => mainWindow);
 
+  // 浏览器：启动时注入 execJsEnabled（Agent 执行 browser_exec_js 的开关）
+  const { loadConfig } = await import('./config/config-v2');
+  const { browserService } = await import('./browser/service');
+  const cfg0 = await loadConfig();
+  browserService.setExecJsEnabled(cfg0.app?.browser?.execJsEnabled);
+  // 单分区清理失败只记日志不阻断（Spec §5）。service.ts 不直接依赖 electron-log：
+  // 其顶层 require('electron') 会破坏 vitest，日志回调在此注入。
+  browserService.setPartitionClearErrorHandler((name, err) => {
+    log.warn(`浏览器分区清理失败（忽略）: ${name}`, err);
+  });
+
   // C1: 接入 BrowserService 的服务端审批（browser_navigate 新域）。
   // browser_act/browser_exec_js 由 Agent 循环的 DANGEROUS_TOOLS 把关，不在此重复。
   // 审批卡片复用现有 approval_required → ApprovalTopBar 通道，超时默认拒绝。
-  const { browserService } = await import('./browser/service');
   browserService.setRequestApproval(async (req) => {
     const streamId = browserSessionStreams.get(req.sessionId ?? 'default');
     if (!streamId) return false;

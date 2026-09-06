@@ -499,3 +499,118 @@ describe('per-tab windows', () => {
     expect(r.error).toContain('Tab 不存在');
   });
 });
+
+describe('browser service capabilities (B group)', () => {
+  it('registers the partition name when a window is created', async () => {
+    const pool = new TabPool();
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(makeWebContents().wc) });
+    const tabId = await createTab(svc, 'sess-7', 'https://a.com/');
+    expect(svc.createdPartitionsForTest()).toContain('persist:stellara-browser-sess-7');
+    expect(tabId).toBeTruthy();
+  });
+
+  it('clearPartitions clears storage and cache for every registered partition and swallows errors', async () => {
+    const pool = new TabPool();
+    const cleared: string[] = [];
+    const cacheCleared: string[] = [];
+    const fakeSession = {
+      clearStorageData: vi.fn().mockImplementation(() => { cleared.push('x'); return Promise.resolve(); }),
+      clearCache: vi.fn().mockImplementation(() => { cacheCleared.push('x'); return Promise.resolve(); }),
+    };
+    const svc = new BrowserService(pool, {
+      createWindow: () => {
+        const { wc } = makeWebContents();
+        wc.session = fakeSession;
+        return makeWindow(wc);
+      },
+    });
+    await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
+    await svc.clearPartitions();
+    expect(cleared.length).toBeGreaterThan(0);
+    expect(cacheCleared.length).toBeGreaterThan(0);
+    // 第二个分区创建后再次清理也幂等
+    await svc.clearPartitions();
+  });
+
+  it('clearPartitions reports per-partition failures via the injected error handler without blocking others', async () => {
+    const pool = new TabPool();
+    const errors: Array<{ name: string; err: unknown }> = [];
+    const fakeSession = {
+      clearStorageData: vi.fn().mockRejectedValue(new Error('session destroyed')),
+      clearCache: vi.fn().mockResolvedValue(undefined),
+    };
+    const svc = new BrowserService(pool, {
+      onPartitionClearError: (name, err) => { errors.push({ name, err }); },
+      createWindow: () => {
+        const { wc } = makeWebContents();
+        wc.session = fakeSession;
+        return makeWindow(wc);
+      },
+    });
+    await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
+    const r = await svc.clearPartitions();
+    expect(r).toBeUndefined();
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]!.name).toBe('persist:stellara-browser-s');
+    expect((errors[0]!.err as Error).message).toBe('session destroyed');
+    // 失败不阻断：注册表照常清空，后续清理幂等
+    await svc.clearPartitions();
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('act debounces: second act within 1s returns an honest error', async () => {
+    const pool = new TabPool();
+    const { wc } = makeWebContents();
+    wc.executeJavaScriptInIsolatedWorld.mockResolvedValue('__OK__');
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    const first = await svc.get('s').act({ tabId, action: 'scroll', direction: 'down' });
+    expect(first.ok).toBe(true);
+    const second = await svc.get('s').act({ tabId, action: 'scroll', direction: 'down' });
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain('过于频繁');
+  });
+
+  it('navigate then immediate snapshot waits for settleDelayMs (injected 0 for tests)', async () => {
+    const pool = new TabPool();
+    const { wc } = makeWebContents();
+    wc.executeJavaScriptInIsolatedWorld.mockResolvedValue('<html><p>x</p></html>');
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc), settleDelayMs: 0 });
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    await svc.get('s').navigate({ tabId, url: 'https://a.com/' });
+    const r = await svc.get('s').snapshot({ tabId });
+    expect(r.ok).toBe(true);
+  });
+
+  it('waits settleDelayMs by default after navigate before snapshot (fake timers)', async () => {
+    vi.useFakeTimers();
+    try {
+      const pool = new TabPool();
+      const { wc } = makeWebContents();
+      wc.executeJavaScriptInIsolatedWorld.mockResolvedValue('<html><p>x</p></html>');
+      const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
+      const tabId = await createTab(svc, 's', 'https://a.com/');
+      const nav = svc.get('s').navigate({ tabId, url: 'https://a.com/' });
+      await vi.runAllTimersAsync();
+      await nav;
+      const snap = svc.get('s').snapshot({ tabId });
+      await vi.advanceTimersByTimeAsync(1500);
+      // snapshot 尚未返回（仍差 500ms）
+      let settled = false;
+      void snap.then(() => { settled = true; });
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(600);
+      await snap;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('execJsEnabled injection beats env', async () => {
+    const svc = new BrowserService(new TabPool(), { execJsEnabled: true });
+    expect(svc.isExecJsEnabled()).toBe(true);
+    const svc2 = new BrowserService(new TabPool(), { execJsEnabled: false });
+    expect(svc2.isExecJsEnabled()).toBe(false);
+  });
+});

@@ -124,6 +124,10 @@ export function installDevPreviewApi(): void {
     browser: {
       list: async () => [],
       getSnapshot: async () => ({ markdown: '' }),
+      getConfig: async () => ({ searchProvider: 'auto', execJsEnabled: false, hasTavilyKey: false, hasBraveKey: false }),
+      updateConfig: async () => {},
+      setSearchKey: async () => {},
+      clearSearchKey: async () => {},
     },
     dialog: {
       openDirectory: async () => previewWorkDir,

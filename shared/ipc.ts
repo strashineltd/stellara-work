@@ -361,6 +361,12 @@ export interface BrowserExtractArgs { tabId: string; kind: 'text'|'links'|'table
 export interface BrowserScreenshotArgs { tabId: string; }
 export interface BrowserTabsArgs { op: 'list'|'create'|'close'|'select'; tabId?: string; url?: string; }
 export interface BrowserExecJsArgs { tabId: string; js: string; }
+export interface BrowserConfigView {
+  searchProvider: string;
+  execJsEnabled: boolean;
+  hasTavilyKey: boolean;
+  hasBraveKey: boolean;
+}
 
 export interface TaskCompleteArgs {
   summary?: string;
@@ -936,6 +942,10 @@ export interface ElectronAPI {
   browser: {
     list: (sessionId: string) => Promise<Array<{ id: string; url: string; title: string; active?: boolean }>>;
     getSnapshot: (sessionId: string, tabId: string) => Promise<{ markdown: string }>;
+    getConfig: () => Promise<BrowserConfigView>;
+    updateConfig: (partial: { searchProvider?: string; execJsEnabled?: boolean }) => Promise<void>;
+    setSearchKey: (provider: 'tavily' | 'brave', key: string) => Promise<void>;
+    clearSearchKey: (provider: 'tavily' | 'brave') => Promise<void>;
   };
   dialog: {
     /** 弹原生目录选择器，返回选中的路径（或 null 取消） */

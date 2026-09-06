@@ -11,7 +11,7 @@ vi.mock('../../mcp/mcp-manager', () => ({
   mcpManager: { callTool: mockCallTool },
 }));
 
-import { invokeTool } from './index';
+import { invokeTool, planModeTools } from './index';
 import type { ToolName } from '../../../shared/ipc';
 
 describe('invokeTool mcp bridge', () => {
@@ -33,5 +33,12 @@ describe('invokeTool mcp bridge', () => {
     const result = await invokeTool(name, {}, '/work');
     expect(result.ok).toBe(false);
     expect(result.error).toContain('未知工具');
+  });
+});
+
+describe('planModeTools', () => {
+  it('includes web_search exactly once', () => {
+    const names = planModeTools.map((t) => t.function.name);
+    expect(names.filter((n) => n === 'web_search')).toHaveLength(1);
   });
 });

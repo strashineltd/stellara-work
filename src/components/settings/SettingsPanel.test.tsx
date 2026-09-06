@@ -99,11 +99,11 @@ describe('SettingsPanel', () => {
     document.body.replaceChildren();
   });
 
-  it('renders 5 nav tabs with the models panel by default', async () => {
+  it('renders 6 nav tabs with the models panel by default', async () => {
     const { container } = await render(<SettingsPanel onClose={vi.fn()} />);
 
     const items = container.querySelectorAll('.settings-nav__item');
-    expect(items.length).toBe(5);
+    expect(items.length).toBe(6);
     expect(container.querySelector('.settings-nav__item.active')?.textContent).toContain('模型');
     expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('模型');
   });

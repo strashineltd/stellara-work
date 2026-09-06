@@ -130,6 +130,13 @@ const api: ElectronAPI = {
     list: (sessionId: string) => ipcRenderer.invoke('browser:list', sessionId),
     getSnapshot: (sessionId: string, tabId: string) =>
       ipcRenderer.invoke('browser:getSnapshot', sessionId, tabId),
+    getConfig: () => ipcRenderer.invoke('browser:getConfig'),
+    updateConfig: (partial: { searchProvider?: string; execJsEnabled?: boolean }) =>
+      ipcRenderer.invoke('browser:updateConfig', partial),
+    setSearchKey: (provider: 'tavily' | 'brave', key: string) =>
+      ipcRenderer.invoke('browser:setSearchKey', provider, key),
+    clearSearchKey: (provider: 'tavily' | 'brave') =>
+      ipcRenderer.invoke('browser:clearSearchKey', provider),
   },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),

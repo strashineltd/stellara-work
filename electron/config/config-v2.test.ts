@@ -208,5 +208,23 @@ describe('config-v2', () => {
     expect(getKey('browser-tavily')).toBe('tvly-test');
     expect(getKey('browser-brave')).toBe('brv-test');
   });
+
+  it('round-trips browser.execJsEnabled', async () => {
+    const cfg = await loadConfig();
+    cfg.app = { ...cfg.app, browser: { searchProvider: 'tavily', execJsEnabled: true } };
+    await saveConfig(cfg);
+    const loaded = await loadConfig();
+    expect(loaded.app.browser?.execJsEnabled).toBe(true);
+    expect(loaded.app.browser?.searchProvider).toBe('tavily');
+  });
+
+  it('keeps legacy config without browser block working', async () => {
+    const legacy = await loadConfig();
+    legacy.app = { ...legacy.app } as typeof legacy.app;
+    delete (legacy.app as Record<string, unknown>).browser;
+    await saveConfig(legacy);
+    const loaded = await loadConfig();
+    expect(loaded.app.browser).toBeUndefined();
+  });
 });
 
