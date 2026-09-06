@@ -110,6 +110,36 @@ describe('BrowserService approval wiring', () => {
     await svc.get('sess-7').navigate({ tabId, url: 'https://b.com/' });
     expect(approve).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'sess-7' }));
   });
+
+  it('implicit new-tab navigate rolls back tab+window when approval is rejected', async () => {
+    const pool = new TabPool();
+    const destroyed: string[] = [];
+    const svc = new BrowserService(pool, {
+      requestApproval: vi.fn().mockResolvedValue(false),
+      createWindow: () => {
+        const w = makeWindow(makeWebContents().wc);
+        w.destroy = vi.fn(() => destroyed.push('w'));
+        return w;
+      },
+    });
+    const r = await svc.get('s').navigate({ url: 'https://b.com/' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('用户拒绝了此操作');
+    expect(pool.list('s')).toHaveLength(0);
+    expect(destroyed).toEqual(['w']);
+  });
+
+  it('explicit-tabId navigate keeps the tab when approval is rejected', async () => {
+    const pool = new TabPool();
+    const svc = new BrowserService(pool, {
+      requestApproval: vi.fn().mockResolvedValue(false),
+      createWindow: () => makeWindow(makeWebContents().wc),
+    });
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    const r = await svc.get('s').navigate({ tabId, url: 'https://b.com/' });
+    expect(r.ok).toBe(false);
+    expect(pool.list('s')).toHaveLength(1);
+  });
 });
 
 describe('SSRF chain in browser path (validateUrl)', () => {

@@ -117,6 +117,21 @@ describe('BrowserTab', () => {
     expect(img?.getAttribute('src')).toBe(dataUrl);
   });
 
+  it('opens http(s) and mailto links via window.open', async () => {
+    (window as any).electronAPI.browser.getSnapshot = vi.fn().mockResolvedValue({ markdown: '[联系](mailto:a@b.c) [站](https://ex.com)' });
+    const open = vi.fn();
+    (window as any).open = open;
+    const { container, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+    await act(async () => {});
+    await act(async () => {});
+    const anchors = container.querySelectorAll('a');
+    expect(anchors.length).toBe(2);
+    const mailto = Array.from(anchors).find((a) => a.getAttribute('href')?.startsWith('mailto:'));
+    fireClick(mailto ?? null);
+    expect(open).toHaveBeenCalledWith('mailto:a@b.c', '_blank');
+    unmount();
+  });
+
   it('calls onDismiss when 收起 is clicked', async () => {
     const onDismiss = vi.fn();
     const { container } = render(<BrowserTab sessionId="s" streamId="st" onDismiss={onDismiss} />);

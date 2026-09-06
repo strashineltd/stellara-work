@@ -127,11 +127,11 @@ export function BrowserTab({ sessionId, streamId, events = [], onDismiss }: Brow
     window.electronAPI?.chat?.abort?.(streamId);
   }
 
-  /** 快照内链接：仅 http/https 才允许新窗口打开（主进程 setWindowOpenHandler 兜底） */
+  /** 快照内链接：http/https/mailto 允许新窗口打开（主进程 setWindowOpenHandler 兜底） */
   function handleAnchorClick(href: string) {
     try {
       const u = new URL(href, window.location.href);
-      if (u.protocol === 'http:' || u.protocol === 'https:') {
+      if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:') {
         window.open(u.href, '_blank');
       }
     } catch {

@@ -272,11 +272,11 @@ export class BrowserService {
     return wc.executeJavaScript(code);
   }
 
-  private ensureTab(sessionId: string, tabId: string | undefined, urlForCreate: string): string {
+  private ensureTab(sessionId: string, tabId: string | undefined, urlForCreate: string): { tabId: string; created: boolean } {
     if (tabId) {
       this.tabPool.select(sessionId, tabId);
       this.activeTabs.set(sessionId, tabId);
-      return tabId;
+      return { tabId, created: false };
     }
     const { tab, evicted } = this.tabPool.create(sessionId, urlForCreate);
     if (evicted) {
@@ -287,15 +287,27 @@ export class BrowserService {
       this.windows.delete(evicted.id);
       this.knownIds.delete(evicted.id);
       this.lastDomain.delete(evicted.id);
-      if (this.activeTabs.get(sessionId) === evicted.id) {
-        const rest = this.tabPool.list(sessionId);
-        this.activeTabs.set(sessionId, rest.length ? rest[rest.length - 1]!.id : undefined!);
-        if (!rest.length) this.activeTabs.delete(sessionId);
-      }
     }
     this.getOrCreateWindow(sessionId, tab.id);
     this.activeTabs.set(sessionId, tab.id);
-    return tab.id;
+    return { tabId: tab.id, created: true };
+  }
+
+  /** 撤销一次新建 Tab 的副作用（审批被拒时回滚隐式创建的 Tab+窗口） */
+  private rollbackTab(sessionId: string, tabId: string): void {
+    const win = this.windows.get(tabId);
+    if (win && typeof win.destroy === 'function') {
+      try { win.destroy(); } catch { /* ignore */ }
+    }
+    this.windows.delete(tabId);
+    this.knownIds.delete(tabId);
+    this.lastDomain.delete(tabId);
+    this.tabPool.close(sessionId, tabId);
+    if (this.activeTabs.get(sessionId) === tabId) {
+      const rest = this.tabPool.list(sessionId);
+      if (rest.length) this.activeTabs.set(sessionId, rest[rest.length - 1]!.id);
+      else this.activeTabs.delete(sessionId);
+    }
   }
 
   private async doNavigate(
@@ -310,8 +322,11 @@ export class BrowserService {
     const validation = await validateUrl(url);
     if (!validation.ok) return { ok: false, output: '', error: validation.error ?? 'URL 不允许' };
     let tabId: string;
+    let createdTab = false;
     try {
-      tabId = this.ensureTab(sessionId, args.tabId, url);
+      const res = this.ensureTab(sessionId, args.tabId, url);
+      tabId = res.tabId;
+      createdTab = res.created;
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
@@ -319,7 +334,10 @@ export class BrowserService {
     const last = this.lastDomain.get(tabId);
     const isNew = !last || last !== host;
     const approved = await this.ensureApproved(sessionId, 'browser_navigate', { ...(args as unknown as Record<string, unknown>) }, isNew);
-    if (!approved) return { ok: false, output: '', error: '用户拒绝了此操作' };
+    if (!approved) {
+      if (createdTab) this.rollbackTab(sessionId, tabId);
+      return { ok: false, output: '', error: '用户拒绝了此操作' };
+    }
     const win = this.getOrCreateWindow(sessionId, tabId);
     await withTimeout(win.webContents.loadURL(url), NAVIGATE_TIMEOUT_MS, '导航超时，可重试');
     this.lastDomain.set(tabId, host);
@@ -542,7 +560,7 @@ export class BrowserService {
             const gate = isAllowedBrowserUrl(url);
             if (!gate.ok) return { ok: false, output: '', error: gate.error ?? 'URL 不允许' };
           }
-          const tabId = this.ensureTab(sessionId, undefined, url);
+          const { tabId } = this.ensureTab(sessionId, undefined, url);
           const tab = this.tabPool.select(sessionId, tabId);
           return { ok: true, output: JSON.stringify(tab) };
         }
