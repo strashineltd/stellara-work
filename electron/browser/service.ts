@@ -136,8 +136,9 @@ function lazyElectron(): any {
 }
 
 export class BrowserService {
-  private windows = new Map<string, any>();
-  private lastDomain = new Map<string, string>();
+  private windows = new Map<string, any>();        // tabId -> BrowserWindow
+  private activeTabs = new Map<string, string>();  // sessionId -> tabId
+  private lastDomain = new Map<string, string>();  // tabId -> hostname
   private knownIds = new Map<string, Set<string>>();
 
   constructor(
@@ -152,6 +153,15 @@ export class BrowserService {
   isExecJsEnabled(): boolean {
     if (typeof this.opts.execJsEnabled === 'boolean') return this.opts.execJsEnabled;
     return process.env.STELLARA_BROWSER_JS === '1';
+  }
+
+  activeTabFor(sessionId: string): string | undefined {
+    return this.activeTabs.get(sessionId);
+  }
+
+  list(sessionId: string): Array<{ id: string; url: string; title: string; active?: boolean }> {
+    const active = this.activeTabs.get(sessionId);
+    return this.tabPool.list(sessionId).map((t) => ({ ...t, active: t.id === active }));
   }
 
   get(sessionId: string): SessionBrowser {
@@ -181,8 +191,8 @@ export class BrowserService {
     return fn({ toolName, args, summary, sessionId });
   }
 
-  private getOrCreateWindow(sessionId: string): any {
-    const existing = this.windows.get(sessionId);
+  private getOrCreateWindow(sessionId: string, tabId: string): any {
+    const existing = this.windows.get(tabId);
     if (existing && typeof existing.isDestroyed === 'function' && !existing.isDestroyed()) {
       return existing;
     }
@@ -250,14 +260,8 @@ export class BrowserService {
         }
       });
     });
-    this.windows.set(sessionId, win);
+    this.windows.set(tabId, win);
     return win;
-  }
-
-  private peekWindow(sessionId: string): any | undefined {
-    const w = this.windows.get(sessionId);
-    if (w && typeof w.isDestroyed === 'function' && !w.isDestroyed()) return w;
-    return undefined;
   }
 
   private execJsInIsolatedWorld(win: any, code: string): Promise<unknown> {
@@ -271,10 +275,27 @@ export class BrowserService {
   private ensureTab(sessionId: string, tabId: string | undefined, urlForCreate: string): string {
     if (tabId) {
       this.tabPool.select(sessionId, tabId);
+      this.activeTabs.set(sessionId, tabId);
       return tabId;
     }
-    const created = this.tabPool.create(sessionId, urlForCreate);
-    return created.id;
+    const { tab, evicted } = this.tabPool.create(sessionId, urlForCreate);
+    if (evicted) {
+      const w = this.windows.get(evicted.id);
+      if (w && typeof w.destroy === 'function') {
+        try { w.destroy(); } catch { /* ignore */ }
+      }
+      this.windows.delete(evicted.id);
+      this.knownIds.delete(evicted.id);
+      this.lastDomain.delete(evicted.id);
+      if (this.activeTabs.get(sessionId) === evicted.id) {
+        const rest = this.tabPool.list(sessionId);
+        this.activeTabs.set(sessionId, rest.length ? rest[rest.length - 1]!.id : undefined!);
+        if (!rest.length) this.activeTabs.delete(sessionId);
+      }
+    }
+    this.getOrCreateWindow(sessionId, tab.id);
+    this.activeTabs.set(sessionId, tab.id);
+    return tab.id;
   }
 
   private async doNavigate(
@@ -288,20 +309,20 @@ export class BrowserService {
     if (!gate.ok) return { ok: false, output: '', error: gate.error ?? 'URL 不允许' };
     const validation = await validateUrl(url);
     if (!validation.ok) return { ok: false, output: '', error: validation.error ?? 'URL 不允许' };
-    const host = safeHostname(url) ?? '';
-    const last = this.lastDomain.get(sessionId);
-    const isNew = !last || last !== host;
-    const approved = await this.ensureApproved(sessionId, 'browser_navigate', { ...(args as unknown as Record<string, unknown>) }, isNew);
-    if (!approved) return { ok: false, output: '', error: '用户拒绝了此操作' };
     let tabId: string;
     try {
       tabId = this.ensureTab(sessionId, args.tabId, url);
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
-    const win = this.getOrCreateWindow(sessionId);
+    const host = safeHostname(url) ?? '';
+    const last = this.lastDomain.get(tabId);
+    const isNew = !last || last !== host;
+    const approved = await this.ensureApproved(sessionId, 'browser_navigate', { ...(args as unknown as Record<string, unknown>) }, isNew);
+    if (!approved) return { ok: false, output: '', error: '用户拒绝了此操作' };
+    const win = this.getOrCreateWindow(sessionId, tabId);
     await withTimeout(win.webContents.loadURL(url), NAVIGATE_TIMEOUT_MS, '导航超时，可重试');
-    this.lastDomain.set(sessionId, host);
+    this.lastDomain.set(tabId, host);
     const tab = this.tabPool.select(sessionId, tabId);
     tab.url = url;
     tab.title = url;
@@ -319,7 +340,7 @@ export class BrowserService {
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
-    const win = this.getOrCreateWindow(sessionId);
+    const win = this.getOrCreateWindow(sessionId, args.tabId);
     const html = await withTimeout(
       this.execJsInIsolatedWorld(win, 'document.documentElement.outerHTML.slice(0,500000)'),
       JS_TIMEOUT_MS,
@@ -345,7 +366,7 @@ export class BrowserService {
     }
     const approved = await this.ensureApproved(sessionId, 'browser_act', { ...(args as unknown as Record<string, unknown>) }, false);
     if (!approved) return { ok: false, output: '', error: '用户拒绝了此操作' };
-    const win = this.getOrCreateWindow(sessionId);
+    const win = this.getOrCreateWindow(sessionId, args.tabId);
     const wc = win.webContents;
     const notFound = (ref: string): ToolResult => ({ ok: false, output: '', error: `未找到目标元素 ${ref}（请重新 snapshot）` });
     const run = async (): Promise<ToolResult> => {
@@ -451,7 +472,7 @@ export class BrowserService {
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
-    const win = this.getOrCreateWindow(sessionId);
+    const win = this.getOrCreateWindow(sessionId, args.tabId);
     const html = await withTimeout(
       this.execJsInIsolatedWorld(win, 'document.documentElement.outerHTML.slice(0,500000)'),
       JS_TIMEOUT_MS,
@@ -480,7 +501,7 @@ export class BrowserService {
     } catch (e) {
       return { ok: false, output: '', error: e instanceof Error ? e.message : String(e) };
     }
-    const win = this.getOrCreateWindow(sessionId);
+    const win = this.getOrCreateWindow(sessionId, args.tabId);
     const img = (await withTimeout(win.webContents.capturePage(), ACT_TIMEOUT_MS, '截图超时，可重试')) as any;
     let buf: Buffer;
     let mime = 'image/png';
@@ -514,25 +535,39 @@ export class BrowserService {
     try {
       switch (args.op) {
         case 'list':
-          return { ok: true, output: JSON.stringify(this.tabPool.list(sessionId)) };
+          return { ok: true, output: JSON.stringify(this.list(sessionId)) };
         case 'create': {
           const url = (args.url ?? 'about:blank').trim() || 'about:blank';
           if (url !== 'about:blank') {
             const gate = isAllowedBrowserUrl(url);
             if (!gate.ok) return { ok: false, output: '', error: gate.error ?? 'URL 不允许' };
           }
-          const t = this.tabPool.create(sessionId, url);
-          return { ok: true, output: JSON.stringify(t) };
+          const tabId = this.ensureTab(sessionId, undefined, url);
+          const tab = this.tabPool.select(sessionId, tabId);
+          return { ok: true, output: JSON.stringify(tab) };
         }
         case 'close': {
           if (!args.tabId) return { ok: false, output: '', error: '缺少 tabId' };
-          this.tabPool.close(sessionId, args.tabId);
+          this.tabPool.select(sessionId, args.tabId);
+          const win = this.windows.get(args.tabId);
+          if (win && typeof win.destroy === 'function') {
+            try { win.destroy(); } catch { /* ignore */ }
+          }
+          this.windows.delete(args.tabId);
           this.knownIds.delete(args.tabId);
+          this.lastDomain.delete(args.tabId);
+          this.tabPool.close(sessionId, args.tabId);
+          if (this.activeTabs.get(sessionId) === args.tabId) {
+            const rest = this.tabPool.list(sessionId);
+            if (rest.length) this.activeTabs.set(sessionId, rest[rest.length - 1]!.id);
+            else this.activeTabs.delete(sessionId);
+          }
           return { ok: true, output: `已关闭: ${args.tabId}` };
         }
         case 'select': {
           if (!args.tabId) return { ok: false, output: '', error: '缺少 tabId' };
           const t = this.tabPool.select(sessionId, args.tabId);
+          this.activeTabs.set(sessionId, args.tabId);
           return { ok: true, output: JSON.stringify(t) };
         }
         default:
@@ -560,18 +595,18 @@ export class BrowserService {
     }
     const approved = await this.ensureApproved(sessionId, 'browser_exec_js', { ...(args as unknown as Record<string, unknown>), js: args.js.slice(0, 200) }, false);
     if (!approved) return { ok: false, output: '', error: '用户拒绝了此操作' };
-    const win = this.getOrCreateWindow(sessionId);
+    const win = this.getOrCreateWindow(sessionId, args.tabId);
     const out = await withTimeout(this.execJsInIsolatedWorld(win, args.js), JS_TIMEOUT_MS, 'JS 执行超时，可重试');
     return { ok: true, output: String(out ?? '').slice(0, 20000) };
   }
 
   private doStop(sessionId: string): void {
-    const win = this.peekWindow(sessionId);
+    const tabId = this.activeTabs.get(sessionId);
+    if (!tabId) return;
+    const win = this.windows.get(tabId);
     try {
       win?.webContents?.stop?.();
-    } catch {
-      // ignore: stop is best-effort
-    }
+    } catch { /* ignore */ }
   }
 }
 

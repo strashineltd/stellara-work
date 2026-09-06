@@ -952,14 +952,7 @@ function registerIpcHandlers(): void {
   handle('browser:list', async (_e, sessionId: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
     const { browserService } = await import('./browser/service');
-    const result = await browserService.get(sessionId).tabs({ op: 'list' });
-    if (!result.ok) throw new Error(result.error ?? '获取标签页失败');
-    try {
-      const tabs = JSON.parse(result.output) as Array<{ id: string; url: string; title: string }>;
-      return tabs.map((t) => ({ id: t.id, url: t.url, title: t.title }));
-    } catch {
-      return [];
-    }
+    return browserService.list(sessionId);
   });
 
   handle('browser:getSnapshot', async (_e, sessionId: string, tabId: string) => {

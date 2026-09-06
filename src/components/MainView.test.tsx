@@ -2097,3 +2097,143 @@ describe('MainView live entry motion', () => {
     }
   });
 });
+
+describe('MainView browser panel', () => {
+  type StreamControl = {
+    events: AsyncGenerator<import('../../shared/ipc').ChatStreamEvent>;
+    push: (ev: import('../../shared/ipc').ChatStreamEvent) => void;
+  };
+
+  function controlledStream(): StreamControl {
+    const queue: import('../../shared/ipc').ChatStreamEvent[] = [];
+    const waiters: Array<(ev: import('../../shared/ipc').ChatStreamEvent) => void> = [];
+    const events = (async function* () {
+      for (;;) {
+        const ev = queue.length > 0
+          ? queue.shift()!
+          : await new Promise<import('../../shared/ipc').ChatStreamEvent>((resolve) => waiters.push(resolve));
+        yield ev;
+        if (ev.type === 'done') return;
+      }
+    })();
+    return {
+      events,
+      push: (ev) => {
+        if (waiters.length > 0) waiters.shift()!(ev);
+        else queue.push(ev);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+      browser: {
+        list: vi.fn().mockResolvedValue([]),
+        getSnapshot: vi.fn().mockResolvedValue({ markdown: '' }),
+      },
+    };
+  });
+
+  async function typeAndSend(querySelector: (sel: string) => Element | null, text: string) {
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+  }
+
+  it('collects browser_* stream events and mounts the panel auto-expanded', async () => {
+    const events = (async function* () {
+      yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'browser_navigate', arguments: '{"url":"https://ex.com"}' } } };
+      yield { type: 'tool_result', toolResult: { name: 'browser_navigate', result: { ok: true, output: 'ok' } } };
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 'st1', events });
+    const { querySelector } = await renderMainView();
+    await typeAndSend(querySelector, '打开网站');
+    const panel = querySelector('.browser-tab');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('aria-label')).toBe('浏览器观察');
+  });
+
+  it('does not mount the panel for a stream without browser events', async () => {
+    const events = (async function* () {
+      yield { type: 'content', content: '普通回复' };
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 'st1', events });
+    const { querySelector } = await renderMainView();
+    await typeAndSend(querySelector, '写个测试');
+    expect(querySelector('.browser-tab')).toBeNull();
+  });
+
+  it('stays closed after dismissal for the rest of the stream', async () => {
+    const stream = controlledStream();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 'st1', events: stream.events });
+    const { querySelector, querySelectorAll } = await renderMainView();
+    await typeAndSend(querySelector, '打开网站');
+    stream.push({ type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'browser_navigate', arguments: '{"url":"https://ex.com"}' } } });
+    await act(async () => {});
+    expect(querySelector('.browser-tab')).not.toBeNull();
+    const dismiss = Array.from(querySelectorAll('button')).find((el) => el.textContent === '收起');
+    fireClick(dismiss);
+    expect(querySelector('.browser-tab')).toBeNull();
+    stream.push({ type: 'tool_result', toolResult: { name: 'browser_navigate', result: { ok: true, output: 'ok' } } });
+    await act(async () => {});
+    expect(querySelector('.browser-tab')).toBeNull();
+    stream.push({ type: 'done' });
+    await act(async () => {});
+  });
+
+  it('clears the browser panel when switching sessions', async () => {
+    const stream = controlledStream();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 'st1', events: stream.events });
+    const { querySelector } = await renderMainView({}, SessionSwitchHarness);
+    await typeAndSend(querySelector, '打开网站');
+    stream.push({ type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'browser_navigate', arguments: '{"url":"https://ex.com"}' } } });
+    await act(async () => {});
+    expect(querySelector('.browser-tab')).not.toBeNull();
+    fireClick(querySelector('[data-tab-id="b"]'));
+    await act(async () => {});
+    expect(querySelector('.browser-tab')).toBeNull();
+    stream.push({ type: 'done' });
+    await act(async () => {});
+  });
+
+  it('does not re-open the panel for late browser_* events from a previous stream after switching sessions', async () => {
+    const stream = controlledStream();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 'st1', events: stream.events });
+    const { querySelector } = await renderMainView({}, SessionSwitchHarness);
+    await typeAndSend(querySelector, '打开网站');
+    stream.push({ type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'browser_navigate', arguments: '{"url":"https://ex.com"}' } } });
+    await act(async () => {});
+    expect(querySelector('.browser-tab')).not.toBeNull();
+    fireClick(querySelector('[data-tab-id="b"]'));
+    await act(async () => {});
+    stream.push({ type: 'tool_result', toolResult: { name: 'browser_navigate', result: { ok: true, output: 'ok' } } });
+    await act(async () => {});
+    expect(querySelector('.browser-tab')).toBeNull();
+    stream.push({ type: 'done' });
+    await act(async () => {});
+  });
+});

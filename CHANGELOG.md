@@ -6,6 +6,7 @@ All notable changes to Stellara Work are documented here. Versions follow [Seman
 
 ### Added · 新增
 
+- 内置 AI 浏览器二期：真多 Tab（每 Tab 独立窗口）、观察窗接入聊天区并自动展开、同 Tab 快照实时刷新、Markdown 链接协议硬化
 - 内置 AI 浏览器 P0/P1: web_search + browser_* Agent 工具（自动化控制，强审批），观察窗只读
 
 ## [0.9.2] - 2026-08-20

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act } from 'react';
 import { MarkdownView } from './MarkdownView';
@@ -53,6 +53,30 @@ describe('MarkdownView', () => {
       <MarkdownView content="没有任何路径，只有普通文字。" workDir="/w" />,
     );
     expect(container.querySelector('.hoverable-path')).toBeNull();
+    unmount();
+  });
+
+  it('renders dangerous-protocol links as plain text', () => {
+    const { container, unmount } = render(<MarkdownView content="[x](javascript:alert(1))" />);
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.textContent).toContain('x');
+    unmount();
+  });
+
+  it('keeps http(s)/mailto links as anchors', () => {
+    const { container, unmount } = render(<MarkdownView content="[site](https://ex.com) [mail](mailto:a@b.c)" />);
+    expect(container.querySelectorAll('a').length).toBe(2);
+    unmount();
+  });
+
+  it('calls onAnchorClick when a link is clicked', () => {
+    const onClick = vi.fn();
+    const { container, unmount } = render(
+      <MarkdownView content="[site](https://ex.com)" onAnchorClick={onClick} />,
+    );
+    const a = container.querySelector('a')!;
+    act(() => { a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); });
+    expect(onClick).toHaveBeenCalledWith('https://ex.com/');
     unmount();
   });
 });

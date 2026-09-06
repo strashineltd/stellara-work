@@ -934,7 +934,7 @@ export interface ElectronAPI {
     invoke: (name: ToolName, args: ToolArgs) => Promise<ToolResult>;
   };
   browser: {
-    list: (sessionId: string) => Promise<Array<{ id: string; url: string; title: string }>>;
+    list: (sessionId: string) => Promise<Array<{ id: string; url: string; title: string; active?: boolean }>>;
     getSnapshot: (sessionId: string, tabId: string) => Promise<{ markdown: string }>;
   };
   dialog: {

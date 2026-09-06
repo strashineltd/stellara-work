@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AppInfo, ApprovalRequest, AttachmentMeta, ConfiguredModel, ModelListItem,
-  SessionSummary, Session, SkillDef, Project, ContextStateView,
+  SessionSummary, Session, SkillDef, Project, ContextStateView, ChatStreamEvent,
 } from '../../shared/ipc';
 import {
   type DisplayEntry,
@@ -23,6 +23,7 @@ import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
 import { CommandPalette } from './CommandPalette';
+import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
 import { type OpenSettings } from './SettingsPanel';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { usePresence } from '../hooks/usePresence';
@@ -107,6 +108,11 @@ export function MainView(props: MainViewProps) {
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
+  // 本次任务的浏览器事件（browser_* / tool_call(browser_*) / tool_result(browser_*)）
+  const [browserEvents, setBrowserEvents] = useState<ChatStreamEvent[]>([]);
+  const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
+  // 用户在本流内收起面板后，不再自动展开
+  const browserPanelDismissedRef = useRef(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks' | 'memory' | 'files'>('home');
   const [slash, setSlash] = useState<SlashState>({
@@ -262,6 +268,13 @@ export function MainView(props: MainViewProps) {
   // ---- Session lifecycle ----
   const entriesSessionRef = useRef<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 切换会话时清空上一个会话残留的浏览器面板状态（发送新任务时也会重置）
+  useEffect(() => {
+    setBrowserEvents([]);
+    setBrowserPanelOpen(false);
+    browserPanelDismissedRef.current = false;
+  }, [activeSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -474,6 +487,9 @@ export function MainView(props: MainViewProps) {
     setMemoryContext([]);
     setContextStats(null);
     setSubagents([]);
+    setBrowserEvents([]);
+    setBrowserPanelOpen(false);
+    browserPanelDismissedRef.current = false;
     if (!activeSessionId) {
       appendLocalError('请先创建并选择一个会话后再发送任务。');
       return;
@@ -525,6 +541,13 @@ export function MainView(props: MainViewProps) {
           );
           return next ?? prev;
         });
+        if (isBrowserStreamEvent(ev)) {
+          // M3: 迟到的 browser_* 事件若属于已切走的流，不追加、不自动展开（面板不会挂到别的会话上）
+          if (streamSessionId === activeSessionRef.current) {
+            setBrowserEvents((prev) => [...prev, ev]);
+            if (!browserPanelDismissedRef.current) setBrowserPanelOpen(true);
+          }
+        }
         if (ev.type === 'memory_context' && ev.memories) {
           setMemoryContext(ev.memories);
         }
@@ -932,6 +955,17 @@ export function MainView(props: MainViewProps) {
                     if (others.length === 0) return;
                     if (!window.confirm(`关闭并删除其他 ${others.length} 个会话？该操作不可撤销。`)) return;
                     for (const s of others) void handleDeleteSession(s.id, true);
+                  }}
+                />
+              )}
+              {browserPanelOpen && activeSessionId && (
+                <BrowserTab
+                  sessionId={activeSessionId}
+                  streamId={streamId}
+                  events={browserEvents}
+                  onDismiss={() => {
+                    browserPanelDismissedRef.current = true;
+                    setBrowserPanelOpen(false);
                   }}
                 />
               )}

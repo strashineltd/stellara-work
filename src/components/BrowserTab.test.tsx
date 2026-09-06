@@ -21,6 +21,11 @@ function render(ui: React.ReactElement) {
       });
       document.body.removeChild(container);
     },
+    rerender: (ui: React.ReactElement) => {
+      act(() => {
+        root!.render(ui);
+      });
+    },
     getByText: (text: string | RegExp) => {
       const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
       let node: Node | null;
@@ -110,5 +115,61 @@ describe('BrowserTab', () => {
     const img = querySelector('.browser-tab__screenshot') as HTMLImageElement | null;
     expect(img?.tagName.toLowerCase()).toBe('img');
     expect(img?.getAttribute('src')).toBe(dataUrl);
+  });
+
+  it('calls onDismiss when 收起 is clicked', async () => {
+    const onDismiss = vi.fn();
+    const { container } = render(<BrowserTab sessionId="s" streamId="st" onDismiss={onDismiss} />);
+    await act(async () => {});
+    fireClick(getByRole(container, 'button', /收起/));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes snapshot when a browser_snapshot event arrives for the same tab', async () => {
+    const getSnapshot = vi.fn().mockResolvedValue({ markdown: '# v1' });
+    (window as any).electronAPI.browser.getSnapshot = getSnapshot;
+    const { rerender, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+    await act(async () => {});
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+    rerender(
+      <BrowserTab
+        sessionId="s"
+        streamId="st"
+        events={[{ type: 'tool_result', toolResult: { name: 'browser_snapshot', result: { ok: true, output: 'ok' } } }]}
+      />,
+    );
+    await act(async () => {});
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it('marks the service-active tab from browser.list with .active and follows it with .selected', async () => {
+    const TABS2 = [
+      { id: 't1', url: 'https://a.com', title: 'a' },
+      { id: 't2', url: 'https://b.com', title: 'b', active: true },
+    ];
+    (window as any).electronAPI.browser.list = vi.fn().mockResolvedValue(TABS2);
+    const { container, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+    await act(async () => {});
+    expect(container.querySelector('.browser-tab__tab.active')?.textContent).toContain('b.com');
+    expect(container.querySelector('.browser-tab__tab.selected')?.textContent).toContain('b.com');
+    expect(container.querySelector('.browser-tab__tab.active')?.classList.contains('selected')).toBe(true);
+    unmount();
+  });
+
+  it('marks the manually clicked tab with .selected without claiming .active', async () => {
+    const TABS2 = [
+      { id: 't1', url: 'https://a.com', title: 'a', active: true },
+      { id: 't2', url: 'https://b.com', title: 'b' },
+    ];
+    (window as any).electronAPI.browser.list = vi.fn().mockResolvedValue(TABS2);
+    const { container, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+    await act(async () => {});
+    fireClick(getByRole(container, 'button', /b\.com/));
+    const selectedBtn = container.querySelector('.browser-tab__tab.selected');
+    expect(selectedBtn?.textContent).toContain('b.com');
+    expect(selectedBtn?.classList.contains('active')).toBe(false);
+    expect(container.querySelector('.browser-tab__tab.active')?.textContent).toContain('a.com');
+    unmount();
   });
 });

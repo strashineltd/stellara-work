@@ -6,6 +6,20 @@ import { HoverablePath } from './hover/HoverablePath';
 interface MarkdownViewProps {
   content: string;
   workDir?: string;
+  /** 链接被点击时先经此回调（如协议校验后新窗口打开） */
+  onAnchorClick?: (href: string) => void;
+}
+
+const SAFE_LINK_PROTOCOLS = ['http:', 'https:', 'mailto:'];
+
+function resolveHref(href: string | undefined): string | null {
+  if (!href) return null;
+  try {
+    const u = new URL(href, window.location.href);
+    return SAFE_LINK_PROTOCOLS.includes(u.protocol) ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -14,7 +28,7 @@ interface MarkdownViewProps {
  * - 代码块、列表、标题、引用、行内代码、链接
  * - 简单代码高亮（关键词颜色），不上 highlight.js（避免 50KB 依赖）
  */
-export function MarkdownView({ content, workDir }: MarkdownViewProps) {
+export function MarkdownView({ content, workDir, onAnchorClick }: MarkdownViewProps) {
   return (
     <div className="md-content">
       <ReactMarkdown
@@ -34,10 +48,25 @@ export function MarkdownView({ content, workDir }: MarkdownViewProps) {
               </code>
             );
           },
-          // 链接：新窗口打开
-          a({ children, ...props }: { children?: React.ReactNode } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+          // 链接：协议安全后才渲染为 a；dangerous/不可解析为 span
+          a({ children, href, ...props }: { children?: React.ReactNode } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+            const safe = resolveHref(href);
+            if (!safe) {
+              return <span>{children}</span>;
+            }
             return (
-              <a {...props} target="_blank" rel="noopener noreferrer">
+              <a
+                {...props}
+                href={safe}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  if (onAnchorClick) {
+                    e.preventDefault();
+                    onAnchorClick(safe);
+                  }
+                }}
+              >
                 {children}
               </a>
             );
