@@ -1,4 +1,4 @@
-import type { OpenAITool, ToolName, ToolArgs, ToolResult, ToolExecutionContext, RunCommandArgs, DispatchSubagentsArgs } from '../../../shared/ipc';
+import type { OpenAITool, ToolName, ToolArgs, ToolResult, ToolExecutionContext, RunCommandArgs, DispatchSubagentsArgs, WebSearchArgs } from '../../../shared/ipc';
 import { readFile, writeFile, editFile, fsTools } from './fs';
 import { runCommand, shellTools } from './shell';
 import { searchFiles, searchTools } from './search';
@@ -10,7 +10,16 @@ import { taskComplete, taskCompleteTools } from './task-complete';
 import { gitStatus, gitDiff, gitLog, gitTools } from './git';
 import { memorySearch, memorySave, memoryTools } from './memory';
 import { dispatchSubagents, dispatchSubagentsTools } from './dispatch-subagents';
+import { webSearch, webSearchTools } from './web-search';
+import { browserOpenAITools, browserPlanTools } from './browser-tools';
+import { browserService } from '../../browser/service';
 import { mcpManager } from '../../mcp/mcp-manager';
+
+function toBrowserError(e: unknown, fallback: string): ToolResult {
+  const msg = e instanceof Error ? e.message : String(e ?? fallback);
+  const retryable = /超时|可重试|重试|TIMEOUT|ECONN|ENOTFOUND|net::|ERR_/i.test(msg);
+  return { ok: false, output: '', error: retryable ? msg : `${msg}（失败）` };
+}
 
 export { fsTools, shellTools, searchTools, grepTools, searchSymbolTools, listFilesTools, webFetchTools, taskCompleteTools, gitTools, memoryTools, dispatchSubagentsTools };
 
@@ -26,6 +35,8 @@ export const allTools: OpenAITool[] = [
   ...gitTools,
   ...memoryTools,
   ...dispatchSubagentsTools,
+  ...webSearchTools,
+  ...browserOpenAITools.filter((t) => !['web_search'].includes(t.function.name)),
 ];
 
 /**
@@ -38,6 +49,8 @@ export const planModeTools: OpenAITool[] = [
   searchSymbolTools[0], // search_symbol（只读）
   listFilesTools[0], // list_files
   ...gitTools,      // git 操作是只读的
+  browserPlanTools.find((t) => t.function.name === 'browser_snapshot')!,
+  browserPlanTools.find((t) => t.function.name === 'browser_extract')!,
   // web_fetch 不进 plan mode（会发起外部请求）
   // memory_search 也不进 plan mode
 ];
@@ -102,6 +115,64 @@ async function invokeToolInternal(
       return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd);
     case 'dispatch_subagents':
       return dispatchSubagents(args as DispatchSubagentsArgs, cwd, context);
+    case 'web_search':
+      return webSearch(args as WebSearchArgs, cwd);
+    case 'browser_navigate': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).navigate(args as { url: string; tabId?: string }, context);
+      } catch (e) {
+        return toBrowserError(e, '导航失败，可重试');
+      }
+    }
+    case 'browser_snapshot': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).snapshot(args as { tabId: string }, context);
+      } catch (e) {
+        return toBrowserError(e, '快照失败，可重试');
+      }
+    }
+    case 'browser_act': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).act(args as { tabId: string; action: 'click' | 'type' | 'scroll' | 'select' | 'hover' | 'press' | 'back' | 'reload'; targetId?: string; text?: string; direction?: 'up' | 'down' }, context);
+      } catch (e) {
+        return toBrowserError(e, '操作失败，可重试');
+      }
+    }
+    case 'browser_extract': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).extract(args as { tabId: string; kind: 'text' | 'links' | 'tables' }, context);
+      } catch (e) {
+        return toBrowserError(e, '抽取失败，可重试');
+      }
+    }
+    case 'browser_screenshot': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).screenshot(args as { tabId: string }, context);
+      } catch (e) {
+        return toBrowserError(e, '截图失败，可重试');
+      }
+    }
+    case 'browser_tabs': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).tabs(args as { op: 'list' | 'create' | 'close' | 'select'; tabId?: string; url?: string }, context);
+      } catch (e) {
+        return toBrowserError(e, 'Tab 操作失败，可重试');
+      }
+    }
+    case 'browser_exec_js': {
+      const sid = context?.sessionId ?? 'default';
+      try {
+        return await browserService.get(sid).execJs(args as { tabId: string; js: string }, context);
+      } catch (e) {
+        return toBrowserError(e, 'JS 执行失败，可重试');
+      }
+    }
     default:
       return { ok: false, output: '', error: `未知工具: ${name}` };
   }

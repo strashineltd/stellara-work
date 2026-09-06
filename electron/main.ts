@@ -48,6 +48,12 @@ let pendingOpenFile: string | null = null;
 const chatStreams = new ChatStreamRegistry();
 const grantedWorkDirs = new Set<string>();
 
+// BrowserService 的服务端审批（browser_navigate 新域）需要路由到具体 stream 的审批通道。
+const browserSessionStreams = new Map<string, string>();
+function unregisterBrowserStream(sessionId: string, streamId: string): void {
+  if (browserSessionStreams.get(sessionId) === streamId) browserSessionStreams.delete(sessionId);
+}
+
 async function normalizeWorkDir(workDir: string): Promise<string> {
   const resolved = path.resolve(workDir);
   if (process.platform === 'win32') return resolved.toLowerCase();
@@ -309,6 +315,7 @@ function registerIpcHandlers(): void {
   handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
     const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    browserSessionStreams.set(request.sessionId, streamId);
 
     const wireApi = configured.wireApi ?? 'responses';
     if (wireApi === 'anthropic') {
@@ -940,6 +947,29 @@ function registerIpcHandlers(): void {
     if (!memory) throw new Error('记忆不存在');
     return memoryToMarkdown(memory);
   });
+
+  // Browser (Task 9, read-only for Task 10 UI; trusted handle wrapper already enforces isTrustedIpcSender)
+  handle('browser:list', async (_e, sessionId: string) => {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    const { browserService } = await import('./browser/service');
+    const result = await browserService.get(sessionId).tabs({ op: 'list' });
+    if (!result.ok) throw new Error(result.error ?? '获取标签页失败');
+    try {
+      const tabs = JSON.parse(result.output) as Array<{ id: string; url: string; title: string }>;
+      return tabs.map((t) => ({ id: t.id, url: t.url, title: t.title }));
+    } catch {
+      return [];
+    }
+  });
+
+  handle('browser:getSnapshot', async (_e, sessionId: string, tabId: string) => {
+    if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    if (typeof tabId !== 'string' || !tabId.trim()) throw new Error('标签页无效');
+    const { browserService } = await import('./browser/service');
+    const result = await browserService.get(sessionId).snapshot({ tabId });
+    if (!result.ok) throw new Error(result.error ?? '获取快照失败');
+    return { markdown: result.output };
+  });
 }
 
 async function verifyProjectSelection(workDir: string, filePath: string): Promise<ProjectFileSelection> {
@@ -1228,6 +1258,7 @@ async function runAnthropicLoopForIpc(
     coordinator.dispose();
     contextHub.dispose();
     chatStreams.cleanup(streamId);
+    unregisterBrowserStream(request.sessionId, streamId);
     if (!terminalEventSent) send({ type: 'done' });
 
     // macOS：恢复系统休眠
@@ -1412,6 +1443,7 @@ async function runResponsesLoopForIpc(
     coordinator.dispose();
     contextHub.dispose();
     chatStreams.cleanup(streamId);
+    unregisterBrowserStream(request.sessionId, streamId);
     if (!terminalEventSent) send({ type: 'done' });
 
     // macOS：恢复系统休眠
@@ -1711,6 +1743,31 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   createWindow();
   installAppMenu(() => mainWindow);
+
+  // C1: 接入 BrowserService 的服务端审批（browser_navigate 新域）。
+  // browser_act/browser_exec_js 由 Agent 循环的 DANGEROUS_TOOLS 把关，不在此重复。
+  // 审批卡片复用现有 approval_required → ApprovalTopBar 通道，超时默认拒绝。
+  const { browserService } = await import('./browser/service');
+  browserService.setRequestApproval(async (req) => {
+    const streamId = browserSessionStreams.get(req.sessionId ?? 'default');
+    if (!streamId) return false;
+    const approvalId = `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('chat-stream', {
+        streamId,
+        event: {
+          type: 'approval_required',
+          approval: {
+            id: approvalId,
+            toolName: req.toolName,
+            args: JSON.stringify(req.args),
+            toolCallId: `browser-${approvalId}`,
+          },
+        },
+      });
+    }
+    return chatStreams.requestApproval(streamId, approvalId, 60_000);
+  });
 });
 
 app.on('window-all-closed', () => {

@@ -161,7 +161,11 @@ export interface ChatStreamEvent {
     | 'subagent_conflict'
     // Context Hub 事件
     | 'context_revision'
-    | 'context_usage';
+    | 'context_usage'
+    // AI 浏览器事件
+    | 'browser_navigate'
+    | 'browser_snapshot'
+    | 'browser_screenshot';
   content?: string;
   toolCall?: ToolCall;
   toolResult?: { name: string; toolCallId?: string; result: unknown };
@@ -275,22 +279,13 @@ export interface OpenAITool {
 }
 
 export type ToolName =
-  | 'read_file'
-  | 'write_file'
-  | 'edit_file'
-  | 'run_command'
-  | 'search_files'
-  | 'search_content'
-  | 'search_symbol'
-  | 'list_files'
-  | 'web_fetch'
-  | 'task_complete'
-  | 'git_status'
-  | 'git_diff'
-  | 'git_log'
-  | 'memory_search'
-  | 'memory_save'
-  | 'dispatch_subagents';
+  | 'read_file' | 'write_file' | 'edit_file' | 'run_command'
+  | 'search_files' | 'search_content' | 'search_symbol' | 'list_files'
+  | 'web_fetch' | 'web_search'
+  | 'browser_navigate' | 'browser_snapshot' | 'browser_act'
+  | 'browser_extract' | 'browser_screenshot' | 'browser_tabs' | 'browser_exec_js'
+  | 'task_complete' | 'git_status' | 'git_diff' | 'git_log'
+  | 'memory_search' | 'memory_save' | 'dispatch_subagents';
 
 export interface ReadFileArgs {
   path: string;
@@ -354,6 +349,19 @@ export interface WebFetchArgs {
   maxBytes?: number;
 }
 
+export interface WebSearchArgs { query: string; count?: number; }
+export interface BrowserNavigateArgs { tabId?: string; url: string; }
+export interface BrowserSnapshotArgs { tabId: string; }
+export interface BrowserActArgs {
+  tabId: string;
+  action: 'click'|'type'|'scroll'|'select'|'hover'|'press'|'back'|'reload';
+  targetId?: string; text?: string; direction?: 'up'|'down';
+}
+export interface BrowserExtractArgs { tabId: string; kind: 'text'|'links'|'tables'; }
+export interface BrowserScreenshotArgs { tabId: string; }
+export interface BrowserTabsArgs { op: 'list'|'create'|'close'|'select'; tabId?: string; url?: string; }
+export interface BrowserExecJsArgs { tabId: string; js: string; }
+
 export interface TaskCompleteArgs {
   summary?: string;
 }
@@ -414,6 +422,14 @@ export type ToolArgs =
   | SearchContentArgs
   | ListFilesArgs
   | WebFetchArgs
+  | WebSearchArgs
+  | BrowserNavigateArgs
+  | BrowserSnapshotArgs
+  | BrowserActArgs
+  | BrowserExtractArgs
+  | BrowserScreenshotArgs
+  | BrowserTabsArgs
+  | BrowserExecJsArgs
   | TaskCompleteArgs
   | DispatchSubagentsArgs;
 
@@ -916,6 +932,10 @@ export interface ElectronAPI {
   tools: {
     /** 直接调一个 tool（不通过 LLM，用于开发期 / 测试） */
     invoke: (name: ToolName, args: ToolArgs) => Promise<ToolResult>;
+  };
+  browser: {
+    list: (sessionId: string) => Promise<Array<{ id: string; url: string; title: string }>>;
+    getSnapshot: (sessionId: string, tabId: string) => Promise<{ markdown: string }>;
   };
   dialog: {
     /** 弹原生目录选择器，返回选中的路径（或 null 取消） */

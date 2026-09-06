@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { loadConfig, saveConfig, addModel, migrateFromV1, _setConfigDir } from './config-v2';
 import type { McpServerConfig } from '../../shared/ipc';
-import { _setSecretsDir, getKey } from './secrets';
+import { _setSecretsDir, _setCipher, getKey, setKey } from './secrets';
 
 let tmpDir: string;
 
@@ -185,6 +185,28 @@ describe('config-v2', () => {
     }));
     const migrated = await migrateFromV1();
     expect(migrated).toBe(false);
+  });
+
+  it('persists browser search provider choice + BYO key namespaces', async () => {
+    _setCipher(null);
+    // legacy config without browser field stays undefined (no migration break)
+    const legacy = await loadConfig();
+    expect(legacy.app.browser).toBeUndefined();
+    // browser provider choice round-trips via config
+    await saveConfig({
+      activeModelId: null,
+      models: [],
+      app: { browser: { searchProvider: 'tavily' } },
+      mcpServers: [],
+      schemaVersion: 1,
+    });
+    const cfg = await loadConfig();
+    expect(cfg.app.browser?.searchProvider).toBe('tavily');
+    // BYO keys round-trip via existing secrets.ts (no secrets.ts changes)
+    await setKey('browser-tavily', 'tvly-test');
+    await setKey('browser-brave', 'brv-test');
+    expect(getKey('browser-tavily')).toBe('tvly-test');
+    expect(getKey('browser-brave')).toBe('brv-test');
   });
 });
 

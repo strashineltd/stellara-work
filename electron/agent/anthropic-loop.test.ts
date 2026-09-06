@@ -125,6 +125,46 @@ describe('runAnthropicAgentLoop', () => {
     expect(resultMessage.content[0].content).toContain('用户拒绝了此操作');
   });
 
+  it('browser_act is gated as a dangerous tool (loop approval)', async () => {
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 12, output_tokens: 4 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'browser_act', input: { action: 'click' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 6 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+    const onApproval = vi.fn().mockResolvedValue(false);
+    for await (const _event of runAnthropicAgentLoop('任务', {
+      model,
+      cwd: workDir,
+      sessionId: 'sub-session',
+      contextHub: hub,
+      allowSubagents: false,
+      client: { create: mockCreate },
+      onApproval,
+    })) {
+      // 消费事件
+    }
+
+    expect(mockRequiresApproval).not.toHaveBeenCalled();
+    expect(onApproval).toHaveBeenCalledTimes(1);
+    expect(onApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ function: expect.objectContaining({ name: 'browser_act' }) }),
+    );
+    // 拒绝 → tool_result 内容是拒绝文案
+    const secondRequest = mockCreate.mock.calls[1]![0];
+    const resultMessage = secondRequest.messages.find((message: { role: string; content: unknown }) =>
+      message.role === 'user' && Array.isArray(message.content)
+        && message.content.some((block: { type?: string }) => block.type === 'tool_result'));
+    expect(resultMessage.content[0].content).toContain('用户拒绝了此操作');
+  });
+
   it('记忆注入携带会话所属项目 id', async () => {
     mockCreate.mockResolvedValueOnce({
       id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',

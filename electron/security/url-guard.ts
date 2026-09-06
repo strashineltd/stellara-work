@@ -17,3 +17,10 @@ export function isSafeExternalUrl(raw: string): boolean {
   }
   return SAFE_PROTOCOLS.has(url.protocol);
 }
+
+export function isSafeBrowserUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch { return false; }
+}

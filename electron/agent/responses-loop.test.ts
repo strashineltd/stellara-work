@@ -305,6 +305,27 @@ describe('runResponsesLoop', () => {
         expect.objectContaining({ function: expect.objectContaining({ name: 'write_file' }) }),
       );
     });
+
+    it('browser_act / browser_exec_js are gated as dangerous tools (loop approval)', async () => {
+      streamQueue.push(() => functionCallStream('browser_act'));
+      streamQueue.push(() => functionCallStream('browser_exec_js'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const onApproval = vi.fn().mockResolvedValue(false);
+
+      for await (const _event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        onApproval,
+      })) {
+        // 消费事件
+      }
+
+      expect(mockRequiresApproval).not.toHaveBeenCalled();
+      expect(onApproval.mock.calls.map((c) => c[0].function.name)).toEqual(['browser_act', 'browser_exec_js']);
+    });
   });
 
   it('记忆注入携带会话所属项目 id（按项目检索项目记忆）', async () => {

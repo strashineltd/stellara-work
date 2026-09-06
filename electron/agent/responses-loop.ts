@@ -84,7 +84,7 @@ export interface ResponsesLoopOptions {
 // 常量
 // ============================================
 
-const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents']);
+const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents', 'browser_act', 'browser_exec_js']);
 const MAX_TOOL_CALLS_DEFAULT = 50;
 const MAX_ITERATIONS_DEFAULT = 200;
 

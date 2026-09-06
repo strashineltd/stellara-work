@@ -2,6 +2,12 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added · 新增
+
+- 内置 AI 浏览器 P0/P1: web_search + browser_* Agent 工具（自动化控制，强审批），观察窗只读
+
 ## [0.9.2] - 2026-08-20
 
 ### Added · 新增

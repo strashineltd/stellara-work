@@ -126,6 +126,11 @@ const api: ElectronAPI = {
     invoke: (name: ToolName, args: ToolArgs): Promise<ToolResult> =>
       ipcRenderer.invoke('tools:invoke', name, args),
   },
+  browser: {
+    list: (sessionId: string) => ipcRenderer.invoke('browser:list', sessionId),
+    getSnapshot: (sessionId: string, tabId: string) =>
+      ipcRenderer.invoke('browser:getSnapshot', sessionId, tabId),
+  },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),
     openFile: (workDir: string): Promise<string | null> => ipcRenderer.invoke('dialog:openFile', workDir),

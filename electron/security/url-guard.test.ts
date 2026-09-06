@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSafeExternalUrl } from './url-guard';
+import { isSafeBrowserUrl, isSafeExternalUrl } from './url-guard';
 
 describe('isSafeExternalUrl', () => {
   it('允许 https 链接', () => {
@@ -49,5 +49,13 @@ describe('isSafeExternalUrl', () => {
 
   it('拒绝带空格的 URL', () => {
     expect(isSafeExternalUrl('https://exa mple.com')).toBe(false);
+  });
+});
+
+describe('isSafeBrowserUrl', () => {
+  it('isSafeBrowserUrl allows only http/https', () => {
+    expect(isSafeBrowserUrl('https://ex.com')).toBe(true);
+    expect(isSafeBrowserUrl('file:///x')).toBe(false);
+    expect(isSafeBrowserUrl('javascript:alert(1)')).toBe(false);
   });
 });

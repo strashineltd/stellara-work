@@ -45,7 +45,7 @@ export interface AnthropicLoopOptions {
   client?: Pick<AnthropicClient, 'create'>;
 }
 
-const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents']);
+const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents', 'browser_act', 'browser_exec_js']);
 
 export async function* runAnthropicAgentLoop(
   userMessage: string,

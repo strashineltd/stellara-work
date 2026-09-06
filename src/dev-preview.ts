@@ -121,6 +121,10 @@ export function installDevPreviewApi(): void {
       }),
     },
     tools: { invoke: async () => ({ ok: true, output: 'Preview' }) },
+    browser: {
+      list: async () => [],
+      getSnapshot: async () => ({ markdown: '' }),
+    },
     dialog: {
       openDirectory: async () => previewWorkDir,
       openFile: async () => `${previewWorkDir}${sep}README.md`,
