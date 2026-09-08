@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { BrowserService, shouldApprove, isTypeableElement, FORM_CONTROL_SELECTOR, isAllowlistedCookie } from './service';
+import { BrowserService, shouldApprove, isTypeableElement, FORM_CONTROL_SELECTOR, isAllowlistedCookie, READONLY_GUARD_SCRIPT } from './service';
 import { TabPool } from './tabs';
 
 vi.mock('node:dns/promises', () => ({
@@ -39,7 +39,11 @@ function makeWebContents(overrides: Record<string, unknown> = {}) {
 }
 
 function makeWindow(wc: Record<string, any>) {
-  return { isDestroyed: () => false, destroy: vi.fn(), webContents: wc };
+  return { isDestroyed: () => false, destroy: vi.fn(), setBounds: vi.fn(), webContents: wc };
+}
+
+function fakeContentView() {
+  return { addChildView: vi.fn(), removeChildView: vi.fn() };
 }
 
 async function createTab(svc: BrowserService, sessionId: string, url: string): Promise<string> {
@@ -691,5 +695,130 @@ describe('clearNonAllowlistedCookies', () => {
     await svc.get('s').tabs({ op: 'create', url: 'https://a.com/' });
     await svc.clearNonAllowlistedCookies([]);
     expect(errors.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('live view attach/detach (L3)', () => {
+  function liveSetup() {
+    const pool = new TabPool();
+    const contentView = fakeContentView();
+    const svc = new BrowserService(pool, {
+      createWindow: () => makeWindow(makeWebContents().wc),
+      getContentView: () => contentView,
+    });
+    return { pool, contentView, svc };
+  }
+
+  it('attachView adds view to contentView and applies the stored viewport', async () => {
+    const { svc, contentView } = liveSetup();
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    const win = svc.windowsForTest().get(tabId)!;
+    svc.setViewport({ x: 10, y: 20, width: 300, height: 200 });
+    svc.attachView('s', tabId);
+    expect(contentView.addChildView).toHaveBeenCalledWith(win);
+    expect(win.setBounds).toHaveBeenCalledWith({ x: 10, y: 20, width: 300, height: 200 });
+  });
+
+  it('attachView without a contentView throws 主窗口不可用', async () => {
+    const pool = new TabPool();
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(makeWebContents().wc) });
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    expect(() => svc.attachView('s', tabId)).toThrow('主窗口不可用');
+  });
+
+  it('detachView removes the child view', async () => {
+    const { svc, contentView } = liveSetup();
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    svc.attachView('s', tabId);
+    svc.detachView();
+    expect(contentView.removeChildView).toHaveBeenCalledTimes(1);
+    // 二次 detach 幂等
+    svc.detachView();
+    expect(contentView.removeChildView).toHaveBeenCalledTimes(1);
+  });
+
+  it('switching tabs follows the live view to the new active tab', async () => {
+    const { svc, contentView } = liveSetup();
+    const t1 = await createTab(svc, 's', 'https://a.com/');
+    const t2 = await createTab(svc, 's', 'https://b.com/');
+    svc.attachView('s', t1);
+    await svc.get('s').tabs({ op: 'select', tabId: t2 });
+    expect(contentView.removeChildView).toHaveBeenCalledTimes(1);
+    expect(contentView.addChildView).toHaveBeenCalledTimes(2);
+  });
+
+  it('select in another session does not hijack the attached view', async () => {
+    const { svc, contentView } = liveSetup();
+    const t1 = await createTab(svc, 's', 'https://a.com/');
+    svc.attachView('s', t1);
+    const tB = await createTab(svc, 'other', 'https://b.com/');
+    await svc.get('other').tabs({ op: 'select', tabId: tB });
+    expect(contentView.addChildView).toHaveBeenCalledTimes(1);
+    expect(contentView.removeChildView).not.toHaveBeenCalled();
+    // 同会话内仍正常跟随
+    const t2 = await createTab(svc, 's', 'https://c.com/');
+    await svc.get('s').tabs({ op: 'select', tabId: t2 });
+    expect(contentView.addChildView).toHaveBeenCalledTimes(2);
+    expect(contentView.removeChildView).toHaveBeenCalledTimes(1);
+  });
+
+  it('closing the attached tab detaches before destroy', async () => {
+    const { svc, contentView } = liveSetup();
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    svc.attachView('s', tabId);
+    await svc.get('s').tabs({ op: 'close', tabId });
+    expect(contentView.removeChildView).toHaveBeenCalledTimes(1);
+  });
+
+  it('setViewport on an attached view resizes it immediately', async () => {
+    const { svc } = liveSetup();
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    svc.attachView('s', tabId);
+    const win = svc.windowsForTest().get(tabId)!;
+    svc.setViewport({ x: 0, y: 0, width: 500, height: 400 });
+    expect(win.setBounds).toHaveBeenCalledWith({ x: 0, y: 0, width: 500, height: 400 });
+  });
+});
+
+describe('read-only guard (L3)', () => {
+  it('guard script installs capture blockers gated by the flag', () => {
+    expect(READONLY_GUARD_SCRIPT).toContain('__stellaraReadonly');
+    for (const ev of ['mousedown', 'wheel', 'keydown', 'input']) {
+      expect(READONLY_GUARD_SCRIPT).toContain(`'${ev}'`);
+    }
+    expect(READONLY_GUARD_SCRIPT).toContain('stopPropagation');
+    expect(READONLY_GUARD_SCRIPT).toContain('preventDefault');
+  });
+
+  it('injects the guard at window creation and re-injects on did-finish-load', async () => {
+    const pool = new TabPool();
+    const { wc, handlers } = makeWebContents();
+    wc.executeJavaScriptInIsolatedWorld.mockResolvedValue('__OK__');
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
+    await createTab(svc, 's', 'https://a.com/');
+    const codes = wc.executeJavaScriptInIsolatedWorld.mock.calls.map((c: any[]) => c[1][0].code as string);
+    expect(codes.some((c) => c.includes('__stellaraReadonly'))).toBe(true);
+    const finish = handlers.get('did-finish-load');
+    expect(finish).toBeTruthy();
+    const before = wc.executeJavaScriptInIsolatedWorld.mock.calls.length;
+    finish();
+    await flush();
+    expect(wc.executeJavaScriptInIsolatedWorld.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('setUserInteraction flips the flag and focuses on take-over', async () => {
+    const pool = new TabPool();
+    const { wc } = makeWebContents();
+    wc.executeJavaScriptInIsolatedWorld.mockResolvedValue('__OK__');
+    wc.focus = vi.fn();
+    const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
+    const tabId = await createTab(svc, 's', 'https://a.com/');
+    await svc.setUserInteraction('s', tabId, true);
+    const last = wc.executeJavaScriptInIsolatedWorld.mock.calls.at(-1)![1][0].code as string;
+    expect(last).toContain('__stellaraReadonly = false');
+    expect(wc.focus).toHaveBeenCalled();
+    await svc.setUserInteraction('s', tabId, false);
+    const last2 = wc.executeJavaScriptInIsolatedWorld.mock.calls.at(-1)![1][0].code as string;
+    expect(last2).toContain('__stellaraReadonly = true');
   });
 });

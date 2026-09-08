@@ -6923,6 +6923,46 @@ html[data-page-hidden] .kbd.rec {
 .browser-tab__title { overflow: hidden; color: var(--color-text-faint); text-overflow: ellipsis; }
 .browser-tab__tab.active .browser-tab__title { color: var(--color-on-accent); }
 
+.browser-tab__views {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.browser-tab__views button {
+  padding: 3px 10px;
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.browser-tab__views button:hover { background: var(--color-hover-overlay); }
+
+.browser-tab__views button.active {
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.browser-tab__live {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--color-bg-content);
+}
+
+/* 实时画面模式：面板需要确定高度，flex:1 的 live 容器才能撑出非零尺寸 */
+.browser-tab--live {
+  height: clamp(320px, 45vh, 640px);
+}
+
 .browser-tab__snapshot {
   max-height: 260px;
   overflow: auto;

@@ -68,6 +68,9 @@ export function BrowserTab({ sessionId, streamId, events = [], onDismiss }: Brow
   const [tabs, setTabs] = useState<BrowserTabInfo[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState('');
+  const [viewMode, setViewMode] = useState<'snapshot' | 'live'>('snapshot');
+  const [userControl, setUserControl] = useState(false);
+  const liveRef = useRef<HTMLDivElement | null>(null);
 
   const browserEventCount = useMemo(() => events.filter(isBrowserStreamEvent).length, [events]);
   const screenshotDataUrl = useMemo(() => extractScreenshotDataUrl(events), [events]);
@@ -122,6 +125,53 @@ export function BrowserTab({ sessionId, streamId, events = [], onDismiss }: Brow
     };
   }, [sessionId, activeId, snapshotTick]);
 
+  // 实时画面：attach 后经 ResizeObserver 上报容器矩形，卸载/切回时 detach
+  useEffect(() => {
+    if (viewMode !== 'live' || !activeId) return;
+    const api = window.electronAPI?.browser;
+    void api?.attachView?.(sessionId, activeId)?.catch?.(() => {});
+    const sendRect = () => {
+      const el = liveRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        void api?.setViewport?.({ x: r.x, y: r.y, width: r.width, height: r.height })?.catch?.(() => {});
+      }
+    };
+    sendRect();
+    const ro = new ResizeObserver(sendRect);
+    if (liveRef.current) ro.observe(liveRef.current);
+    return () => {
+      void api?.detachView?.()?.catch?.(() => {});
+      ro.disconnect();
+    };
+  }, [viewMode, activeId, sessionId]);
+
+  // 切换 Tab 时重置接管状态（仅 UI 状态，不发 API）
+  useEffect(() => {
+    setUserControl(false);
+  }, [activeId]);
+
+  // 新的 browser_* tool_call 到达 → 自动收回用户接管（含通知主进程）
+  const browserToolCallCount = useMemo(
+    () => events.filter((ev) => ev.type === 'tool_call' && ev.toolCall?.function.name.startsWith('browser_')).length,
+    [events],
+  );
+  useEffect(() => {
+    if (!browserToolCallCount || !userControl) return;
+    setUserControl(false);
+    if (!activeId) return;
+    void window.electronAPI?.browser?.setUserInteraction?.(sessionId, activeId, false)?.catch?.(() => {});
+    // 依赖刻意只留 browserToolCallCount：仅在新的 browser_* tool_call 到达时收回
+  }, [browserToolCallCount]);
+
+  function handleTakeOver() {
+    if (!activeId) return;
+    const next = !userControl;
+    setUserControl(next);
+    void window.electronAPI?.browser?.setUserInteraction?.(sessionId, activeId, next)?.catch?.(() => {});
+  }
+
   function handleAbort() {
     if (!streamId) return;
     window.electronAPI?.chat?.abort?.(streamId);
@@ -140,7 +190,7 @@ export function BrowserTab({ sessionId, streamId, events = [], onDismiss }: Brow
   }
 
   return (
-    <section className="browser-tab" aria-label="浏览器观察">
+    <section className={`browser-tab${viewMode === 'live' ? ' browser-tab--live' : ''}`} aria-label="浏览器观察">
       <div className="browser-tab__tabs">
         {tabs.length === 0 && <span className="empty-hint">暂无标签页</span>}
         {tabs.map((t) => (
@@ -160,15 +210,34 @@ export function BrowserTab({ sessionId, streamId, events = [], onDismiss }: Brow
           </button>
         ))}
       </div>
-      {snapshot && (
-        <div className="browser-tab__snapshot">
-          <MarkdownView content={snapshot} onAnchorClick={handleAnchorClick} />
-        </div>
-      )}
-      {screenshotDataUrl && (
-        <img className="browser-tab__screenshot" src={screenshotDataUrl} alt="浏览器截图" />
+      <div className="browser-tab__views">
+        <button type="button" className={viewMode === 'live' ? 'active' : ''} onClick={() => setViewMode('live')}>
+          实时画面
+        </button>
+        <button type="button" className={viewMode === 'snapshot' ? 'active' : ''} onClick={() => setViewMode('snapshot')}>
+          快照
+        </button>
+      </div>
+      {viewMode === 'live' && activeId ? (
+        <div className="browser-tab__live" ref={liveRef} />
+      ) : (
+        <>
+          {snapshot && (
+            <div className="browser-tab__snapshot">
+              <MarkdownView content={snapshot} onAnchorClick={handleAnchorClick} />
+            </div>
+          )}
+          {screenshotDataUrl && (
+            <img className="browser-tab__screenshot" src={screenshotDataUrl} alt="浏览器截图" />
+          )}
+        </>
       )}
       <div className="browser-tab__actions">
+        {viewMode === 'live' && activeId && (
+          <button type="button" className="btn btn-secondary" onClick={handleTakeOver}>
+            {userControl ? '交还 Agent' : '接管交互'}
+          </button>
+        )}
         {onDismiss && (
           <button type="button" className="btn btn-secondary" onClick={onDismiss}>
             收起

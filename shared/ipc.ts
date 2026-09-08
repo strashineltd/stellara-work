@@ -369,6 +369,8 @@ export interface BrowserConfigView {
   loginAllowlist: string[];
 }
 
+export interface ViewportRect { x: number; y: number; width: number; height: number; }
+
 export interface TaskCompleteArgs {
   summary?: string;
 }
@@ -947,6 +949,10 @@ export interface ElectronAPI {
     updateConfig: (partial: { searchProvider?: string; execJsEnabled?: boolean; loginAllowlist?: string[] }) => Promise<void>;
     setSearchKey: (provider: 'tavily' | 'brave', key: string) => Promise<void>;
     clearSearchKey: (provider: 'tavily' | 'brave') => Promise<void>;
+    attachView: (sessionId: string, tabId: string) => Promise<void>;
+    detachView: () => Promise<void>;
+    setViewport: (rect: ViewportRect) => Promise<void>;
+    setUserInteraction: (sessionId: string, tabId: string, enabled: boolean) => Promise<void>;
   };
   dialog: {
     /** 弹原生目录选择器，返回选中的路径（或 null 取消） */

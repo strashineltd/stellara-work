@@ -19,6 +19,7 @@ import type {
   Memory,
   MenuAction,
   McpServerConfig,
+  ViewportRect,
 } from '../shared/ipc';
 
 /**
@@ -137,6 +138,12 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('browser:setSearchKey', provider, key),
     clearSearchKey: (provider: 'tavily' | 'brave') =>
       ipcRenderer.invoke('browser:clearSearchKey', provider),
+    attachView: (sessionId: string, tabId: string) =>
+      ipcRenderer.invoke('browser:attachView', sessionId, tabId),
+    detachView: () => ipcRenderer.invoke('browser:detachView'),
+    setViewport: (rect: ViewportRect) => ipcRenderer.invoke('browser:setViewport', rect),
+    setUserInteraction: (sessionId: string, tabId: string, enabled: boolean) =>
+      ipcRenderer.invoke('browser:setUserInteraction', sessionId, tabId, enabled),
   },
   dialog: {
     openDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:openDirectory'),

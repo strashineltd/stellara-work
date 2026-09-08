@@ -128,6 +128,10 @@ export function installDevPreviewApi(): void {
       updateConfig: async () => {},
       setSearchKey: async () => {},
       clearSearchKey: async () => {},
+      attachView: async () => {},
+      detachView: async () => {},
+      setViewport: async () => {},
+      setUserInteraction: async () => {},
     },
     dialog: {
       openDirectory: async () => previewWorkDir,

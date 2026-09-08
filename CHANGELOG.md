@@ -6,6 +6,7 @@ All notable changes to Stellara Work are documented here. Versions follow [Seman
 
 ### Added · 新增
 
+- AI 浏览器 L3：观察窗实时画面（WebContentsView 嵌入，默认只读 + 接管交互，实时/快照双视图）
 - AI 浏览器 C3：浏览记忆 — 会话末将 web_search/browser_* 成果并入记忆提取（新增「网页」记忆类型，记忆中心可筛选）
 - AI 浏览器 C2：登录保留站点（允许列表 + 退出清理非列表站点 Cookie，设置面板维护）
 - 内置 AI 浏览器 B 组：设置面板（JS 执行开关 + 搜索服务/Key 配置）、清空数据时清理浏览器分区、act 限频（1 秒 1 次）、导航后 SPA 稳定等待、plan 模式支持 web_search

@@ -2,8 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { BrowserTab } from './BrowserTab';
+import type { ChatStreamEvent } from '../../shared/ipc';
 
 const TABS = [{ id: 't1', url: 'https://ex.com', title: 'ex' }];
+
+// ResizeObserver stub (jsdom lacks it)
+class ROStub {
+  static last: ROStub | null = null;
+  cb: ResizeObserverCallback;
+  constructor(cb: ResizeObserverCallback) {
+    this.cb = cb;
+    ROStub.last = this;
+  }
+  observe() {}
+  disconnect() {}
+  unobserve() {}
+}
+vi.stubGlobal('ResizeObserver', ROStub);
 
 function render(ui: React.ReactElement) {
   const container = document.createElement('div');
@@ -71,6 +86,10 @@ describe('BrowserTab', () => {
       browser: {
         list: vi.fn().mockResolvedValue(TABS),
         getSnapshot: vi.fn().mockResolvedValue({ markdown: '' }),
+        attachView: vi.fn().mockResolvedValue(undefined),
+        detachView: vi.fn().mockResolvedValue(undefined),
+        setViewport: vi.fn().mockResolvedValue(undefined),
+        setUserInteraction: vi.fn().mockResolvedValue(undefined),
       },
       chat: {
         abort: vi.fn(),
@@ -185,6 +204,97 @@ describe('BrowserTab', () => {
     expect(selectedBtn?.textContent).toContain('b.com');
     expect(selectedBtn?.classList.contains('active')).toBe(false);
     expect(container.querySelector('.browser-tab__tab.active')?.textContent).toContain('a.com');
+    unmount();
+  });
+
+  it('defaults to snapshot view and does not attach', async () => {
+    const { container, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+    await act(async () => {});
+    expect(container.querySelector('.browser-tab__live')).toBeNull();
+    expect((window as any).electronAPI.browser.attachView).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('switching to live view attaches and reports the container rect', async () => {
+    const rect = { x: 10, y: 20, width: 300, height: 200, top: 20, left: 10, right: 310, bottom: 220, toJSON: () => ({}) };
+    const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(rect as DOMRect);
+    try {
+      const { container, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+      await act(async () => {});
+      const liveTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '实时画面')!;
+      await act(async () => {
+        liveTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await act(async () => {});
+      expect((window as any).electronAPI.browser.attachView).toHaveBeenCalledWith('s', 't1');
+      expect((window as any).electronAPI.browser.setViewport).toHaveBeenCalled();
+      // container 消失时 detach
+      unmount();
+      expect((window as any).electronAPI.browser.detachView).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('take-over toggles setUserInteraction and revokes on browser_* tool_call', async () => {
+    const events: ChatStreamEvent[] = [
+      { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'browser_navigate', arguments: '{}' } } },
+    ];
+    const { container, rerender, unmount } = render(<BrowserTab sessionId="s" streamId="st" events={events} />);
+    await act(async () => {});
+    const liveTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '实时画面')!;
+    await act(async () => {
+      liveTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {});
+    const take = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('接管交互'))!;
+    await act(async () => {
+      take.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {});
+    expect((window as any).electronAPI.browser.setUserInteraction).toHaveBeenCalledWith('s', 't1', true);
+    // 新的 browser_* tool_call 事件 → 自动收回
+    rerender(
+      <BrowserTab
+        sessionId="s"
+        streamId="st"
+        events={[...events, { type: 'tool_call', toolCall: { id: 'c2', type: 'function', function: { name: 'browser_act', arguments: '{}' } } }]}
+      />,
+    );
+    await act(async () => {});
+    expect((window as any).electronAPI.browser.setUserInteraction).toHaveBeenLastCalledWith('s', 't1', false);
+    unmount();
+  });
+
+  it('resets userControl state when switching tabs without an API call', async () => {
+    (window as any).electronAPI.browser.list = vi.fn().mockResolvedValue([
+      { id: 't1', url: 'https://a.com', title: 'a' },
+      { id: 't2', url: 'https://b.com', title: 'b' },
+    ]);
+    const { container, unmount } = render(<BrowserTab sessionId="s" streamId="st" />);
+    await act(async () => {});
+    const liveTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '实时画面')!;
+    await act(async () => {
+      liveTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {});
+    const take = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('接管交互'))!;
+    await act(async () => {
+      take.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {});
+    expect((window as any).electronAPI.browser.setUserInteraction).toHaveBeenCalledWith('s', 't1', true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('交还 Agent'))).toBe(true);
+    // 切换 Tab → 接管状态重置，按钮回到 接管交互，且不额外发 API
+    (window as any).electronAPI.browser.setUserInteraction.mockClear();
+    await act(async () => {
+      fireClick(getByRole(container, 'button', /b\.com/));
+    });
+    await act(async () => {});
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('接管交互'));
+    expect(btn).toBeTruthy();
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('交还 Agent'))).toBe(false);
+    expect((window as any).electronAPI.browser.setUserInteraction).not.toHaveBeenCalled();
     unmount();
   });
 });

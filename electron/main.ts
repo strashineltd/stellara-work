@@ -32,6 +32,7 @@ import type {
   McpServerConfig,
   ContextStateView,
   BrowserConfigView,
+  ViewportRect,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -1033,6 +1034,31 @@ function registerIpcHandlers(): void {
     await deleteKey(`browser-${provider}`);
     broadcastSettingsChanged();
   });
+
+  handle('browser:attachView', async (_e, sessionId: string, tabId: string) => {
+    if (typeof sessionId !== 'string' || typeof tabId !== 'string') throw new Error('参数无效');
+    const { browserService } = await import('./browser/service');
+    browserService.attachView(sessionId, tabId);
+  });
+
+  handle('browser:detachView', async () => {
+    const { browserService } = await import('./browser/service');
+    browserService.detachView();
+  });
+
+  handle('browser:setViewport', async (_e, rect: ViewportRect) => {
+    if (!rect || ![rect.x, rect.y, rect.width, rect.height].every((n) => typeof n === 'number' && Number.isFinite(n))) {
+      throw new Error('参数无效');
+    }
+    const { browserService } = await import('./browser/service');
+    browserService.setViewport(rect);
+  });
+
+  handle('browser:setUserInteraction', async (_e, sessionId: string, tabId: string, enabled: boolean) => {
+    if (typeof sessionId !== 'string' || typeof tabId !== 'string' || typeof enabled !== 'boolean') throw new Error('参数无效');
+    const { browserService } = await import('./browser/service');
+    await browserService.setUserInteraction(sessionId, tabId, enabled);
+  });
 }
 
 async function verifyProjectSelection(workDir: string, filePath: string): Promise<ProjectFileSelection> {
@@ -1842,6 +1868,10 @@ app.whenReady().then(async () => {
       });
     }
     return chatStreams.requestApproval(streamId, approvalId, 60_000);
+  });
+
+  browserService.setMainContentView(() => {
+    return mainWindow && !mainWindow.isDestroyed() ? mainWindow.contentView : undefined;
   });
 });
 

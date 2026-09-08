@@ -57,6 +57,8 @@ export interface BrowserServiceOptions {
    * vitest 无 Electron 二进制会拿到二进制路径字符串，破坏测试；由 main.ts 注入 log 包装。
    */
   onPartitionClearError?: (name: string, err: unknown) => void;
+  /** Task 1 (L3 live view)：主窗口 contentView 提供者；未设置时 attachView 抛 '主窗口不可用' */
+  getContentView?: () => any;
 }
 
 export interface SessionBrowser {
@@ -135,6 +137,26 @@ function refIndex(ref: string): number {
  */
 export const FORM_CONTROL_SELECTOR = 'input,button,select,textarea';
 
+/**
+ * 只读守卫（L3 live view）：隔离世界注入，capture 阶段拦截用户输入事件。
+ * 幂等安装（__stellaraReadonlyInstalled），开关由 __stellaraReadonly 控制，
+ * setUserInteraction 翻转该标志实现用户接管/交还。
+ */
+export const READONLY_GUARD_SCRIPT = `(() => {
+  if (window.__stellaraReadonlyInstalled) { window.__stellaraReadonly = true; return; }
+  window.__stellaraReadonlyInstalled = true;
+  window.__stellaraReadonly = true;
+  const block = (e) => {
+    if (!window.__stellaraReadonly) return;
+    e.stopImmediatePropagation();
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  for (const ev of ['mousedown','mouseup','mousemove','click','dblclick','contextmenu','wheel','keydown','keyup','keypress','input']) {
+    document.addEventListener(ev, block, { capture: true, passive: false });
+  }
+})();`;
+
 /** 不可输入的 input type（按钮类/复选框/单选框/文件/图片等） */
 const NON_TYPEABLE_INPUT_TYPES = ['button', 'checkbox', 'radio', 'submit', 'reset', 'file', 'image'];
 
@@ -164,6 +186,9 @@ export class BrowserService {
   private partitionSessions = new Map<string, any>();
   private lastActAt = new Map<string, number>();
   private navDoneAt = new Map<string, number>();
+  private attachedTabId?: string;
+  private attachedSessionId?: string;
+  private lastViewport?: { x: number; y: number; width: number; height: number };
 
   constructor(
     private tabPool: TabPool = new TabPool(),
@@ -180,6 +205,64 @@ export class BrowserService {
 
   setPartitionClearErrorHandler(fn: ((name: string, err: unknown) => void) | undefined): void {
     this.opts.onPartitionClearError = fn;
+  }
+
+  setMainContentView(fn: () => unknown): void {
+    this.opts.getContentView = fn;
+  }
+
+  windowsForTest(): Map<string, any> {
+    return this.windows;
+  }
+
+  attachView(sessionId: string, tabId: string): void {
+    this.tabPool.select(sessionId, tabId); // 不存在则抛 'Tab 不存在'
+    const cv = this.opts.getContentView?.();
+    if (!cv) throw new Error('主窗口不可用');
+    this.detachInternal();
+    const win = this.getOrCreateWindow(sessionId, tabId);
+    if (typeof win.setBounds === 'function' && this.lastViewport) {
+      win.setBounds(this.lastViewport);
+    }
+    cv.addChildView(win);
+    this.attachedTabId = tabId;
+    this.attachedSessionId = sessionId;
+  }
+
+  detachView(): void {
+    this.detachInternal();
+  }
+
+  /**
+   * L3 用户接管：enabled=true 时关闭只读守卫并把焦点交给真实用户；
+   * enabled=false 时恢复只读（Agent 自动操作模式）。
+   */
+  async setUserInteraction(sessionId: string, tabId: string, enabled: boolean): Promise<void> {
+    this.tabPool.select(sessionId, tabId);
+    const win = this.getOrCreateWindow(sessionId, tabId);
+    await this.execJsInIsolatedWorld(win, `window.__stellaraReadonly = ${enabled ? 'false' : 'true'};`);
+    if (enabled && typeof win.webContents.focus === 'function') {
+      try { win.webContents.focus(); } catch { /* ignore */ }
+    }
+  }
+
+  private detachInternal(): void {
+    if (!this.attachedTabId) return;
+    const win = this.windows.get(this.attachedTabId);
+    const cv = this.opts.getContentView?.();
+    try {
+      if (win && cv && typeof cv.removeChildView === 'function') cv.removeChildView(win);
+    } catch { /* ignore */ }
+    this.attachedTabId = undefined;
+    this.attachedSessionId = undefined;
+  }
+
+  setViewport(rect: { x: number; y: number; width: number; height: number }): void {
+    this.lastViewport = rect;
+    if (this.attachedTabId) {
+      const win = this.windows.get(this.attachedTabId);
+      try { win?.setBounds?.(rect); } catch { /* ignore */ }
+    }
   }
 
   createdPartitionsForTest(): string[] {
@@ -275,8 +358,7 @@ export class BrowserService {
       win = this.opts.createWindow();
     } else {
       const electron = lazyElectron();
-      win = new electron.BrowserWindow({
-        show: false,
+      win = new electron.WebContentsView({
         webPreferences: {
           partition,
           sandbox: true,
@@ -336,6 +418,11 @@ export class BrowserService {
         }
       });
     });
+    // 只读守卫：页面每次加载完成后重新注入（隔离世界脚本随导航被清掉）
+    win.webContents.on('did-finish-load', () => {
+      void this.execJsInIsolatedWorld(win, READONLY_GUARD_SCRIPT).catch(() => { /* ignore */ });
+    });
+    void this.execJsInIsolatedWorld(win, READONLY_GUARD_SCRIPT).catch(() => { /* ignore */ });
     this.windows.set(tabId, win);
     return win;
   }
@@ -356,6 +443,7 @@ export class BrowserService {
     }
     const { tab, evicted } = this.tabPool.create(sessionId, urlForCreate);
     if (evicted) {
+      if (this.attachedTabId === evicted.id) this.detachInternal();
       const w = this.windows.get(evicted.id);
       if (w && typeof w.destroy === 'function') {
         try { w.destroy(); } catch { /* ignore */ }
@@ -665,6 +753,7 @@ export class BrowserService {
         case 'close': {
           if (!args.tabId) return { ok: false, output: '', error: '缺少 tabId' };
           this.tabPool.select(sessionId, args.tabId);
+          if (this.attachedTabId === args.tabId) this.detachInternal();
           const win = this.windows.get(args.tabId);
           if (win && typeof win.destroy === 'function') {
             try { win.destroy(); } catch { /* ignore */ }
@@ -684,6 +773,9 @@ export class BrowserService {
           if (!args.tabId) return { ok: false, output: '', error: '缺少 tabId' };
           const t = this.tabPool.select(sessionId, args.tabId);
           this.activeTabs.set(sessionId, args.tabId);
+          if (this.attachedTabId && this.attachedSessionId === sessionId) {
+            try { this.attachView(sessionId, args.tabId); } catch { /* 主窗口不可用时保持原状 */ }
+          }
           return { ok: true, output: JSON.stringify(t) };
         }
         default:
