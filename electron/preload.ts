@@ -20,6 +20,10 @@ import type {
   MenuAction,
   McpServerConfig,
   ViewportRect,
+  ServerEntry,
+  ServerInput,
+  ServerStatusEntry,
+  ServerTestResult,
 } from '../shared/ipc';
 
 /**
@@ -179,6 +183,22 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('sessions:appendMessage', id, message),
     move: (sessionId: string, projectId: string | null) =>
       ipcRenderer.invoke('sessions:move', sessionId, projectId),
+  },
+  servers: {
+    list: (): Promise<ServerEntry[]> => ipcRenderer.invoke('servers:list'),
+    add: (input: ServerInput) => ipcRenderer.invoke('servers:add', input),
+    update: (id: string, patch: Partial<ServerInput>) => ipcRenderer.invoke('servers:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('servers:remove', id),
+    test: (id: string): Promise<ServerTestResult> => ipcRenderer.invoke('servers:test', id),
+    setDefault: (id: string | null) => ipcRenderer.invoke('servers:setDefault', id),
+    status: (): Promise<ServerStatusEntry[]> => ipcRenderer.invoke('servers:status'),
+    providers: (id: string) => ipcRenderer.invoke('servers:providers', id),
+    agents: (id: string) => ipcRenderer.invoke('servers:agents', id),
+    onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => {
+      const handler = (_e: unknown, statuses: ServerStatusEntry[]) => callback(statuses);
+      ipcRenderer.on('servers:status-changed', handler);
+      return () => { ipcRenderer.removeListener('servers:status-changed', handler); };
+    },
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
