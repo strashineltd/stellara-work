@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { StrictMode, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNavHistory, type NavState } from './useNavHistory';
@@ -11,11 +11,11 @@ function Harness() {
   return <span>{`${api.current.section}:${api.current.sessionId ?? '-'}:${String(api.canGoBack)}:${String(api.canGoForward)}`}</span>;
 }
 
-function renderHarness() {
+function renderHarness(strict = false) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root: Root = createRoot(container);
-  act(() => { root.render(<Harness />); });
+  act(() => { root.render(strict ? <StrictMode><Harness /></StrictMode> : <Harness />); });
   return { container, root, unmount: () => { act(() => root.unmount()); container.remove(); } };
 }
 
@@ -60,6 +60,18 @@ describe('useNavHistory', () => {
   it('pushing the same state is a no-op', () => {
     const view = renderHarness();
     act(() => { api!.push(INITIAL_NAV); });
+    expect(api!.canGoBack).toBe(false);
+    view.unmount();
+  });
+
+  it('is StrictMode-safe: one push adds exactly one history entry', () => {
+    const view = renderHarness(true);
+    const session: NavState = { section: 'tasks', sessionId: 's1' };
+    act(() => { api!.push(session); });
+    expect(api!.current).toEqual(session);
+    expect(api!.canGoBack).toBe(true);
+    act(() => { api!.back(); });
+    expect(api!.current).toEqual(INITIAL_NAV);
     expect(api!.canGoBack).toBe(false);
     view.unmount();
   });

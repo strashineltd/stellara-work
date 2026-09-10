@@ -9,45 +9,39 @@ function equalNav(a: NavState, b: NavState): boolean {
 
 export function useNavHistory(initial: NavState) {
   const [current, setCurrent] = useState<NavState>(initial);
+  const currentRef = useRef<NavState>(initial);
   const past = useRef<NavState[]>([]);
   const future = useRef<NavState[]>([]);
-  const [, forceRender] = useState(0);
-
-  const sync = useCallback(() => { forceRender((n) => n + 1); }, []);
 
   const push = useCallback((next: NavState) => {
-    setCurrent((prev) => {
-      if (equalNav(prev, next)) return prev;
-      past.current.push(prev);
-      future.current = [];
-      return next;
-    });
-    sync();
-  }, [sync]);
+    const prev = currentRef.current;
+    if (equalNav(prev, next)) return;
+    past.current.push(prev);
+    future.current = [];
+    currentRef.current = next;
+    setCurrent(next);
+  }, []);
 
   const replace = useCallback((next: NavState) => {
+    currentRef.current = next;
     setCurrent(next);
   }, []);
 
   const back = useCallback(() => {
     const prev = past.current.pop();
     if (!prev) return;
-    setCurrent((cur) => {
-      future.current.push(cur);
-      return prev;
-    });
-    sync();
-  }, [sync]);
+    future.current.push(currentRef.current);
+    currentRef.current = prev;
+    setCurrent(prev);
+  }, []);
 
   const forward = useCallback(() => {
     const next = future.current.pop();
     if (!next) return;
-    setCurrent((cur) => {
-      past.current.push(cur);
-      return next;
-    });
-    sync();
-  }, [sync]);
+    past.current.push(currentRef.current);
+    currentRef.current = next;
+    setCurrent(next);
+  }, []);
 
   return {
     current,
