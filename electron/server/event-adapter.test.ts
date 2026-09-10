@@ -12,19 +12,19 @@ describe('EventAdapter', () => {
 
   it('maps tool states', () => {
     const adapter = new EventAdapter();
-    const part = (state: Record<string, unknown>) => ({
+    const part = (state: Record<string, unknown>, callID = 'call_1') => ({
       type: 'message.part.updated',
-      properties: { part: { type: 'tool', id: 't1', callID: 'call_1', sessionID: 'ses_1', tool: 'bash', state } },
+      properties: { part: { type: 'tool', id: `t_${callID}`, callID, sessionID: 'ses_1', tool: 'bash', state } },
     });
     expect(adapter.handle(part({ status: 'pending', input: { command: 'ls' } }) as never).events).toEqual([
       { type: 'tool_call', toolCall: { id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{"command":"ls"}' } } },
     ]);
     expect(adapter.handle(part({ status: 'running', input: { command: 'ls' } }) as never).events).toEqual([]);
-    expect(adapter.handle(part({ status: 'completed', output: 'ok' }) as never).events).toEqual([
-      { type: 'tool_result', toolResult: { name: 'bash', toolCallId: 'call_1', result: { ok: true, output: 'ok' } } },
+    expect(adapter.handle(part({ status: 'completed', output: 'ok' }, 'call_done') as never).events).toEqual([
+      { type: 'tool_result', toolResult: { name: 'bash', toolCallId: 'call_done', result: { ok: true, output: 'ok' } } },
     ]);
-    expect(adapter.handle(part({ status: 'error', error: 'boom' }) as never).events).toEqual([
-      { type: 'tool_result', toolResult: { name: 'bash', toolCallId: 'call_1', result: { ok: false, error: 'boom' } } },
+    expect(adapter.handle(part({ status: 'error', error: 'boom' }, 'call_fail') as never).events).toEqual([
+      { type: 'tool_result', toolResult: { name: 'bash', toolCallId: 'call_fail', result: { ok: false, error: 'boom' } } },
     ]);
   });
 
@@ -87,6 +87,43 @@ describe('EventAdapter', () => {
     expect(adapter.handle(tool('c2', { status: 'completed', output: 'done' }) as never).events).toEqual([
       { type: 'tool_result', toolResult: { name: 'edit', toolCallId: 'c2', result: { ok: true, output: 'done' } } },
     ]);
+  });
+
+  it('emits tool_result only once for duplicate terminal snapshots', () => {
+    const adapter = new EventAdapter();
+    const completed = {
+      type: 'message.part.updated',
+      properties: { part: { type: 'tool', id: 't_dup', callID: 'c_dup', sessionID: 'ses_1', tool: 'bash', state: { status: 'completed', output: 'ok' } } },
+    };
+    expect(adapter.handle(completed as never).events).toEqual([
+      { type: 'tool_result', toolResult: { name: 'bash', toolCallId: 'c_dup', result: { ok: true, output: 'ok' } } },
+    ]);
+    expect(adapter.handle(completed as never).events).toEqual([]);
+  });
+
+  it('emits tool_call once then a single tool_result for pending to completed', () => {
+    const adapter = new EventAdapter();
+    const tool = (state: Record<string, unknown>) => ({
+      type: 'message.part.updated',
+      properties: { part: { type: 'tool', id: 't_flow', callID: 'c_flow', sessionID: 'ses_1', tool: 'bash', state } },
+    });
+    expect(adapter.handle(tool({ status: 'pending', input: { command: 'ls' } }) as never).events).toEqual([
+      { type: 'tool_call', toolCall: { id: 'c_flow', type: 'function', function: { name: 'bash', arguments: '{"command":"ls"}' } } },
+    ]);
+    expect(adapter.handle(tool({ status: 'completed', output: 'ok' }) as never).events).toEqual([
+      { type: 'tool_result', toolResult: { name: 'bash', toolCallId: 'c_flow', result: { ok: true, output: 'ok' } } },
+    ]);
+    expect(adapter.handle(tool({ status: 'completed', output: 'ok' }) as never).events).toEqual([]);
+  });
+
+  it('keeps the first terminal state and ignores later transitions', () => {
+    const adapter = new EventAdapter();
+    const tool = (state: Record<string, unknown>) => ({
+      type: 'message.part.updated',
+      properties: { part: { type: 'tool', id: 't_term', callID: 'c_term', sessionID: 'ses_1', tool: 'bash', state } },
+    });
+    expect(adapter.handle(tool({ status: 'completed', output: 'ok' }) as never).events).toHaveLength(1);
+    expect(adapter.handle(tool({ status: 'error', error: 'late' }) as never).events).toEqual([]);
   });
 
   it('maps assistant token usage', () => {

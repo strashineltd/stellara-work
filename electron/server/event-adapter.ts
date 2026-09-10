@@ -4,7 +4,8 @@
  * 纯逻辑实现：不依赖 Electron / 网络 / 计时器 / 日志，便于单测。
  * - 文本与推理按 `${sessionID}:${partID}` 跟踪全文：增长时输出差量，回退/重写时输出全文。
  * - 工具状态：pending → tool_call（每个 call 仅一次）、running → 无事件、
- *   completed/error → tool_result（未见过的历史 call 也输出，保证容错）。
+ *   completed/error → tool_result（每个 call 首个终态输出一次，重复/后续终态快照跳过；
+ *   未见过的历史 call 也输出，保证容错）。
  * - 未知事件与缺字段均安全降级为空数组，不抛错。
  */
 
@@ -49,6 +50,7 @@ function readErrorMessage(raw: unknown): string | undefined {
 export class EventAdapter {
   private readonly partText = new Map<string, string>();
   private readonly emittedTools = new Set<string>();
+  private readonly emittedResults = new Set<string>();
 
   handle(event: RemoteEvent): AdaptedEvents {
     const properties = isRecord(event.properties) ? event.properties : undefined;
@@ -123,16 +125,17 @@ export class EventAdapter {
       ];
     }
 
-    if (status === 'completed') {
-      return [
-        {
-          type: 'tool_result',
-          toolResult: { name: tool, toolCallId: callID, result: { ok: true, output: state?.output } },
-        },
-      ];
-    }
-
-    if (status === 'error') {
+    if (status === 'completed' || status === 'error') {
+      if (this.emittedResults.has(key)) return [];
+      this.emittedResults.add(key);
+      if (status === 'completed') {
+        return [
+          {
+            type: 'tool_result',
+            toolResult: { name: tool, toolCallId: callID, result: { ok: true, output: state?.output } },
+          },
+        ];
+      }
       return [
         {
           type: 'tool_result',
