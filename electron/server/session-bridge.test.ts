@@ -1,0 +1,182 @@
+import { describe, expect, it, vi } from 'vitest';
+import { SessionBridge } from './session-bridge';
+
+function makeDb() {
+  const rows = new Map<string, Record<string, unknown>>();
+  return {
+    rows,
+    listSessions: () => [...rows.values()],
+    getSession: (id: string) => rows.get(id),
+    createSession: (input: Record<string, unknown>) => {
+      const row = { ...input, messageCount: 0, createdAt: 1, updatedAt: 1 };
+      rows.set(input.id as string, row);
+      return row;
+    },
+    findSessionByRemote: (_sid: string, remote: string) => [...rows.values()].find((r) => r.remoteSessionId === remote),
+    listServerSessions: (sid: string) => [...rows.values()].filter((r) => r.serverId === sid),
+    deleteSession: (id: string) => { rows.delete(id); },
+    deleteSessionByRemote: (sid: string, remote: string) => {
+      const row = [...rows.values()].find((r) => r.serverId === sid && r.remoteSessionId === remote);
+      if (row) rows.delete(row.id as string);
+    },
+    renameSession: (id: string, title: string) => { rows.set(id, { ...rows.get(id)!, title }); },
+    updateSessionMeta: (id: string, patch: Record<string, unknown>) => { rows.set(id, { ...rows.get(id)!, ...patch }); },
+    getMessages: () => [],
+    saveMessages: vi.fn(),
+    appendMessage: vi.fn(),
+  };
+}
+
+function makeManager(client: Record<string, unknown> | null, status = 'connected') {
+  return {
+    list: async () => [],
+    statuses: () => [{ id: 'srv-1', status }],
+    getClient: () => client,
+    onEvent: () => () => {},
+  };
+}
+
+const remoteSession = { id: 'ses_1', title: '远端', time: { created: 100, updated: 200 } };
+
+describe('SessionBridge', () => {
+  it('creates a server session and stores a local mapping row', async () => {
+    const db = makeDb();
+    const client = { createSession: vi.fn(async () => remoteSession) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'local-1' });
+    const session = await bridge.create({ runtime: 'server', serverId: 'srv-1' });
+    expect(session).toMatchObject({ id: 'local-1', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1', title: '远端' });
+    expect(db.rows.get('local-1')).toMatchObject({ remoteSessionId: 'ses_1' });
+  });
+
+  it('merges server sessions when connected and marks offline rows otherwise', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: '本地', modelId: 'm1', runtime: 'local' });
+    const client = { listSessions: vi.fn(async () => [remoteSession]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    const merged = await bridge.list();
+    expect(merged.map((s) => s.id).sort()).toEqual(['l1', 'u1']);
+    const offlineBridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u2' });
+    const offline = await offlineBridge.list();
+    expect(offline.find((s) => s.id === 'u1')).toMatchObject({ offline: true });
+  });
+
+  it('reconciles mappings that no longer exist on the server', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'stale', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_gone' });
+    const client = { listSessions: vi.fn(async () => []) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    await bridge.list();
+    expect(db.rows.has('stale')).toBe(false);
+  });
+
+  it('reads server session messages through the adapter', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const client = {
+      listMessages: vi.fn(async () => [
+        { info: { id: 'm1', role: 'user', sessionID: 'ses_1' }, parts: [{ type: 'text', id: 'p', sessionID: 'ses_1', messageID: 'm1', text: 'hi' }] },
+      ]),
+    };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    const { session, messages } = await bridge.get('l1');
+    expect(session.runtime).toBe('server');
+    expect(messages[0]!.content).toBe('hi');
+    expect(db.saveMessages).not.toHaveBeenCalled();
+    expect(db.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it('labels local sessions with runtime local', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: '本地', modelId: 'm1', runtime: 'local' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    const list = await bridge.list();
+    expect(list.find((s) => s.id === 'l1')).toMatchObject({ runtime: 'local' });
+    expect(list.find((s) => s.id === 'l1')).not.toHaveProperty('offline');
+  });
+
+  it('keeps cached mapping rows when listSessions fails', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'cached', title: 'C', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_x' });
+    const client = { listSessions: vi.fn(async () => { throw new Error('boom'); }) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    const list = await bridge.list();
+    expect(db.rows.has('cached')).toBe(true);
+    expect(list.find((s) => s.id === 'cached')).toMatchObject({ offline: true, remoteSessionId: 'ses_x' });
+  });
+
+  it('refreshes mapped rows from the remote list', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'map', title: '旧', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const client = { listSessions: vi.fn(async () => [{ ...remoteSession, title: '新', time: { created: 100, updated: 300 } }]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    const list = await bridge.list();
+    expect(list.find((s) => s.id === 'map')).toMatchObject({
+      title: '新', updatedAt: 300, runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1',
+    });
+  });
+
+  it('creates local sessions through the local path', async () => {
+    const db = makeDb();
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    const session = await bridge.create({ title: '本地会话', modelId: 'm1' });
+    expect(session).toMatchObject({ id: 'u1', title: '本地会话', modelId: 'm1', runtime: 'local' });
+  });
+
+  it('rejects creating a server session without a connected server', async () => {
+    const db = makeDb();
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await expect(bridge.create({ runtime: 'server', serverId: 'srv-1' })).rejects.toThrow('服务器未连接');
+  });
+
+  it('reads local session messages from the database', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: '本地', modelId: 'm1', runtime: 'local' });
+    db.getMessages = () => [{ sessionId: 'l1', position: 0, role: 'user', content: '本地消息', createdAt: 1 }];
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    const { messages } = await bridge.get('l1');
+    expect(messages[0]!.content).toBe('本地消息');
+  });
+
+  it('throws when reading an offline server session', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await expect(bridge.get('l1')).rejects.toThrow('服务器未连接');
+  });
+
+  it('removes server sessions remotely and locally', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const client = { deleteSession: vi.fn(async () => true) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    await bridge.remove('l1');
+    expect(client.deleteSession).toHaveBeenCalledWith('ses_1');
+    expect(db.rows.has('l1')).toBe(false);
+  });
+
+  it('removes local sessions from the database', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: 'X', modelId: 'm1', runtime: 'local' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await bridge.remove('l1');
+    expect(db.rows.has('l1')).toBe(false);
+  });
+
+  it('renames server sessions remotely and locally', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: '旧', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const client = { updateSession: vi.fn(async () => remoteSession) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    await bridge.rename('l1', '新');
+    expect(client.updateSession).toHaveBeenCalledWith('ses_1', '新');
+    expect(db.rows.get('l1')).toMatchObject({ title: '新' });
+  });
+
+  it('renames local sessions in the database', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: '旧', modelId: 'm1', runtime: 'local' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await bridge.rename('l1', '新');
+    expect(db.rows.get('l1')).toMatchObject({ title: '新' });
+  });
+});
