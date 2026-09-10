@@ -31,6 +31,32 @@ export function captureFocusTarget(explicit?: HTMLElement | null): HTMLElement |
   return active instanceof HTMLElement && active !== document.body ? active : null;
 }
 
+const POINTER_FOCUS_TARGET = [
+  'a[href]',
+  'area[href]',
+  'button',
+  'input:not([type="hidden"])',
+  'select',
+  'textarea',
+  'iframe',
+  'summary',
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+export function getPointerFocusTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const candidate = target.closest<HTMLElement>(POINTER_FOCUS_TARGET);
+  if (
+    !candidate?.isConnected
+    || candidate.matches(':disabled, [aria-disabled="true"]')
+    || candidate.closest('[inert], [aria-hidden="true"]')
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
 function canFocus(target: HTMLElement | null): target is HTMLElement {
   return Boolean(
     target?.isConnected
