@@ -75,4 +75,15 @@ describe('useNavHistory', () => {
     expect(api!.canGoBack).toBe(false);
     view.unmount();
   });
+
+  it('keeps rendered flags in sync when back targets an Object.is-equal state', () => {
+    const view = renderHarness();
+    const session: NavState = { section: 'tasks', sessionId: 's1' };
+    act(() => { api!.push(session); api!.replace(INITIAL_NAV); });
+    act(() => { api!.back(); });
+    expect(api!.current).toEqual(INITIAL_NAV);
+    expect(api!.canGoBack).toBe(false);
+    expect(api!.canGoForward).toBe(true);
+    view.unmount();
+  });
 });
