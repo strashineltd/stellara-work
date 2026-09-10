@@ -4,6 +4,7 @@ import { getAppDataDir } from './data-dir';
 
 let _overrideSecretsDir: string | null = null;
 const PREFIX = 'STELLARA_KEY_';
+const SERVER_PREFIX = 'STELLARA_SERVER_';
 const ENC_PREFIX = 'enc:v1:';
 
 /**
@@ -134,6 +135,43 @@ export async function listKeys(): Promise<Record<string, string>> {
     }
   }
   return result;
+}
+
+function serverKeyName(serverId: string): string {
+  return SERVER_PREFIX + serverId;
+}
+
+export async function setServerPassword(serverId: string, password: string): Promise<void> {
+  const map = await readEnv();
+  map.set(serverKeyName(serverId), encodeStored(password));
+  await writeEnv(map);
+}
+
+/** ⚠️ 返回 **裸服务器密码** —— 仅供主进程内部使用（连接服务器），绝不要通过 IPC 传给 renderer。 */
+export function getServerPassword(serverId: string): string | null {
+  try {
+    const content = require('node:fs').readFileSync(secretsPath(), 'utf-8') as string;
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith(serverKeyName(serverId) + '=')) continue;
+      const eq = trimmed.indexOf('=');
+      let value = trimmed.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      return decodeStored(value);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export async function deleteServerPassword(serverId: string): Promise<void> {
+  const map = await readEnv();
+  map.delete(serverKeyName(serverId));
+  await writeEnv(map);
 }
 
 /**
