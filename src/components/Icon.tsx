@@ -3,8 +3,11 @@ import type { SVGProps } from 'react';
 export type IconName =
   | 'alert'
   | 'arrow-right'
+  | 'bell'
+  | 'calendar'
   | 'check'
   | 'chevron-down'
+  | 'chevron-left'
   | 'chevron-right'
   | 'copy'
   | 'database'
@@ -24,6 +27,7 @@ export type IconName =
   | 'refresh'
   | 'search'
   | 'send'
+  | 'server'
   | 'settings'
   | 'shield'
   | 'stop'
@@ -61,8 +65,14 @@ export function Icon({ name, size = 16, className, ...props }: IconProps) {
       return <svg {...common}><path d="m3 8.3 3.2 3.2L13 4.8" /></svg>;
     case 'arrow-right':
       return <svg {...common}><path d="M2.5 8h9.5M8.5 4.5 12 8l-3.5 3.5" /></svg>;
+    case 'bell':
+      return <svg {...common}><path d="M8 2.5a3.5 3.5 0 0 0-3.5 3.5v2.2L3.2 10.5h9.6L11.5 8.2V6A3.5 3.5 0 0 0 8 2.5Z" /><path d="M6.8 12.5a1.3 1.3 0 0 0 2.4 0" /></svg>;
+    case 'calendar':
+      return <svg {...common}><rect x="2.5" y="3.5" width="11" height="10" rx="1.5" /><path d="M2.5 6.5h11M5.5 2.5v2M10.5 2.5v2" /></svg>;
     case 'chevron-down':
       return <svg {...common}><path d="m4 6 4 4 4-4" /></svg>;
+    case 'chevron-left':
+      return <svg {...common}><path d="M10 4 6 8l4 4" /></svg>;
     case 'chevron-right':
       return <svg {...common}><path d="m6 4 4 4-4 4" /></svg>;
     case 'copy':
@@ -121,6 +131,8 @@ export function Icon({ name, size = 16, className, ...props }: IconProps) {
       return <svg {...common}><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>;
     case 'send':
       return <svg {...common}><path d="M2.1 3.1 14 8 2.1 12.9l1.4-4.1L9 8 3.5 7.2 2.1 3.1Z" /></svg>;
+    case 'server':
+      return <svg {...common}><rect x="2.5" y="3" width="11" height="4" rx="1" /><rect x="2.5" y="9" width="11" height="4" rx="1" /><path d="M5 5h.01M5 11h.01" /></svg>;
     case 'settings':
       return (
         <svg {...common}>
