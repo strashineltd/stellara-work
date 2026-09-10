@@ -110,6 +110,10 @@ export interface ChatRequest {
   attachments?: AttachmentMeta[];
   /** /skill 精确调用：技能名称（或文件名）。主进程在 workDir/skills 中查找并注入正文。 */
   activeSkillName?: string;
+  /** 远端 server 会话的模型覆盖（由 Plan 2B 传入；本地路径忽略） */
+  serverModel?: { providerID: string; modelID: string };
+  /** 远端 server 会话的 agent 覆盖（由 Plan 2B 传入；本地路径忽略） */
+  serverAgent?: string;
 }
 
 export interface ApprovalRequest {
