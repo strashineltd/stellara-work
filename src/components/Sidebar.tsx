@@ -343,7 +343,7 @@ export function Sidebar({
 
   async function deleteProject(p: ProjectSummary) {
     if (!projectMenuOpenRef.current) return;
-    const confirmed = window.confirm(`删除项目“${p.name}”？\n项目中的会话会保留，并移动到“未分组”。`);
+    const confirmed = window.confirm(`删除项目“${p.name}”？\n项目中的会话会保留，并移动到“最近”。`);
     if (!confirmed) return;
     if (!closeProjectMenu(true)) return;
     setProjectBusyId(p.id);
@@ -353,7 +353,7 @@ export function Sidebar({
       setProjectDialog((current) => current.projectId === p.id
         ? { ...current, present: false }
         : current);
-      setProjectFeedback({ kind: 'success', message: `项目“${p.name}”已删除，会话已移到未分组` });
+      setProjectFeedback({ kind: 'success', message: `项目“${p.name}”已删除，会话已移到最近` });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       setProjectFeedback({ kind: 'error', message: `删除失败：${reason}` });
