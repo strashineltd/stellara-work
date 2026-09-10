@@ -31,7 +31,7 @@ export function HomeView(props: HomeViewProps) {
   const activeProject = props.projects.find((project) => project.id === props.activeProjectId);
 
   return (
-    <main className="home-view" aria-labelledby="home-title">
+    <main className="home-view" aria-labelledby="home-title" data-motion="page-enter">
       {props.modelMissing && (
         <div className="no-model-banner" role="alert">
           <Icon name="alert" size={15} />

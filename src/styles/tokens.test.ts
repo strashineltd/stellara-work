@@ -45,6 +45,7 @@ describe('grounded design system', () => {
   const REQUIRED = [
     '--color-bg-app', '--color-bg-sidebar', '--color-bg-content',
     '--color-bg-elevated', '--color-bg-input',
+    '--color-bg-topbar', '--color-bg-composer', '--color-chip-bg',
     '--color-text', '--color-text-soft',
     '--color-border', '--color-border-strong',
     '--color-primary', '--color-accent', '--color-accent-soft',
@@ -52,7 +53,8 @@ describe('grounded design system', () => {
     '--font-sans', '--font-mono',
     '--fs-xs', '--fs-sm', '--fs-base', '--fs-md', '--fs-lg', '--fs-xl',
     '--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6',
-    '--radius-sm', '--radius-md', '--radius-lg',
+    '--radius-sm', '--radius-card', '--radius-md', '--radius-lg',
+    '--topbar-height',
   ];
 
   const MOTION_TOKENS = [
@@ -84,6 +86,13 @@ describe('grounded design system', () => {
     expect(tokens).toMatch(/\[data-theme="dark"\]\s*\{/);
   });
 
+  it('defines dark shell surface overrides', () => {
+    const dark = extractCssBlock(tokens, '[data-theme="dark"]') ?? '';
+    expect(dark).toMatch(/--color-bg-topbar:\s*#20201e\s*;/);
+    expect(dark).toMatch(/--color-bg-composer:\s*#2a2a27\s*;/);
+    expect(dark).toMatch(/--color-chip-bg:\s*#30302d\s*;/);
+  });
+
   it('loads only the new grounded UI styles', () => {
     expect(entry).toContain("./styles/grounded-tokens.css");
     expect(entry).toContain("./styles/workbench.css");
@@ -111,28 +120,21 @@ describe('grounded design system', () => {
 
   it('keeps native window controls (macOS traffic lights / Windows overlay)', () => {
     const windowOptions = electronMain.match(/new BrowserWindow\(\{([\s\S]*?)webPreferences:/)?.[1] ?? '';
-    const header = workbench.match(/\.main-header\s*\{([^}]*)\}/)?.[1] ?? '';
+    const topbar = workbench.match(/\.app-topbar\s*\{([^}]*)\}/)?.[1] ?? '';
 
     expect(windowOptions).toMatch(/titleBarStyle:\s*isMac \? 'hiddenInset' : 'hidden'/);
     expect(windowOptions).toMatch(/trafficLightPosition/);
     expect(windowOptions).toMatch(/titleBarOverlay/);
-    expect(header).toMatch(/env\(titlebar-area-width/);
-    expect(header).toMatch(/-webkit-app-region:\s*drag/);
-    expect(workbench).toMatch(/\.main-header button,[\s\S]*?-webkit-app-region:\s*no-drag/);
-    expect(workbench).toMatch(/html\[data-platform='darwin'\]\s*\.main-header\s*\{/);
-    expect(header).toMatch(/padding: 0 max\(22px[^}]*0 22px/);
+    expect(topbar).toMatch(/env\(titlebar-area-width/);
+    expect(topbar).toMatch(/-webkit-app-region:\s*drag/);
+    expect(workbench).toMatch(/\.app-topbar button,[\s\S]*?-webkit-app-region:\s*no-drag/);
+    expect(workbench).toMatch(/html\[data-platform='darwin'\]\s*\.app-topbar\s*\{/);
   });
 
-  it('stacks the macOS sidebar toggle below the traffic-light controls', () => {
-    const macHeader = workbench.match(/html\[data-platform='darwin'\]\s*\.main-header\s*\{([^}]*)\}/)?.[1] ?? '';
-    const macSidebarToggle = workbench.match(/html\[data-platform='darwin'\]\s*\.sidebar-toggle\s*\{([^}]*)\}/)?.[1] ?? '';
-    const macSidebar = workbench.match(/html\[data-platform='darwin'\]\s*\.sidebar\s*\{([^}]*)\}/)?.[1] ?? '';
+  it('keeps the macOS topbar clear of the traffic-light controls', () => {
+    const macTopbar = workbench.match(/html\[data-platform='darwin'\]\s*\.app-topbar\s*\{([^}]*)\}/)?.[1] ?? '';
 
-    expect(macHeader).toMatch(/padding-left:\s*82px\s*;/);
-    expect(macSidebarToggle).toMatch(/position:\s*absolute\s*;/);
-    expect(macSidebarToggle).toMatch(/left:\s*14px\s*;/);
-    expect(macSidebarToggle).toMatch(/top:\s*28px\s*;/);
-    expect(macSidebar).toMatch(/margin-top:\s*12px\s*;/);
+    expect(macTopbar).toMatch(/padding-left:\s*78px\s*;/);
   });
 
   it('coordinates CSS and JavaScript reduced motion', () => {
@@ -187,7 +189,7 @@ describe('grounded design system', () => {
     expect(workbench).not.toMatch(/\.btn-danger:hover[^}]*filter\s*:/);
     expect(workbench).not.toContain('0.15s ease');
     expect(workbench).not.toMatch(/transform:\s*scale\((?!X)/);
-    expect(workbench).toMatch(/\.continue-row\s*\{[^}]*border-color var\(--motion-fast\)/);
+    expect(workbench).toMatch(/\.sidebar-primary-item\s*\{[^}]*border-color var\(--motion-fast\)/);
 
     const attachBtn = extractCssBlock(workbench, '.attach-btn');
     const attachChip = extractCssBlock(workbench, 'button.attach-chip');
@@ -243,7 +245,7 @@ describe('grounded design system', () => {
       fastTransition(['background-color']),
     );
     expect(workbench).toMatch(
-      /\.header-menu-item,[\s\S]*?\.context-menu > li\s*\{[^}]*transition:\s*background-color var\(--motion-fast\) var\(--ease-standard\)\s*;/,
+      /\.model-switcher-item,[\s\S]*?\.context-menu > li\s*\{[^}]*transition:\s*background-color var\(--motion-fast\) var\(--ease-standard\)\s*;/,
     );
   });
 

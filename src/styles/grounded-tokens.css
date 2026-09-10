@@ -11,6 +11,9 @@
   --color-bg-input: #ffffff;
   --color-bg-code: #f4f5f7;
   --color-bg-selected: #e9eef9;
+  --color-bg-topbar: #f8f8f5;
+  --color-bg-composer: #ffffff;
+  --color-chip-bg: #f0f0ec;
 
   --color-text: #283244;
   --color-text-strong: #172033;
@@ -78,9 +81,11 @@
 
   --radius-xs: 7px;
   --radius-sm: 10px;
+  --radius-card: 12px;
   --radius-md: 14px;
   --radius-lg: 18px;
   --radius-pill: 999px;
+  --topbar-height: 44px;
   --header-height: 64px;
   --sidebar-width: 264px;
   --workspace-width: 312px;
@@ -122,6 +127,9 @@
   --color-bg-input: #25272c;
   --color-bg-code: #191b1f;
   --color-bg-selected: #30333b;
+  --color-bg-topbar: #20201e;
+  --color-bg-composer: #2a2a27;
+  --color-chip-bg: #30302d;
 
   --color-text: #e8eaf0;
   --color-text-strong: #f7f8fa;
