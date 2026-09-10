@@ -6,7 +6,8 @@
  * - SSE 事件经 EventAdapter 适配后，仅当 `serverId:sessionID` 命中活动流时发射，
  *   与本地路径共用 `chat-stream` 通道（渲染层无需区分）。
  * - 审批：approval_required 的远端 permission id 会被替换为本地 approvalId
- *   （`srv:<streamId>:<permissionID>`），respondApproval 命中后回传远端。
+ *   （`srv:<streamId>:<permissionID>`）；respondApproval 命中后回传远端，仅转发成功
+ *   才消费映射（失败保留可重试），同一审批并发响应只转发一次。
  */
 
 import type { ChatStreamEvent } from '@shared/ipc';
@@ -43,6 +44,7 @@ export class ServerChatBridge {
   private readonly activeByRemote = new Map<string, string>();
   private readonly adapters = new Map<string, EventAdapter>();
   private readonly approvals = new Map<string, PendingApproval>();
+  private readonly inFlightApprovals = new Set<string>();
 
   constructor(deps: ServerChatDeps) {
     this.deps = deps;
@@ -130,12 +132,17 @@ export class ServerChatBridge {
 
   async respondApproval(approvalId: string, approved: boolean): Promise<boolean> {
     const approval = this.approvals.get(approvalId);
-    if (!approval) return false;
-    this.approvals.delete(approvalId);
+    if (!approval || this.inFlightApprovals.has(approvalId)) return false;
     const client = this.deps.getClient(approval.serverId);
-    if (client) {
+    if (!client) throw new Error(SERVER_NOT_CONNECTED);
+    this.inFlightApprovals.add(approvalId);
+    try {
       await client.respondPermission(approval.remoteSessionId, approval.permissionID, approved ? 'once' : 'reject');
+    } finally {
+      this.inFlightApprovals.delete(approvalId);
     }
+    // 仅在远端应答成功后消费映射：失败保留，允许用户重试
+    this.approvals.delete(approvalId);
     return true;
   }
 

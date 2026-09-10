@@ -85,6 +85,82 @@ describe('ServerChatBridge', () => {
     expect(client.abort).toHaveBeenCalledWith('ses_1');
   });
 
+  it('keeps a failed approval registered so it can be retried', async () => {
+    const respondPermission = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(undefined);
+    const { bridge, emitted } = makeBridge({ client: { respondPermission } });
+    await bridge.start('s1', 'hi');
+    bridge.handleEvent('srv-1', permission());
+    const approvalId = (emitted.find((e) => e.type === 'approval_required')!.payload as { approval: { id: string } })
+      .approval.id;
+
+    await expect(bridge.respondApproval(approvalId, true)).rejects.toThrow('network down');
+    expect(respondPermission).toHaveBeenCalledTimes(1);
+
+    await expect(bridge.respondApproval(approvalId, true)).resolves.toBe(true);
+    expect(respondPermission).toHaveBeenCalledTimes(2);
+    expect(respondPermission).toHaveBeenLastCalledWith('ses_1', 'perm_1', 'once');
+
+    // 成功后映射被消费（不可再次响应）
+    await expect(bridge.respondApproval(approvalId, true)).resolves.toBe(false);
+    expect(respondPermission).toHaveBeenCalledTimes(2);
+  });
+
+  it('forwards only once when two responses race', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const respondPermission = vi.fn(async () => {
+      await gate;
+    });
+    const { bridge, emitted } = makeBridge({ client: { respondPermission } });
+    await bridge.start('s1', 'hi');
+    bridge.handleEvent('srv-1', permission());
+    const approvalId = (emitted.find((e) => e.type === 'approval_required')!.payload as { approval: { id: string } })
+      .approval.id;
+
+    const first = bridge.respondApproval(approvalId, true);
+    const second = bridge.respondApproval(approvalId, false);
+    await expect(second).resolves.toBe(false);
+    expect(respondPermission).toHaveBeenCalledTimes(1);
+
+    release();
+    await expect(first).resolves.toBe(true);
+    expect(respondPermission).toHaveBeenCalledTimes(1);
+    expect(respondPermission).toHaveBeenCalledWith('ses_1', 'perm_1', 'once');
+  });
+
+  it('keeps the approval when the server disconnects before responding', async () => {
+    const client = {
+      promptAsync: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+      respondPermission: vi.fn(async () => {}),
+    };
+    let current: typeof client | null = client;
+    const emitted: Array<{ streamId: string; type: string; payload: unknown }> = [];
+    const bridge = new ServerChatBridge({
+      getSession: () => ({ runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' }),
+      getClient: () => current as never,
+      emit: (streamId, event) => emitted.push({ streamId, type: event.type, payload: event }),
+      newStreamId: () => 'stream-1',
+    });
+    await bridge.start('s1', 'hi');
+    bridge.handleEvent('srv-1', permission());
+    const approvalId = (emitted.find((e) => e.type === 'approval_required')!.payload as { approval: { id: string } })
+      .approval.id;
+
+    current = null;
+    await expect(bridge.respondApproval(approvalId, true)).rejects.toThrow('服务器未连接');
+    expect(client.respondPermission).not.toHaveBeenCalled();
+
+    current = client;
+    await expect(bridge.respondApproval(approvalId, true)).resolves.toBe(true);
+    expect(client.respondPermission).toHaveBeenCalledWith('ses_1', 'perm_1', 'once');
+  });
+
   it('rejects unknown or local sessions', async () => {
     const { bridge, client } = makeBridge();
     await expect(bridge.start('missing', 'hi')).rejects.toThrow('不是远端会话');
