@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ApprovalMode } from '../../lib/navigation';
 import { usePresence } from '../../hooks/usePresence';
 import { presenceRootProps } from '../../lib/presence-ui';
@@ -20,6 +20,25 @@ export function ApprovalModeMenu(props: ApprovalModeMenuProps) {
   const [open, setOpen] = useState(false);
   const presence = usePresence(open, 120);
   const current = MODES.find((item) => item.id === props.mode) ?? MODES[1]!;
+
+  // 点外部 / Escape 关闭审批模式下拉
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('.approval-mode-menu')) return;
+      setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
 
   return (
     <span className="approval-mode-menu">
