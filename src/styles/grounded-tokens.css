@@ -13,7 +13,7 @@
   --color-bg-selected: #e9eef9;
   --color-bg-topbar: #f8f8f5;
   --color-bg-composer: #ffffff;
-  --color-chip-bg: #f0f0ec;
+  --color-chip-bg: #eef0f4;
 
   --color-text: #283244;
   --color-text-strong: #172033;
@@ -127,9 +127,9 @@
   --color-bg-input: #25272c;
   --color-bg-code: #191b1f;
   --color-bg-selected: #30333b;
-  --color-bg-topbar: #20201e;
-  --color-bg-composer: #2a2a27;
-  --color-chip-bg: #30302d;
+  --color-bg-topbar: #1b1c20;
+  --color-bg-composer: #202226;
+  --color-chip-bg: #27292e;
 
   --color-text: #e8eaf0;
   --color-text-strong: #f7f8fa;

@@ -88,9 +88,9 @@ describe('grounded design system', () => {
 
   it('defines dark shell surface overrides', () => {
     const dark = extractCssBlock(tokens, '[data-theme="dark"]') ?? '';
-    expect(dark).toMatch(/--color-bg-topbar:\s*#20201e\s*;/);
-    expect(dark).toMatch(/--color-bg-composer:\s*#2a2a27\s*;/);
-    expect(dark).toMatch(/--color-chip-bg:\s*#30302d\s*;/);
+    expect(dark).toMatch(/--color-bg-topbar:\s*#1b1c20\s*;/);
+    expect(dark).toMatch(/--color-bg-composer:\s*#202226\s*;/);
+    expect(dark).toMatch(/--color-chip-bg:\s*#27292e\s*;/);
   });
 
   it('loads only the new grounded UI styles', () => {
