@@ -1610,11 +1610,21 @@ html[data-platform='darwin'] .app-topbar {
 
 .home-view {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  flex: 1 1 auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   align-items: center;
+  min-height: 0;
   gap: var(--space-6);
   padding: var(--space-7) var(--space-6) var(--space-5);
   overflow: auto;
+}
+
+.home-view > .home-view__center {
+  grid-row: 2;
+}
+
+.home-view > .home-composer {
+  grid-row: 3;
 }
 
 .home-view__center {
@@ -5473,6 +5483,7 @@ html[data-page-hidden] .kbd.rec {
   grid-template-columns: 168px minmax(0, 1fr);
   width: min(960px, calc(100vw - 64px));
   height: min(680px, calc(100vh - 64px));
+  border-radius: var(--radius-card);
   overflow: hidden;
 }
 
@@ -5494,7 +5505,7 @@ html[data-page-hidden] .kbd.rec {
   min-height: 34px;
   padding: 0 var(--space-input-h);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-soft);
   font-size: 12.5px;
@@ -5526,6 +5537,12 @@ html[data-page-hidden] .kbd.rec {
   min-height: 0;
   padding: 18px 20px;
   overflow: auto;
+  background: var(--color-bg-content);
+}
+
+.settings-tab-content {
+  min-width: 0;
+  background: var(--color-bg-elevated);
 }
 
 .settings-panel-root {

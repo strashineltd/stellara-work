@@ -72,6 +72,14 @@ describe('HomeView', () => {
     unmount();
   });
 
+  it('focuses the composer textarea when a capability card is clicked', () => {
+    const { container, unmount } = render(<HomeView {...BASE_PROPS} />);
+    const card = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('探索并理解代码')) ?? null;
+    fireClick(card);
+    expect(document.activeElement).toBe(container.querySelector('textarea'));
+    unmount();
+  });
+
   it('shows project and branch chips and hides branch when null', () => {
     const first = render(<HomeView {...BASE_PROPS} />);
     expect(first.container.textContent).toContain('Stellara Work');

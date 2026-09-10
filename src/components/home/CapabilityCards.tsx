@@ -14,7 +14,7 @@ interface CapabilityCardsProps {
 
 export function CapabilityCards({ onPick }: CapabilityCardsProps) {
   return (
-    <div className="capability-cards" aria-label="能力入口">
+    <div className="capability-cards" role="group" aria-label="能力入口">
       {CAPABILITY_CARDS.map((card) => (
         <button key={card.id} className="capability-card" type="button" onClick={() => onPick(card.prompt)}>
           <span className="capability-card__icon"><Icon name={card.icon} size={16} /></span>

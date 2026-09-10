@@ -3,7 +3,7 @@ import type { ApprovalMode } from '../../lib/navigation';
 import { CapabilityCards } from './CapabilityCards';
 import { HomeComposer } from './HomeComposer';
 import { Icon } from '../Icon';
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 interface HomeViewProps {
   config: ConfiguredModel | null;
@@ -29,6 +29,7 @@ interface HomeViewProps {
 
 export function HomeView(props: HomeViewProps) {
   const activeProject = props.projects.find((project) => project.id === props.activeProjectId);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   return (
     <main className="home-view" aria-labelledby="home-title" data-motion="page-enter">
@@ -44,9 +45,15 @@ export function HomeView(props: HomeViewProps) {
       <div className="home-view__center">
         <span className="home-view__glyph" aria-hidden="true"><Icon name="terminal" size={22} /></span>
         <h1 id="home-title">你想让我们在 Stellara Work 中构建什么?</h1>
-        <CapabilityCards onPick={props.onInputChange} />
+        <CapabilityCards
+          onPick={(prompt) => {
+            props.onInputChange(prompt);
+            textareaRef.current?.focus();
+          }}
+        />
       </div>
       <HomeComposer
+        textareaRef={textareaRef}
         input={props.input}
         busy={props.busy}
         attachments={props.attachments}

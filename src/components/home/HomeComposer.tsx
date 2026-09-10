@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { AttachmentMeta } from '../../../shared/ipc';
 import { AttachmentPicker } from '../attachments/AttachmentPicker';
 import { ApprovalModeMenu } from '../chat/ApprovalModeMenu';
@@ -6,6 +6,7 @@ import type { ApprovalMode } from '../../lib/navigation';
 import { Icon } from '../Icon';
 
 interface HomeComposerProps {
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
   input: string;
   busy: boolean;
   attachments: AttachmentMeta[];
@@ -24,8 +25,6 @@ interface HomeComposerProps {
 }
 
 export function HomeComposer(props: HomeComposerProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   return (
     <div className="home-composer">
       <div className="home-composer__chips">
@@ -47,7 +46,7 @@ export function HomeComposer(props: HomeComposerProps) {
         )}
       </div>
       <textarea
-        ref={textareaRef}
+        ref={props.textareaRef}
         rows={3}
         value={props.input}
         disabled={props.busy}
