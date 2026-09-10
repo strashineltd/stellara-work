@@ -11,6 +11,7 @@ import {
   applyStreamEventToEntries, generateReportFromEntries, clearEntryEnterMotion,
 } from '../lib/chat-utils';
 import { useReducedMotion } from '../hooks/useReducedMotion';
+import type { ApprovalMode } from '../lib/navigation';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
@@ -94,7 +95,8 @@ export function MainView(props: MainViewProps) {
     present: false,
     entryCount: 0,
   });
-  const [planMode, setPlanMode] = useState(false);
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>('step');
+  const planMode = approvalMode === 'plan';
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
   const [fileTree, setFileTree] = useState<{ present: boolean; workDir: string | null }>({
     present: false,
@@ -311,7 +313,7 @@ export function MainView(props: MainViewProps) {
         if (cancelled) return;
         setEntries(messagesToEntries(messages));
         entriesSessionRef.current = activeSessionId;
-        setPlanMode(false);
+        setApprovalMode('step');
         setLastUserForRetry(null);
         setPendingPlanApproval(null);
       }).catch((e) => {
@@ -754,7 +756,7 @@ export function MainView(props: MainViewProps) {
   useShortcuts(
     props.shortcuts,
     {
-      togglePlanMode: () => setPlanMode((v) => !v),
+      togglePlanMode: () => setApprovalMode((mode) => (mode === 'plan' ? 'step' : 'plan')),
       sendMessage: () => {
         if (!busy && input.trim()) void handleSend();
       },
@@ -1007,7 +1009,7 @@ export function MainView(props: MainViewProps) {
               <InputArea
                 input={input}
                 busy={busy}
-                planMode={planMode}
+                approvalMode={approvalMode}
                 slash={slash}
                 hasWorkDir={!!activeWorkDir}
                 attachments={attachments}
@@ -1015,7 +1017,7 @@ export function MainView(props: MainViewProps) {
                 onPickAttachments={() => void handlePickAttachmentFiles()}
                 onAddAttachmentPaths={(paths) => void handleAddAttachmentPaths(paths)}
                 onInputChange={setInput}
-                onPlanToggle={() => setPlanMode((v) => !v)}
+                onApprovalModeChange={setApprovalMode}
                 onSend={() => void handleSend()}
                 onSlashApply={handleSlashApply}
                 onSlashOpen={() => setSlash((s) => ({ ...s, slashOpen: true, slashIdx: 0 }))}
@@ -1143,7 +1145,7 @@ export function MainView(props: MainViewProps) {
           onOpenFileTree={() => openFileTree(commandReturnFocusRef.current)}
           onToggleSidebar={props.onToggleSidebar}
           onToggleWorkspace={props.onToggleWorkspace}
-          onTogglePlanMode={() => setPlanMode((v) => !v)}
+          onTogglePlanMode={() => setApprovalMode((mode) => (mode === 'plan' ? 'step' : 'plan'))}
           onNewTask={() => handleNewTask(commandReturnFocusRef.current)}
         />
       )}

@@ -200,12 +200,18 @@ describe('MainView shortcut wiring', () => {
   });
 
   it('Ctrl+Shift+P toggles plan mode', async () => {
-    const { querySelector } = await renderMainView();
-    expect(querySelector('.plan-toggle.on')).toBeNull();
+    const { querySelector, querySelectorAll } = await renderMainView();
+    const trigger = querySelector('.approval-mode-menu__trigger');
+    expect(trigger?.textContent).toContain('逐步批准');
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', ctrlKey: true, shiftKey: true }));
     });
-    expect(querySelector('.plan-toggle.on')).not.toBeNull();
+    expect(trigger?.textContent).toContain('计划模式');
+    fireClick(trigger);
+    const planItem = Array.from(querySelectorAll('.approval-mode-menu__item')).find((el) => el.textContent?.includes('计划模式'))!;
+    expect(planItem.getAttribute('aria-selected')).toBe('true');
+    fireClick(planItem);
+    expect(trigger?.textContent).toContain('计划模式');
   });
 
   it('Ctrl+Enter sends the typed message', async () => {

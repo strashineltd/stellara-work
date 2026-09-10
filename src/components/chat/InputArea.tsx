@@ -1,9 +1,11 @@
 import type { AttachmentMeta, SkillDef } from '../../../shared/ipc';
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { AttachmentPicker } from '../attachments/AttachmentPicker';
 import { usePresence } from '../../hooks/usePresence';
 import { presenceRootProps } from '../../lib/presence-ui';
 import { Icon } from '../Icon';
+import { ApprovalModeMenu } from './ApprovalModeMenu';
+import type { ApprovalMode } from '../../lib/navigation';
 
 export interface SlashState {
   slashOpen: boolean;
@@ -15,7 +17,7 @@ export interface SlashState {
 interface InputAreaProps {
   input: string;
   busy: boolean;
-  planMode: boolean;
+  approvalMode: ApprovalMode;
   slash: SlashState;
   hasWorkDir: boolean;
   attachments: AttachmentMeta[];
@@ -23,7 +25,7 @@ interface InputAreaProps {
   activeSkill?: SkillDef | null;
   onActiveSkillClear?: () => void;
   onInputChange: (value: string) => void;
-  onPlanToggle: () => void;
+  onApprovalModeChange: (mode: ApprovalMode) => void;
   onSend: () => void;
   onAttachmentsChange: (next: AttachmentMeta[]) => void;
   onPickAttachments: () => void;
@@ -33,10 +35,11 @@ interface InputAreaProps {
   onSlashClose: () => void;
   onSlashIdxChange: (idx: number) => void;
   onLazyLoadSkills: () => void;
+  modelControl?: ReactNode;
 }
 
 /**
- * 底部输入区：textarea + slash 自动补全 + 附件（选择/拖拽/chip）+ plan toggle + 发送按钮
+ * 底部输入区：textarea + slash 自动补全 + 附件（选择/拖拽/chip）+ 审批模式菜单 + 发送按钮
  */
 export function InputArea(props: InputAreaProps) {
   const slashPresence = usePresence(props.slash.slashOpen, 120);
@@ -164,30 +167,18 @@ export function InputArea(props: InputAreaProps) {
               }
             }
           }
-          // Tab / Shift+Tab 切 Plan 模式
-          if (e.key === 'Tab') {
-            e.preventDefault();
-            props.onPlanToggle();
-            if (props.slash.slashOpen) props.onSlashClose();
-            return;
-          }
           // Ctrl+Enter 由全局快捷键 hook 处理
         }}
         disabled={props.busy}
         rows={3}
       />
       <div className="input-actions">
-        <label className={`plan-toggle ${props.planMode ? 'on' : ''}`} title="计划模式只会读取和分析，不会修改文件或执行命令">
-          <input
-            type="checkbox"
-            checked={props.planMode}
-            onChange={(e) => {
-              if (e.target.checked !== props.planMode) props.onPlanToggle();
-            }}
-            disabled={props.busy}
-          />
-          <span>先制定计划{props.planMode ? ' · 只读' : ''}</span>
-        </label>
+        <ApprovalModeMenu
+          mode={props.approvalMode}
+          onModeChange={props.onApprovalModeChange}
+          disabled={props.busy}
+        />
+        {props.modelControl}
         <span className="hint input-shortcut">Ctrl + Enter</span>
         <button
           className="btn btn-primary"

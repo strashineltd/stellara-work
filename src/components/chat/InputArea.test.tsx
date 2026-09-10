@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
-import { act, useState } from 'react';
+import { act, useState, type ReactNode } from 'react';
 import { InputArea } from './InputArea';
 import type { SlashState } from './InputArea';
+import type { ApprovalMode } from '../../lib/navigation';
 import type { AttachmentMeta, SkillDef } from '../../../shared/ipc';
 
 const EMPTY_SLASH: SlashState = {
@@ -24,6 +25,9 @@ const FILE_ATT: AttachmentMeta = {
 
 interface RenderProps {
   attachments?: AttachmentMeta[];
+  approvalMode?: ApprovalMode;
+  modelControl?: ReactNode;
+  onApprovalModeChange?: (mode: ApprovalMode) => void;
   onAttachmentsChange?: (next: AttachmentMeta[]) => void;
   onPickAttachments?: () => void;
   onAddAttachmentPaths?: (paths: string[]) => void;
@@ -41,11 +45,11 @@ function render(overrides: RenderProps = {}) {
       <InputArea
         input=""
         busy={false}
-        planMode={false}
+        approvalMode={overrides.approvalMode ?? 'step'}
         slash={EMPTY_SLASH}
         hasWorkDir={true}
         onInputChange={vi.fn()}
-        onPlanToggle={vi.fn()}
+        onApprovalModeChange={overrides.onApprovalModeChange ?? vi.fn()}
         onSend={vi.fn()}
         onSlashApply={vi.fn()}
         onSlashOpen={overrides.onSlashOpen ?? vi.fn()}
@@ -53,6 +57,7 @@ function render(overrides: RenderProps = {}) {
         onSlashIdxChange={vi.fn()}
         onLazyLoadSkills={overrides.onLazyLoadSkills ?? vi.fn()}
         attachments={overrides.attachments ?? []}
+        modelControl={overrides.modelControl}
         onAttachmentsChange={overrides.onAttachmentsChange ?? vi.fn()}
         onPickAttachments={overrides.onPickAttachments ?? vi.fn()}
         onAddAttachmentPaths={overrides.onAddAttachmentPaths ?? vi.fn()}
@@ -102,11 +107,11 @@ function SlashHarness({ initialOpen, onSlashApply }: {
     <InputArea
       input=""
       busy={false}
-      planMode={false}
+      approvalMode="step"
       slash={slash}
       hasWorkDir={true}
       onInputChange={vi.fn()}
-      onPlanToggle={vi.fn()}
+      onApprovalModeChange={vi.fn()}
       onSend={vi.fn()}
       onSlashApply={(skill) => {
         onSlashApply?.(skill);
@@ -205,6 +210,30 @@ describe('InputArea', () => {
     const { querySelector } = render();
     const footer = querySelector('.main-input');
     expect(footer).toBeTruthy();
+  });
+
+  it('renders the approval mode menu and reports mode changes', () => {
+    const onApprovalModeChange = vi.fn();
+    const { container } = render({ onApprovalModeChange });
+    const trigger = container.querySelector('.approval-mode-menu button');
+    expect(trigger?.textContent).toContain('逐步批准');
+
+    fireClick(trigger);
+    const auto = Array.from(container.querySelectorAll('.approval-mode-menu__item'))
+      .find((el) => el.textContent?.includes('帮我批准')) ?? null;
+    fireClick(auto);
+
+    expect(onApprovalModeChange).toHaveBeenCalledWith('auto');
+  });
+
+  it('reflects plan approval mode in the menu trigger', () => {
+    const { container } = render({ approvalMode: 'plan' });
+    expect(container.querySelector('.approval-mode-menu button')?.textContent).toContain('计划模式');
+  });
+
+  it('renders the model control slot in the input actions', () => {
+    const { container } = render({ modelControl: <span className="test-model-control">模型</span> });
+    expect(container.querySelector('.input-actions .test-model-control')).not.toBeNull();
   });
 
   it('does not use emoji glyphs in rendered HTML', () => {
@@ -351,11 +380,11 @@ describe('InputArea', () => {
         <InputArea
           input=""
           busy={false}
-          planMode={false}
+          approvalMode="plan"
           slash={EMPTY_SLASH}
           hasWorkDir={true}
           onInputChange={vi.fn()}
-          onPlanToggle={vi.fn()}
+          onApprovalModeChange={vi.fn()}
           onSend={vi.fn()}
           onSlashApply={vi.fn()}
           onSlashOpen={vi.fn()}
