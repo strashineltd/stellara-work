@@ -80,12 +80,29 @@ jobs:
           pattern: '*'
           merge-multiple: true
           path: dist-assets
+      - name: Extract release notes from CHANGELOG
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ] || ! grep -q '[^[:space:]]' release-notes.md; then
+            printf '自动构建发布：macOS 与 Windows。\n' > release-notes.md
+          fi
+          echo "--- release notes ---"
+          cat release-notes.md
       - name: Upload to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "Stellara Work ${{ github.ref_name }}" \
-            --notes "自动构建发布：macOS (arm64) 与 Windows (x64)。" \
-            dist-assets/* || \
-          gh release upload "${{ github.ref_name }}" dist-assets/* --clobber
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            gh release edit "${{ github.ref_name }}" --notes-file release-notes.md
+            gh release upload "${{ github.ref_name }}" dist-assets/* --clobber
+          else
+            gh release create "${{ github.ref_name }}" \
+              --title "Stellara Work ${{ github.ref_name }}" \
+              --notes-file release-notes.md \
+              dist-assets/*
+          fi
