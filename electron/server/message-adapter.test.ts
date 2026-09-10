@@ -25,13 +25,33 @@ describe('remoteMessagesToRows', () => {
     expect(rows.map((r) => r.position)).toEqual([0, 1, 2]);
   });
 
-  it('maps failed tools and skips empty assistant messages', () => {
+  it('maps failed tools and keeps tool-only assistant rows', () => {
     const rows = remoteMessagesToRows('s1', [
       { info: { id: 'm1', role: 'assistant', sessionID: 'ses_1' }, parts: [{ type: 'tool', id: 't1', callID: 'c1', sessionID: 'ses_1', messageID: 'm1', tool: 'edit', state: { status: 'error', error: 'denied' } }] },
     ]);
-    expect(rows.map((r) => r.role)).toEqual(['tool']);
-    expect(rows[0]!.content).toBe('Error: denied');
-    expect(JSON.parse(rows[0]!.meta!)).toEqual({ ok: false });
+    expect(rows.map((r) => r.role)).toEqual(['assistant', 'tool']);
+    expect(rows[0]!.content).toBe('');
+    expect(JSON.parse(rows[0]!.toolCalls!)).toEqual([
+      { id: 'c1', type: 'function', function: { name: 'edit', arguments: '{}' } },
+    ]);
+    expect(rows[0]!.position).toBe(0);
+    expect(rows[1]!.content).toBe('Error: denied');
+    expect(JSON.parse(rows[1]!.meta!)).toEqual({ ok: false });
+  });
+
+  it('skips truly empty assistant messages', () => {
+    const rows = remoteMessagesToRows('s1', [
+      { info: { id: 'm1', role: 'assistant' } },
+      {
+        info: { id: 'm2', role: 'assistant' },
+        parts: [
+          { type: 'reasoning', id: 'r1', text: '思考' },
+          { type: 'file', id: 'f1' },
+          { type: 'text', id: 'p1' },
+        ],
+      },
+    ]);
+    expect(rows).toEqual([]);
   });
 
   it('tolerates missing parts, time, and state.input', () => {
@@ -71,11 +91,16 @@ describe('remoteMessagesToRows', () => {
         ],
       },
     ]);
-    expect(rows.map((r) => r.role)).toEqual(['tool', 'tool']);
-    expect(rows[0]!.content).toBe('partial');
-    expect(JSON.parse(rows[0]!.meta!)).toEqual({ ok: false });
-    expect(rows[1]!.content).toBe('');
-    expect(JSON.parse(rows[1]!.meta!)).toEqual({ ok: true });
+    expect(rows.map((r) => r.role)).toEqual(['assistant', 'tool', 'tool']);
+    expect(rows[0]!.content).toBe('');
+    expect(JSON.parse(rows[0]!.toolCalls!)).toEqual([
+      { id: 'c1', type: 'function', function: { name: 'edit', arguments: '{}' } },
+      { id: 'c2', type: 'function', function: { name: 'edit', arguments: '{}' } },
+    ]);
+    expect(rows[1]!.content).toBe('partial');
+    expect(JSON.parse(rows[1]!.meta!)).toEqual({ ok: false });
+    expect(rows[2]!.content).toBe('');
+    expect(JSON.parse(rows[2]!.meta!)).toEqual({ ok: true });
     expect(rows[0]!.createdAt).toBe(5);
   });
 });

@@ -5,7 +5,8 @@
  * - user / assistant 的 text parts 拼接为 content；reasoning 与未知 part 忽略。
  * - assistant 的 tool parts 汇总为 toolCalls JSON（含未终态的 call）。
  * - completed / error 的 tool parts 额外生成独立 tool 行。
- * - 空 assistant（无文本）跳过，其终态工具仍生成 tool 行；position 从 0 递增。
+ * - 空 assistant（无文本且无工具）跳过；仅有 tool 时保留 content 为空的 assistant 行与 toolCalls，
+ *   其终态工具仍生成 tool 行；position 从 0 递增。
  * - 缺字段（parts / time / state.input）安全降级，不抛错。
  */
 
@@ -76,7 +77,7 @@ export function remoteMessagesToRows(localSessionId: string, messages: RemoteMes
       continue;
     }
 
-    if (text !== '') {
+    if (text !== '' || toolCalls.length > 0) {
       rows.push({
         sessionId: localSessionId,
         position: rows.length,
