@@ -258,27 +258,29 @@ describe('Sidebar', () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
-  it('lists unassigned recent sessions by updatedAt and caps at five', () => {
-    const sessions: SessionSummary[] = Array.from({ length: 6 }, (_, index) => ({
-      id: `recent-${index}`,
+  it('renders every unassigned session once in 最近, ordered by updatedAt desc', () => {
+    const ids = Array.from({ length: 6 }, (_, index) => `recent-${index}`);
+    const sessions: SessionSummary[] = ids.map((id, index) => ({
+      id,
       title: `最近会话 ${index}`,
       modelId: 'deepseek',
       messageCount: 1,
       updatedAt: index * 1000,
     }));
     const onSelect = vi.fn();
-    const { querySelector, querySelectorAll, getByText } = render(
+    const { container, querySelectorAll, getByText } = render(
       <Sidebar sessions={sessions} activeId={null} onSelect={onSelect} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />,
     );
     expect(getByText('最近')).toBeTruthy();
     const rows = querySelectorAll('.sidebar-recent .session-row');
-    expect(rows.length).toBe(5);
-    expect(Array.from(rows).map((el) => el.getAttribute('data-session-id'))).toEqual([
-      'recent-5', 'recent-4', 'recent-3', 'recent-2', 'recent-1',
-    ]);
+    expect(rows.length).toBe(6);
+    expect(Array.from(rows).map((el) => el.getAttribute('data-session-id'))).toEqual([...ids].reverse());
+    for (const id of ids) {
+      expect(querySelectorAll(`[data-session-id="${id}"]`).length).toBe(1);
+    }
+    expect(container.textContent).not.toContain('未分组');
     fireClick(rows[0]!);
     expect(onSelect).toHaveBeenCalledWith('recent-5');
-    expect(querySelector('.sidebar-recent .session-row[data-session-id="recent-0"]')).toBeNull();
   });
 
   it('excludes project sessions from the recent group', () => {
@@ -289,6 +291,8 @@ describe('Sidebar', () => {
     const { querySelectorAll } = render(<Sidebar sessions={sessions} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />);
     const recentIds = Array.from(querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'));
     expect(recentIds).toEqual(['loose']);
+    expect(querySelectorAll('[data-session-id="loose"]').length).toBe(1);
+    expect(querySelectorAll('[data-session-id="pinned"]').length).toBe(1);
   });
 
   it('does not render the recent group when every session belongs to a project', () => {
@@ -298,6 +302,32 @@ describe('Sidebar', () => {
     const { container, querySelector } = render(<Sidebar sessions={sessions} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />);
     expect(querySelector('.sidebar-recent')).toBeNull();
     expect(Array.from(container.querySelectorAll('.sidebar-section-title')).some((el) => el.textContent === '最近')).toBe(false);
+  });
+
+  it('filters 最近 by the project filter and the search query', () => {
+    const sessions: SessionSummary[] = [
+      { id: 'keep', title: '保留的会话', modelId: 'deepseek', messageCount: 1, updatedAt: 2 },
+      { id: 'drop', title: '排除的会议', modelId: 'deepseek', messageCount: 1, updatedAt: 1 },
+    ];
+    const view = render(<Sidebar sessions={sessions} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />);
+    const select = view.querySelector('.sidebar-filter-select') as HTMLSelectElement;
+    const chooseProjectFilter = (value: string) => {
+      act(() => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+        setter?.call(select, value);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    };
+
+    chooseProjectFilter('p1');
+    expect(view.querySelector('.sidebar-recent')).toBeNull();
+
+    chooseProjectFilter('all');
+    expect(view.querySelectorAll('.sidebar-recent .session-row').length).toBe(2);
+
+    fireInput(view.querySelector('.sidebar-search-input') as HTMLInputElement, '保留');
+    const recentIds = Array.from(view.querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'));
+    expect(recentIds).toEqual(['keep']);
   });
 
   it('opens a session from the keyboard', () => {
@@ -982,15 +1012,17 @@ describe('Sidebar', () => {
     expect(backdrop.hasAttribute('inert')).toBe(false);
   });
 
-  it('keeps sessions from previously deleted projects visible as unassigned', () => {
+  it('keeps sessions from previously deleted projects visible in 最近', () => {
     const orphaned: SessionSummary[] = [
       { id: 'orphan', title: 'Recovered task', modelId: 'deepseek', messageCount: 1, updatedAt: Date.now(), projectId: 'deleted-project' },
     ];
-    const { getByText } = render(
+    const { container, getByText, querySelectorAll } = render(
       <Sidebar sessions={orphaned} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />,
     );
-    expect(getByText('未分组')).toBeTruthy();
+    expect(getByText('最近')).toBeTruthy();
     expect(getByText('Recovered task')).toBeTruthy();
+    expect(querySelectorAll('[data-session-id="orphan"]').length).toBe(1);
+    expect(container.textContent).not.toContain('未分组');
   });
 
   it('forwards closing presence semantics and root transition completion to the aside', () => {

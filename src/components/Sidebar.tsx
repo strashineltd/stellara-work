@@ -68,7 +68,7 @@ function truncateTitle(title: string, maxLen = 28): string {
 
 // 默认展开所有项目
 function initExpanded(projects: ProjectSummary[]): Record<string, boolean> {
-  const map: Record<string, boolean> = { '__unassigned__': true };
+  const map: Record<string, boolean> = {};
   for (const p of projects) map[p.id] = true;
   return map;
 }
@@ -163,7 +163,7 @@ export function Sidebar({
 
     return {
       projectGroups: groupMap,
-      unassigned: unassignedList,
+      unassigned: unassignedList.sort((a, b) => b.updatedAt - a.updatedAt),
     };
   }, [projects, sessions, search, contentMatchIds, projectFilter]);
 
@@ -175,10 +175,10 @@ export function Sidebar({
       const next = { ...prev };
       let changed = false;
       for (const session of sessions) {
+        if (!session.projectId) continue;
         if (!session.title.toLowerCase().includes(query)) continue;
-        const groupId = session.projectId ?? '__unassigned__';
-        if (!next[groupId]) {
-          next[groupId] = true;
+        if (!next[session.projectId]) {
+          next[session.projectId] = true;
           changed = true;
         }
       }
@@ -187,12 +187,9 @@ export function Sidebar({
   }, [search, sessions]);
 
   useEffect(() => {
-    if (!editingId) return;
-    const sourceRow = sessionMenuReturnFocusRef.current?.closest('.session-row');
-    const input = sourceRow?.querySelector<HTMLInputElement>('.session-title-input') ?? editInputRef.current;
-    if (input) {
-      input.focus();
-      input.select();
+    if (editingId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
     }
   }, [editingId]);
 
@@ -659,11 +656,6 @@ export function Sidebar({
     items[nextIndex]?.focus({ preventScroll: true });
   }
 
-  const recentSessions = sessions
-    .filter((s) => !s.projectId)
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 5);
-
   return (
     <>
       <aside className="sidebar" {...presenceRootProps(presence)}>
@@ -777,37 +769,6 @@ export function Sidebar({
           return renderProjectGroup(p, sessionsInProject, sourceMissing);
         })}
 
-        {/* 未分组会话（筛选到具体项目时不显示） */}
-        {unassigned.length > 0 && (projectFilter === 'all' || projectFilter === 'unassigned') && (
-          <li className="project-group">
-            <div
-              className={`project-header${expanded['__unassigned__'] ? ' project-header--expanded' : ''}`}
-              role="button"
-              tabIndex={0}
-              aria-expanded={expanded['__unassigned__']}
-              aria-label={`${expanded['__unassigned__'] ? '收起' : '展开'}未分组会话`}
-              onClick={() => toggleProject('__unassigned__')}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleProject('__unassigned__');
-                }
-              }}
-            >
-              <span className="project-header__arrow">
-                <Icon name={expanded['__unassigned__'] ? 'chevron-down' : 'chevron-right'} size={13} />
-              </span>
-              <span className="project-name project-name--muted">未分组</span>
-              <span className="project-count">{unassigned.length}</span>
-            </div>
-            {expanded['__unassigned__'] && (
-              <ul className="project-children">
-                {unassigned.map(renderSession)}
-              </ul>
-            )}
-          </li>
-        )}
-
         {/* 空状态 */}
         {sessions.length === 0 && (
           <li className="session-empty">
@@ -816,11 +777,11 @@ export function Sidebar({
         )}
       </ul>
 
-      {recentSessions.length > 0 && (
+      {unassigned.length > 0 && (
         <section className="sidebar-recent" aria-label="最近">
           <h2 className="sidebar-section-title">最近</h2>
           <ul className="session-list">
-            {recentSessions.map(renderSession)}
+            {unassigned.map(renderSession)}
           </ul>
         </section>
       )}
