@@ -194,6 +194,18 @@ export function MainView(props: MainViewProps) {
     nav.push({ section: next, sessionId });
   }
 
+  // 后退/前进切换历史会话：把 nav 里的 sessionId 应用到当前会话
+  useEffect(() => {
+    if (nav.current.section !== 'tasks') return;
+    const navSessionId = nav.current.sessionId;
+    if (!navSessionId || navSessionId === activeSessionId) return;
+    if (sessions.some((session) => session.id === navSessionId)) {
+      onSessionSwitched(navSessionId);
+      return;
+    }
+    nav.replace({ section: 'tasks', sessionId: activeSessionId ?? null });
+  }, [nav.current.section, nav.current.sessionId, nav.replace, activeSessionId, sessions, onSessionSwitched]);
+
   useLayoutEffect(() => {
     if (clearTaskPresence.state === 'entering') {
       clearTaskCancelRef.current?.focus({ preventScroll: true });

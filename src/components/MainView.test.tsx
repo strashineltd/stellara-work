@@ -312,6 +312,24 @@ function SessionSwitchHarness(props: React.ComponentProps<typeof MainView>) {
   );
 }
 
+function SessionRemovalHarness(props: React.ComponentProps<typeof MainView>) {
+  const [activeId, setActiveId] = useState<string | null>(props.activeSessionId);
+  const [sessions, setSessions] = useState(props.sessions);
+  return (
+    <MainView
+      {...props}
+      sessions={sessions}
+      activeSessionId={activeId}
+      onSessionSwitched={setActiveId}
+      onSessionDeleted={(id) => {
+        const remaining = sessions.filter((session) => session.id !== id);
+        setSessions(remaining);
+        if (activeId === id) setActiveId(remaining[0]?.id ?? null);
+      }}
+    />
+  );
+}
+
 function ProjectCreationHarness(props: React.ComponentProps<typeof MainView>) {
   const [projects, setProjects] = useState(props.projects);
   return (
@@ -844,6 +862,73 @@ describe('MainView shell navigation', () => {
 
     fireClick(forward);
     expect(querySelector('.main-chat')).not.toBeNull();
+  });
+
+  it('applies the history session when navigating back and forward', async () => {
+    (window as any).electronAPI.sessions.get.mockImplementation((id: string) =>
+      Promise.resolve({
+        session: id === 'a' ? SESSIONS[0] : SESSIONS[1],
+        messages: [{ sessionId: id, position: 0, role: 'user', content: id === 'a' ? 'A 的任务' : 'B 的任务', createdAt: 0 }],
+      }),
+    );
+    const { container, querySelector } = await renderMainView({}, SessionSwitchHarness);
+    expect(container.textContent).toContain('A 的任务');
+
+    fireClick(querySelector('[data-session-id="b"]'));
+    await act(async () => {});
+    expect(container.textContent).toContain('B 的任务');
+
+    fireClick(querySelector('[aria-label="后退"]'));
+    await act(async () => {});
+    expect(container.textContent).toContain('A 的任务');
+    expect(container.textContent).not.toContain('B 的任务');
+
+    fireClick(querySelector('[aria-label="前进"]'));
+    await act(async () => {});
+    expect(container.textContent).toContain('B 的任务');
+  });
+
+  it('recovers when the current history session was deleted', async () => {
+    (window as any).electronAPI.sessions.get.mockImplementation((id: string) =>
+      Promise.resolve({
+        session: id === 'a' ? SESSIONS[0] : SESSIONS[1],
+        messages: [{ sessionId: id, position: 0, role: 'user', content: id === 'a' ? 'A 的任务' : 'B 的任务', createdAt: 0 }],
+      }),
+    );
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const view = await renderMainView({}, SessionRemovalHarness);
+    const { container, querySelector } = view;
+    expect(container.textContent).toContain('A 的任务');
+
+    fireClick(querySelector('[data-session-id="b"]'));
+    await act(async () => {});
+    expect(container.textContent).toContain('B 的任务');
+
+    act(() => {
+      querySelector('[data-session-id="b"]')!.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }),
+      );
+    });
+    const deleteItem = Array.from(document.querySelectorAll('.session-menu-item')).find(
+      (el) => el.textContent === '删除',
+    );
+    fireClick(deleteItem);
+    await act(async () => {});
+    expect((window as any).electronAPI.sessions.delete).toHaveBeenCalledWith('b');
+    expect(querySelector('[data-session-id="b"]')).toBeNull();
+    expect(container.textContent).toContain('A 的任务');
+    expect(container.textContent).not.toContain('B 的任务');
+
+    fireClick(querySelector('[data-session-id="a"]'));
+    await act(async () => {});
+
+    const back = querySelector('[aria-label="后退"]') as HTMLButtonElement;
+    fireClick(back);
+    await act(async () => {});
+    fireClick(back);
+    await act(async () => {});
+    expect(querySelector('.home-view')).not.toBeNull();
+    view.unmount();
   });
 
   it('fetches the git branch for the active work dir', async () => {
