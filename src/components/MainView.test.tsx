@@ -119,7 +119,7 @@ describe('MainView session deletion confirmation', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -186,7 +186,7 @@ describe('MainView shortcut wiring', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -280,7 +280,7 @@ describe('MainView model-missing banner', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -382,7 +382,7 @@ describe('MainView memory context', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -473,7 +473,7 @@ describe('MainView files section', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -504,7 +504,7 @@ describe('MainView context stats', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -623,7 +623,7 @@ describe('MainView subagents', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -726,7 +726,7 @@ describe('MainView without a configured model', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -737,11 +737,11 @@ describe('MainView without a configured model', () => {
       undefined,
       { navigateToTasks: false },
     );
-    expect(querySelector('.dashboard--home')).not.toBeNull();
+    expect(querySelector('.home-view')).not.toBeNull();
     expect(container.textContent).toContain('尚未配置模型，Agent 暂时无法执行任务');
   });
 
-  it('prompts to configure a model when sending from home without a config', async () => {
+  it('opens settings when sending from home without a config', async () => {
     const onOpenSettings = vi.fn();
     const { querySelector, container } = await renderMainView(
       {
@@ -762,11 +762,11 @@ describe('MainView without a configured model', () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
     });
     await act(async () => {});
-    expect(container.textContent).toContain('请先配置模型');
+    expect(container.querySelector('.home-view')).not.toBeNull();
     expect(onOpenSettings).toHaveBeenCalled();
   });
 
-  it('returns focus to the header model pill after settings closes when sending from home without a config', async () => {
+  it('returns focus to the home send button after settings closes when sending from home without a config', async () => {
     const { querySelector } = await renderMainView(
       { config: null, activeSessionId: null },
       SettingsCloseHarness,
@@ -778,14 +778,117 @@ describe('MainView without a configured model', () => {
       setter.call(textarea, '写个任务');
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const sendButton = querySelector('.dashboard-send-button') as HTMLButtonElement;
+    const sendButton = querySelector('.home-composer__send') as HTMLButtonElement;
     sendButton.focus({ preventScroll: true });
     fireClick(sendButton);
     await act(async () => {});
     expect(querySelector('.settings-modal')).not.toBeNull();
     fireClick(querySelector('.settings-close'));
     await act(async () => {});
-    expect(document.activeElement).toBe(querySelector('.model-pill--missing'));
+    expect(document.activeElement).toBe(sendButton);
+  });
+});
+
+describe('MainView shell navigation', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue('main') },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  it('renders the top bar and home view on first load', async () => {
+    const { querySelector, container } = await renderMainView({}, undefined, { navigateToTasks: false });
+    expect(querySelector('.app-topbar')).not.toBeNull();
+    expect(querySelector('.home-view')).not.toBeNull();
+    expect(querySelector('.home-composer')).not.toBeNull();
+    expect(container.textContent).toContain('你想让我们在 Stellara Work 中构建什么?');
+  });
+
+  it('prefills the composer when a capability card is clicked', async () => {
+    const { querySelector, querySelectorAll } = await renderMainView({}, undefined, { navigateToTasks: false });
+    const card = Array.from(querySelectorAll('.capability-card')).find((el) => el.textContent?.includes('探索并理解代码'));
+    fireClick(card);
+    const textarea = querySelector('.home-composer textarea') as HTMLTextAreaElement;
+    expect(textarea.value).toContain('探索并理解');
+  });
+
+  it('disables back/forward initially and back returns home after entering a session', async () => {
+    const { querySelector } = await renderMainView({}, undefined, { navigateToTasks: false });
+    const back = querySelector('[aria-label="后退"]') as HTMLButtonElement;
+    const forward = querySelector('[aria-label="前进"]') as HTMLButtonElement;
+    expect(back.disabled).toBe(true);
+    expect(forward.disabled).toBe(true);
+
+    fireClick(querySelector('[data-session-id="a"]'));
+    expect(querySelector('.main-chat')).not.toBeNull();
+    expect(back.disabled).toBe(false);
+
+    fireClick(back);
+    expect(querySelector('.home-view')).not.toBeNull();
+    expect(back.disabled).toBe(true);
+    expect(forward.disabled).toBe(false);
+
+    fireClick(forward);
+    expect(querySelector('.main-chat')).not.toBeNull();
+  });
+
+  it('fetches the git branch for the active work dir', async () => {
+    const view = await renderMainView(
+      { config: { ...CONFIG, workDir: 'D:/proj' } },
+      undefined,
+      { navigateToTasks: false },
+    );
+    await act(async () => {});
+    expect((window as any).electronAPI.app.getGitBranch).toHaveBeenCalledWith('D:/proj');
+    expect(view.querySelector('.home-composer__branch')?.textContent).toContain('main');
+  });
+
+  it('auto-approves pending approvals when the approval mode is auto', async () => {
+    const approve = vi.fn();
+    (window as any).electronAPI.chat.approve = approve;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+    const events = (async function* () {
+      yield { type: 'approval_required', approval: { id: 'ap-auto', toolName: 'write_file', args: '{}', toolCallId: 'tc1' } };
+      await gate;
+      yield { type: 'done' };
+    })();
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's1', events });
+    const { querySelector, querySelectorAll } = await renderMainView();
+    await act(async () => {});
+    fireClick(querySelector('.approval-mode-menu__trigger'));
+    const autoItem = Array.from(querySelectorAll('.approval-mode-menu__item')).find((el) => el.textContent?.includes('帮我批准'));
+    fireClick(autoItem);
+    expect(querySelector('.approval-mode-menu__trigger')?.textContent).toContain('帮我批准');
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '改文件');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    fireClick(querySelector('.main-input .btn-primary'));
+    await act(async () => {});
+
+    expect(approve).toHaveBeenCalledWith('ap-auto', true);
+    expect(querySelector('.approval-top-bar')).toBeNull();
+
+    releaseGate();
+    await act(async () => {});
   });
 });
 
@@ -805,7 +908,7 @@ describe('MainView slash skills reload on settings change', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -875,7 +978,7 @@ describe('MainView home composer attachments', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
       dialog: {
         getPathForFile: vi.fn((f: File) => `/tmp/${f.name}`),
@@ -950,7 +1053,7 @@ describe('MainView panel presence', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -969,7 +1072,7 @@ describe('MainView panel presence', () => {
     expect(sidebar.hasAttribute('inert')).toBe(true);
     expect(inspector.getAttribute('data-motion-state')).toBe('closing');
     expect(inspector.getAttribute('aria-hidden')).toBe('true');
-    expect(view.container.querySelector('.sidebar-toggle')?.getAttribute('aria-pressed')).toBe('false');
+    expect(view.container.querySelector('[data-panel-toggle="sidebar"]')?.getAttribute('aria-pressed')).toBe('false');
 
     act(() => sidebar.dispatchEvent(new Event('transitionend', { bubbles: true })));
     expect(view.container.querySelector('.main-layout > .sidebar')).toBeNull();
@@ -1052,7 +1155,7 @@ describe('MainView command and task modal presence', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       projects: { create: vi.fn() },
       dialog: { selectProjectDir: vi.fn().mockResolvedValue({ workDir: 'D:/new-project' }) },
       fs: {
@@ -1092,7 +1195,7 @@ describe('MainView command and task modal presence', () => {
 
   it('restores the palette opener on Escape and completes exit only from its root', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     const input = openPalette(opener);
     const palette = view.querySelector('.command-palette') as HTMLElement;
     const backdrop = palette.closest('.modal-backdrop') as HTMLElement;
@@ -1120,7 +1223,7 @@ describe('MainView command and task modal presence', () => {
 
   it('cancels palette exit and refocuses its input when rapidly reopened', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     const input = openPalette(opener);
     const backdrop = input.closest('.modal-backdrop') as HTMLElement;
 
@@ -1146,7 +1249,7 @@ describe('MainView command and task modal presence', () => {
       config: { ...CONFIG, workDir: 'D:/proj' },
       onOpenSettings,
     });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     openPalette(opener);
     const restoreSpy = vi.spyOn(opener, 'focus');
     const backdrop = view.querySelector('.command-palette')!.closest('.modal-backdrop') as HTMLElement;
@@ -1162,7 +1265,7 @@ describe('MainView command and task modal presence', () => {
 
   it('transfers the palette target through FileTree and restores it when FileTree closes', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     openPalette(opener);
     const restoreSpy = vi.spyOn(opener, 'focus');
     const paletteBackdrop = view.querySelector('.command-palette')!.closest('.modal-backdrop') as HTMLElement;
@@ -1191,7 +1294,10 @@ describe('MainView command and task modal presence', () => {
 
   it('restores a direct FileTree trigger and cancels a stale exit on rapid reopen', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const trigger = view.querySelector('[aria-label="浏览文件"]') as HTMLButtonElement;
+    const filesNav = Array.from(view.querySelectorAll('.sidebar-tool')).find((el) => el.textContent?.includes('文件'));
+    fireClick(filesNav);
+    await act(async () => {});
+    const trigger = view.querySelector('[aria-label="全屏浏览文件"]') as HTMLButtonElement;
     trigger.focus();
     fireClick(trigger);
     await act(async () => {});
@@ -1214,7 +1320,10 @@ describe('MainView command and task modal presence', () => {
 
   it('reinvokes already-open FileTree from Ctrl+K without replacing its original return target', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const trigger = view.querySelector('[aria-label="浏览文件"]') as HTMLButtonElement;
+    const filesNav = Array.from(view.querySelectorAll('.sidebar-tool')).find((el) => el.textContent?.includes('文件'));
+    fireClick(filesNav);
+    await act(async () => {});
+    const trigger = view.querySelector('[aria-label="全屏浏览文件"]') as HTMLButtonElement;
     trigger.focus();
     fireClick(trigger);
     await act(async () => {});
@@ -1240,7 +1349,7 @@ describe('MainView command and task modal presence', () => {
 
   it('keeps Ctrl+K open and focused when FileTree has no workDir', async () => {
     view = await renderMainView({ config: CONFIG });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     const input = openPalette(opener);
     const paletteBackdrop = input.closest('.modal-backdrop') as HTMLElement;
 
@@ -1253,7 +1362,7 @@ describe('MainView command and task modal presence', () => {
 
   it('clears entries immediately while retaining the original confirmation count through exit', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     openPalette(opener);
     const restoreSpy = vi.spyOn(opener, 'focus');
     const paletteBackdrop = view.querySelector('.command-palette')!.closest('.modal-backdrop') as HTMLElement;
@@ -1283,40 +1392,15 @@ describe('MainView command and task modal presence', () => {
     expect(view.querySelector('.confirm-modal')).toBeNull();
   });
 
-  it('cancels clear-confirmation exit when the durable header command rapidly reopens it', async () => {
-    view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const menuTrigger = view.querySelector('[aria-label="打开主菜单"]') as HTMLButtonElement;
-    menuTrigger.focus();
-    fireClick(menuTrigger);
-    fireClick(view.getByText('新任务（清空当前）'));
-    const confirmation = view.querySelector('.confirm-modal') as HTMLElement;
-    const backdrop = confirmation.closest('.modal-backdrop') as HTMLElement;
-    const cancel = Array.from(confirmation.querySelectorAll('button')).find((button) => button.textContent?.includes('取消'))!;
-
-    fireClick(cancel);
-    expect(document.activeElement).toBe(menuTrigger);
-    expect(backdrop.dataset.motionState).toBe('closing');
-
-    fireClick(menuTrigger);
-    fireClick(view.getByText('新任务（清空当前）'));
-    expect(view.querySelector('.confirm-modal')?.closest('.modal-backdrop')).toBe(backdrop);
-    expect(backdrop.hasAttribute('inert')).toBe(false);
-    expect(document.activeElement).toBe(cancel);
-
-    act(() => backdrop.dispatchEvent(new Event('transitionend', { bubbles: true })));
-    expect(view.querySelector('.confirm-modal')).not.toBeNull();
-  });
-
   it('reinvokes an already-open clear confirmation from Ctrl+K without replacing its original return target', async () => {
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const menuTrigger = view.querySelector('[aria-label="打开主菜单"]') as HTMLButtonElement;
-    menuTrigger.focus();
-    fireClick(menuTrigger);
-    fireClick(view.getByText('新任务（清空当前）'));
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
+    openPalette(opener);
+    await clickAndFlush(command('新任务（清空当前聊天）'));
     const confirmation = view.querySelector('.confirm-modal') as HTMLElement;
     const cancel = Array.from(confirmation.querySelectorAll('button')).find((button) => button.textContent?.includes('取消'))!;
     const clear = Array.from(confirmation.querySelectorAll('button')).find((button) => button.textContent?.includes('清空'))!;
-    const originalFocus = vi.spyOn(menuTrigger, 'focus');
+    const originalFocus = vi.spyOn(opener, 'focus');
     openPalette(clear);
     const staleFocus = vi.spyOn(clear, 'focus');
     const paletteBackdrop = view.querySelector('.command-palette')!.closest('.modal-backdrop') as HTMLElement;
@@ -1329,14 +1413,14 @@ describe('MainView command and task modal presence', () => {
     expect(paletteBackdrop.dataset.motionState).toBe('closing');
 
     await clickAndFlush(cancel);
-    expect(document.activeElement).toBe(menuTrigger);
+    expect(document.activeElement).toBe(opener);
     expect(originalFocus).toHaveBeenCalledOnce();
   });
 
   it('keeps Ctrl+K open and focused when clear has no entries', async () => {
     (window as any).electronAPI.sessions.get.mockResolvedValue({ session: SESSIONS[0], messages: [] });
     view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     const input = openPalette(opener);
     const paletteBackdrop = input.closest('.modal-backdrop') as HTMLElement;
 
@@ -1358,7 +1442,7 @@ describe('MainView command and task modal presence', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
     });
     await act(async () => {});
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     const input = openPalette(opener);
     const paletteBackdrop = input.closest('.modal-backdrop') as HTMLElement;
 
@@ -1371,7 +1455,7 @@ describe('MainView command and task modal presence', () => {
 
   it('transfers the durable palette opener through create-project when New Session has no project', async () => {
     view = await renderMainView({ activeSessionId: null, projects: [], sessions: [] });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     openPalette(opener);
     const restoreSpy = vi.spyOn(opener, 'focus');
     const paletteBackdrop = view.querySelector('.command-palette')!.closest('.modal-backdrop') as HTMLElement;
@@ -1396,7 +1480,7 @@ describe('MainView command and task modal presence', () => {
       projects: [{ id: 'p1', name: '现有项目', updatedAt: 1, sessionCount: 0 }],
       sessions: [],
     });
-    const opener = view.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const opener = view.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     openPalette(opener);
     const restoreSpy = vi.spyOn(opener, 'focus');
     const paletteBackdrop = view.querySelector('.command-palette')!.closest('.modal-backdrop') as HTMLElement;
@@ -1404,40 +1488,10 @@ describe('MainView command and task modal presence', () => {
     await clickAndFlush(command('新建会话'));
 
     expect(document.body.querySelector('.project-dialog')).toBeNull();
-    expect(view.querySelector('main.dashboard--home')).not.toBeNull();
+    expect(view.querySelector('main.home-view')).not.toBeNull();
     expect(document.activeElement).toBe(opener);
     expect(restoreSpy).toHaveBeenCalledOnce();
     expect(paletteBackdrop.dataset.motionState).toBe('closing');
-  });
-
-  it('restores the durable Header menu trigger after New Session create-project cancellation', async () => {
-    view = await renderMainView({ activeSessionId: null, projects: [], sessions: [] });
-    const menuTrigger = view.querySelector('[aria-label="打开主菜单"]') as HTMLButtonElement;
-    menuTrigger.focus();
-    fireClick(menuTrigger);
-    const menuItem = Array.from(view.querySelectorAll('.header-menu-item')).find(
-      (item) => item.textContent?.includes('新建会话'),
-    ) as HTMLButtonElement;
-    const menu = menuItem.closest('.header-menu') as HTMLElement;
-    menuItem.focus();
-    const triggerFocus = vi.spyOn(menuTrigger, 'focus');
-
-    fireClick(menuItem);
-
-    const dialog = document.body.querySelector('.project-dialog') as HTMLElement;
-    const cancel = Array.from(dialog.querySelectorAll('button')).find((button) => button.textContent?.includes('取消'))!;
-    expect(menuItem.isConnected).toBe(true);
-    expect(menu.dataset.motionState).toBe('closing');
-    expect(menu.hasAttribute('inert')).toBe(true);
-    expect(menu.getAttribute('aria-hidden')).toBe('true');
-    expect(document.activeElement).toBe(dialog.querySelector('#project-dialog-name'));
-    expect(triggerFocus).not.toHaveBeenCalled();
-
-    fireClick(cancel);
-
-    expect(document.activeElement).toBe(menuTrigger);
-    act(() => menu.dispatchEvent(new Event('transitionend', { bubbles: true })));
-    expect(menuItem.isConnected).toBe(false);
   });
 
   it('falls back to the sidebar create-project button when New Session removes its TabBar trigger', async () => {
@@ -1671,7 +1725,7 @@ describe('MainView page entrance markers', () => {
         onExtracted: vi.fn().mockReturnValue(() => {}),
       },
       projects: { list: vi.fn().mockResolvedValue([]) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -1689,16 +1743,14 @@ describe('MainView page entrance markers', () => {
     }
   });
 
-  it('marks the home root and replaces it with the pull request placeholder on section switch', async () => {
+  it('replaces the home root with the pull request placeholder on section switch', async () => {
     const { querySelector, querySelectorAll } = await renderMainView(
       {},
       undefined,
       { navigateToTasks: false },
     );
-    const homeRoot = querySelector('main.dashboard--home') as HTMLElement;
+    const homeRoot = querySelector('main.home-view') as HTMLElement;
     expect(homeRoot).toBeTruthy();
-    expect(homeRoot.dataset.motion).toBe('page-enter');
-    expect(homeRoot.dataset.page).toBe('home');
 
     act(() => {
       const prNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
@@ -1783,7 +1835,7 @@ describe('MainView live entry motion', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
     };
   });
@@ -2093,7 +2145,7 @@ describe('MainView browser panel', () => {
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
-      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
       browser: {
         list: vi.fn().mockResolvedValue([]),

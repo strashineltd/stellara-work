@@ -11,18 +11,20 @@ import {
   applyStreamEventToEntries, generateReportFromEntries, clearEntryEnterMotion,
 } from '../lib/chat-utils';
 import { useReducedMotion } from '../hooks/useReducedMotion';
-import type { AppSection, ApprovalMode } from '../lib/navigation';
+import { useNavHistory } from '../hooks/useNavHistory';
+import { INITIAL_NAV, type AppSection, type ApprovalMode } from '../lib/navigation';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
-import { Header } from './chat/Header';
 import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
+import { ModelSwitcher } from './chat/ModelSwitcher';
 import { TabBar, type TabBarTab } from './chat/TabBar';
-import { HomeDashboard } from './HomeDashboard';
+import { HomeView } from './home/HomeView';
 import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
+import { AppTopBar } from './shell/AppTopBar';
 import { PlaceholderPage } from './shell/PlaceholderPage';
 import { CommandPalette } from './CommandPalette';
 import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
@@ -63,7 +65,7 @@ interface MainViewProps {
 export function MainView(props: MainViewProps) {
   const {
     config, info: _info, sidebarOpen, workspaceMode, activeSessionId, projects, sessions,
-    onToggleSidebar, onReconfigure, onOpenSettings,
+    onToggleSidebar, onOpenSettings,
     onProjectCreated, onProjectDeleted, onProjectRenamed, onProjectFileUpdated,
     onSessionCreated, onSessionSwitched, onSessionDeleted, onSessionRenamed, onSessionsChanged,
     onModelChanged,
@@ -98,6 +100,7 @@ export function MainView(props: MainViewProps) {
   });
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('step');
   const planMode = approvalMode === 'plan';
+  const [branch, setBranch] = useState<string | null>(null);
   const [lastUserForRetry, setLastUserForRetry] = useState<string | null>(null);
   const [fileTree, setFileTree] = useState<{ present: boolean; workDir: string | null }>({
     present: false,
@@ -117,7 +120,8 @@ export function MainView(props: MainViewProps) {
   // 用户在本流内收起面板后，不再自动展开
   const browserPanelDismissedRef = useRef(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<AppSection>('home');
+  const nav = useNavHistory(INITIAL_NAV);
+  const activeSection: AppSection = nav.current.section;
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -181,13 +185,13 @@ export function MainView(props: MainViewProps) {
     setEntries((prev) => [...prev, presentWithKey({ kind: 'error', message }, 'status', errorKey)]);
   }
 
-  function navigateToSection(next: AppSection) {
+  function navigateToSection(next: AppSection, sessionId: string | null = null) {
     const previous = activeSectionRef.current;
     activeSectionRef.current = next;
     if (previous === 'tasks' && next !== 'tasks') {
       setEntries(clearEntryEnterMotion);
     }
-    setActiveSection(next);
+    nav.push({ section: next, sessionId });
   }
 
   useLayoutEffect(() => {
@@ -248,6 +252,26 @@ export function MainView(props: MainViewProps) {
   useEffect(() => {
     void window.electronAPI.models.getAll().then(setModelList).catch(() => { /* ignore */ });
   }, [config?.id]);
+
+  // ---- Git branch for the home composer ----
+  useEffect(() => {
+    let active = true;
+    if (!activeWorkDir) {
+      setBranch(null);
+      return;
+    }
+    void window.electronAPI.app.getGitBranch(activeWorkDir)
+      .then((value) => { if (active) setBranch(value); })
+      .catch(() => { if (active) setBranch(null); });
+    return () => { active = false; };
+  }, [activeWorkDir]);
+
+  // 帮我批准：审批事件到达时自动放行
+  useEffect(() => {
+    if (approvalMode !== 'auto' || !pendingApproval) return;
+    window.electronAPI.chat.approve(pendingApproval.id, true);
+    setPendingApproval(null);
+  }, [approvalMode, pendingApproval]);
 
   // 监听主进程"会话结束已提取记忆"事件，显示轻提示
   useEffect(() => {
@@ -480,12 +504,23 @@ export function MainView(props: MainViewProps) {
     setLastUserForRetry(null);
   }
 
-  async function handleSend() {
+  async function handleSend(returnFocus?: HTMLElement | null) {
     if (!input.trim() || busy) return;
     if (!config) {
       appendLocalError('请先配置模型后再发送任务。');
-      onOpenSettings(undefined, document.querySelector<HTMLButtonElement>('.model-pill--missing'));
+      onOpenSettings(undefined, returnFocus ?? document.querySelector<HTMLButtonElement>('.no-model-banner__btn--settings'));
       return;
+    }
+    if (!activeSessionId) {
+      if (activeSectionRef.current === 'tasks') {
+        appendLocalError('请先创建并选择一个会话后再发送任务。');
+        return;
+      }
+      void handleNewSession(undefined, returnFocus);
+      return;
+    }
+    if (activeSectionRef.current !== 'tasks') {
+      navigateToSection('tasks', activeSessionId);
     }
     setMemoryContext([]);
     setContextStats(null);
@@ -493,10 +528,6 @@ export function MainView(props: MainViewProps) {
     setBrowserEvents([]);
     setBrowserPanelOpen(false);
     browserPanelDismissedRef.current = false;
-    if (!activeSessionId) {
-      appendLocalError('请先创建并选择一个会话后再发送任务。');
-      return;
-    }
     if (attachments.length > 0 && !activeWorkDir) {
       appendLocalError('请先创建项目或设置工作目录，再发送附件。');
       return;
@@ -819,7 +850,7 @@ export function MainView(props: MainViewProps) {
     void window.electronAPI.sessions.create({ modelId: config.id, projectId: targetProjectId })
       .then((session) => {
         onSessionCreated(session);
-        navigateToSection('tasks');
+        navigateToSection('tasks', session.id);
       })
       .catch((error) => console.error('New session failed:', error));
   }
@@ -840,17 +871,8 @@ export function MainView(props: MainViewProps) {
   }
 
   function handleSelectSession(id: string) {
-    navigateToSection('tasks');
+    navigateToSection('tasks', id);
     onSessionSwitched(id);
-  }
-
-  function handleOpenProject(projectId: string) {
-    const firstSession = sessions.find((session) => session.projectId === projectId);
-    if (firstSession) {
-      handleSelectSession(firstSession.id);
-      return;
-    }
-    void handleNewSession(projectId);
   }
 
   async function handleDeleteSession(id: string, skipConfirm = false) {
@@ -876,28 +898,15 @@ export function MainView(props: MainViewProps) {
   return (
     <div className="main-view">
       {activeSection === 'tasks' && <a className="skip-link" href="#task-stream">跳到工作记录</a>}
-      <Header
-        config={config}
+      <AppTopBar
+        canGoBack={nav.canGoBack}
+        canGoForward={nav.canGoForward}
+        onBack={nav.back}
+        onForward={nav.forward}
         sidebarOpen={sidebarOpen}
         workspaceOpen={props.workspaceOpen}
-        modelList={modelList}
-        switchingModel={switchingModel}
-        busy={busy}
-        hasEntries={entries.length > 0}
         onToggleSidebar={onToggleSidebar}
         onToggleWorkspace={props.onToggleWorkspace}
-        workDir={activeWorkDir}
-        projectName={activeProject?.name}
-        onChooseProject={() => {
-          navigateToSection('home');
-          if (!activeProject && projects.length === 0) openCreateProject();
-        }}
-        onOpenFileTree={() => { openFileTree(); }}
-        onOpenSettings={onOpenSettings}
-        onReconfigure={onReconfigure}
-        onNewSession={(returnFocus) => handleNewSession(undefined, returnFocus)}
-        onNewTask={handleNewTask}
-        onSwitchModel={(id) => void handleSwitchModel(id)}
       />
 
       <div className="main-layout">
@@ -909,7 +918,7 @@ export function MainView(props: MainViewProps) {
             activeId={activeSessionId}
             mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
             activeSection={activeSection}
-            onNavigate={(section) => navigateToSection(section)}
+            onNavigate={navigateToSection}
             onOpenSettings={() => onOpenSettings()}
             onSelect={handleSelectSession}
             onNew={(returnFocus) => void handleNewSession(undefined, returnFocus)}
@@ -1023,6 +1032,15 @@ export function MainView(props: MainViewProps) {
                 onLazyLoadSkills={handleLoadSkills}
                 activeSkill={activeSkill}
                 onActiveSkillClear={() => setActiveSkill(null)}
+                modelControl={
+                  <ModelSwitcher
+                    config={config}
+                    modelList={modelList}
+                    switchingModel={switchingModel}
+                    onSwitchModel={(id) => void handleSwitchModel(id)}
+                    onReconfigure={(returnFocus) => onOpenSettings(undefined, returnFocus)}
+                  />
+                }
               />
             </>
           ) : activeSection === 'memory' ? (
@@ -1044,40 +1062,33 @@ export function MainView(props: MainViewProps) {
               onBackHome={() => navigateToSection('home')}
             />
           ) : (
-            <HomeDashboard
-              section={activeSection}
+            <HomeView
               config={config}
-              modelMissing={!config}
-              onOpenSettings={() => onOpenSettings()}
-              workDir={activeWorkDir}
-              projectName={activeProject?.name}
               projects={projects}
-              sessions={sessions}
+              activeProjectId={activeProject?.id}
+              branch={branch}
               input={input}
               busy={busy}
               attachments={attachments}
               hasWorkDir={!!activeWorkDir}
+              approvalMode={approvalMode}
+              modelMissing={!config}
+              onOpenSettings={() => onOpenSettings()}
               onInputChange={setInput}
               onAttachmentsChange={setAttachments}
               onAddPaths={(paths) => void handleAddAttachmentPaths(paths)}
               onPickAttachments={() => void handlePickAttachmentFiles()}
-              onSend={(returnFocus) => {
-                if (!config) {
-                  navigateToSection('tasks');
-                  void handleSend();
-                  return;
-                }
-                if (!activeSessionId) {
-                  void handleNewSession(undefined, returnFocus);
-                  return;
-                }
-                navigateToSection('tasks');
-                void handleSend();
-              }}
-              onSelectSession={handleSelectSession}
-              onOpenProject={handleOpenProject}
-              onCreateProject={openCreateProject}
-              onOpenFiles={() => activeWorkDir ? openFileTree() : openCreateProject()}
+              onSend={(returnFocus) => void handleSend(returnFocus)}
+              onApprovalModeChange={setApprovalMode}
+              modelControl={
+                <ModelSwitcher
+                  config={config}
+                  modelList={modelList}
+                  switchingModel={switchingModel}
+                  onSwitchModel={(id) => void handleSwitchModel(id)}
+                  onReconfigure={(returnFocus) => onOpenSettings(undefined, returnFocus)}
+                />
+              }
             />
           )}
         </div>

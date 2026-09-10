@@ -163,7 +163,7 @@ export default function App() {
 
   function toggleSidebar() {
     if (state.kind !== 'ready') return;
-    if (state.sidebarOpen) focusToggleBeforePanelClose('.sidebar', '.sidebar-toggle');
+    if (state.sidebarOpen) focusToggleBeforePanelClose('.sidebar', '[data-panel-toggle="sidebar"]');
     setState((current) => current.kind === 'ready'
       ? { ...current, sidebarOpen: !current.sidebarOpen }
       : current);
@@ -171,7 +171,7 @@ export default function App() {
 
   function toggleWorkspace() {
     if (state.kind !== 'ready') return;
-    if (state.workspaceOpen) focusToggleBeforePanelClose('.workspace-panel', '.workspace-toggle');
+    if (state.workspaceOpen) focusToggleBeforePanelClose('.workspace-panel', '[data-panel-toggle="workspace"]');
     setState((current) => current.kind === 'ready'
       ? { ...current, workspaceOpen: !current.workspaceOpen }
       : current);

@@ -36,6 +36,7 @@ export function AppTopBar(props: AppTopBarProps) {
         <button
           className="btn-icon app-topbar__action-button"
           type="button"
+          data-panel-toggle="sidebar"
           aria-label={props.sidebarOpen ? '隐藏侧栏' : '显示侧栏'}
           aria-pressed={props.sidebarOpen}
           onClick={props.onToggleSidebar}
@@ -45,6 +46,7 @@ export function AppTopBar(props: AppTopBarProps) {
         <button
           className="btn-icon app-topbar__action-button"
           type="button"
+          data-panel-toggle="workspace"
           aria-label={props.workspaceOpen ? '隐藏工作区' : '显示工作区'}
           aria-pressed={props.workspaceOpen}
           onClick={props.onToggleWorkspace}

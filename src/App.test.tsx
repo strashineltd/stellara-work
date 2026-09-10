@@ -62,6 +62,7 @@ beforeEach(() => {
     app: {
       getInfo: vi.fn().mockResolvedValue(INFO),
       onSettingsChanged: vi.fn().mockReturnValue(() => {}),
+      getGitBranch: vi.fn().mockResolvedValue(null),
     },
     models: {
       list: vi.fn().mockResolvedValue({ presets: [], configured: CONFIG }),
@@ -99,7 +100,7 @@ describe('App panel shortcut focus management', () => {
     const container = await renderApp();
     const sidebar = container.querySelector('.main-layout > .sidebar') as HTMLElement;
     const search = sidebar.querySelector('.sidebar-search-input') as HTMLInputElement;
-    const toggle = container.querySelector('.sidebar-toggle') as HTMLButtonElement;
+    const toggle = container.querySelector('[data-panel-toggle="sidebar"]') as HTMLButtonElement;
     search.focus();
     expect(document.activeElement).toBe(search);
     let inertWhenToggleFocused: boolean | null = null;
@@ -121,7 +122,7 @@ describe('App panel shortcut focus management', () => {
 
   it('focuses the persistent workspace toggle before shortcut closure makes the inspector inert', async () => {
     const container = await renderApp();
-    const toggle = container.querySelector('.workspace-toggle') as HTMLButtonElement;
+    const toggle = container.querySelector('[data-panel-toggle="workspace"]') as HTMLButtonElement;
     act(() => toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     const inspector = container.querySelector('.main-layout > .workspace-panel') as HTMLElement;
     const resizeHandle = inspector.querySelector('.workspace-resize-handle') as HTMLElement;
