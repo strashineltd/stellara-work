@@ -45,4 +45,15 @@ describe('readGitBranch', () => {
     expect(await readGitBranch(dir)).toBeNull();
     expect(await readGitBranch(path.join(dir, 'missing'))).toBeNull();
   });
+
+  it('resolves a linked worktree .git file', async () => {
+    const dir = await fixture();
+    const repo = path.join(dir, 'repo');
+    const realGitDir = path.join(dir, 'real-gitdir');
+    await mkdir(repo);
+    await mkdir(realGitDir);
+    await writeFile(path.join(realGitDir, 'HEAD'), 'ref: refs/heads/worktree-feature\n');
+    await writeFile(path.join(repo, '.git'), `gitdir: ${path.relative(repo, realGitDir)}\n`);
+    expect(await readGitBranch(repo)).toBe('worktree-feature');
+  });
 });
