@@ -83,6 +83,7 @@ function makeStreamIterator<T>(channel: string, filter: (payload: any) => boolea
 const api: ElectronAPI = {
   app: {
     getInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:getInfo'),
+    getGitBranch: (workDir: string): Promise<string | null> => ipcRenderer.invoke('app:getGitBranch', workDir),
     onSettingsChanged: (callback: () => void) => {
       const handler = () => callback();
       ipcRenderer.on('settings-changed', handler);

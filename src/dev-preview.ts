@@ -92,6 +92,7 @@ export function installDevPreviewApi(): void {
   const api: ElectronAPI = {
     app: {
       getInfo: async () => ({ version: '0.9.2-preview', platform: previewPlatform, appDataPath: 'Preview', envPath: 'Preview' }),
+      getGitBranch: async () => 'main',
       onSettingsChanged: (callback) => {
         settingsListeners.add(callback);
         return () => settingsListeners.delete(callback);

@@ -909,6 +909,7 @@ export function inferWireApiFromUrl(baseUrl: string): WireApi {
 export interface ElectronAPI {
   app: {
     getInfo: () => Promise<AppInfo>;
+    getGitBranch: (workDir: string) => Promise<string | null>;
     /** 监听设置变更广播 */
     onSettingsChanged: (callback: () => void) => () => void;
   };

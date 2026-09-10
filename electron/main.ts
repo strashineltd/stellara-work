@@ -203,6 +203,12 @@ function registerIpcHandlers(): void {
     };
   });
 
+  handle('app:getGitBranch', async (_e, workDir: string) => {
+    const { readGitBranch } = await import('./git-branch');
+    if (typeof workDir !== 'string' || !workDir.trim()) return null;
+    return readGitBranch(workDir);
+  });
+
   // Models（v1，保留兼容但走 v2 数据）
   handle('models:list', async (): Promise<ModelListResponse> => {
     const { MODEL_PRESETS } = await import('./llm/presets');
