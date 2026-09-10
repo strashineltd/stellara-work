@@ -4,6 +4,7 @@ import type { SessionSummary, Project, ProjectFileSelection, ProjectSummary } fr
 import { Icon } from './Icon';
 import { ProjectDialog } from './ProjectDialog';
 import { formatRelativeTime } from '../lib/chat-utils';
+import type { AppSection } from '../lib/navigation';
 import { usePresence } from '../hooks/usePresence';
 import { captureFocusTarget, presenceRootProps, restoreFocusTarget, type PresenceMotionProps } from '../lib/presence-ui';
 
@@ -25,12 +26,8 @@ interface SidebarProps extends PresenceMotionProps {
   onProjectRename: (id: string, name: string) => void | Promise<void>;
   onProjectFileUpdate?: (id: string, selection: ProjectFileSelection) => Project | Promise<Project>;
   onNewSessionInProject: (projectId: string) => void;
-  activeSection?: 'home' | 'projects' | 'tasks' | 'memory' | 'files';
-  onNavigateHome?: () => void;
-  onNavigateProjects?: () => void;
-  onNavigateTasks?: () => void;
-  onNavigateMemory?: () => void;
-  onNavigateFiles?: () => void;
+  activeSection?: AppSection;
+  onNavigate: (section: AppSection) => void;
   onOpenSettings?: () => void;
 }
 
@@ -80,8 +77,7 @@ export function Sidebar({
   projects, sessions, activeId, mode,
   onSelect, onNew, onDelete, onRename, onExport,
   onProjectCreate, onProjectDelete, onProjectRename, onProjectFileUpdate, onNewSessionInProject,
-  activeSection = 'tasks', onNavigateHome, onNavigateProjects, onNavigateTasks, onNavigateMemory,
-  onNavigateFiles, onOpenSettings, presence,
+  activeSection, onNavigate, onOpenSettings, presence,
 }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -191,9 +187,12 @@ export function Sidebar({
   }, [search, sessions]);
 
   useEffect(() => {
-    if (editingId && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
+    if (!editingId) return;
+    const sourceRow = sessionMenuReturnFocusRef.current?.closest('.session-row');
+    const input = sourceRow?.querySelector<HTMLInputElement>('.session-title-input') ?? editInputRef.current;
+    if (input) {
+      input.focus();
+      input.select();
     }
   }, [editingId]);
 
@@ -660,59 +659,36 @@ export function Sidebar({
     items[nextIndex]?.focus({ preventScroll: true });
   }
 
+  const recentSessions = sessions
+    .filter((s) => !s.projectId)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 5);
+
   return (
     <>
       <aside className="sidebar" {...presenceRootProps(presence)}>
       <nav className="sidebar-primary" aria-label="主要导航">
-        <span className="sidebar-nav-label">工作台</span>
-        <button
-          className={`sidebar-primary-item${activeSection === 'home' ? ' sidebar-primary-item--active' : ''}`}
-          type="button"
-          aria-current={activeSection === 'home' ? 'page' : undefined}
-          onClick={onNavigateHome}
-        >
-          <Icon name="home" size={16} />
-          <span>首页</span>
+        <button className="sidebar-primary-item" type="button" onClick={(event) => onNew(event.currentTarget)}>
+          <Icon name="plus" size={15} />
+          <span>新对话</span>
         </button>
         <button
-          className={`sidebar-primary-item${activeSection === 'projects' ? ' sidebar-primary-item--active' : ''}`}
+          className={`sidebar-primary-item${activeSection === 'pull-requests' ? ' sidebar-primary-item--active' : ''}`}
           type="button"
-          aria-current={activeSection === 'projects' ? 'page' : undefined}
-          onClick={onNavigateProjects}
+          aria-current={activeSection === 'pull-requests' ? 'page' : undefined}
+          onClick={() => onNavigate('pull-requests')}
         >
-          <Icon name="folder" size={16} />
-          <span>项目</span>
+          <Icon name="copy" size={15} />
+          <span>Pull Request</span>
         </button>
         <button
-          className={`sidebar-primary-item${activeSection === 'tasks' ? ' sidebar-primary-item--active' : ''}`}
+          className={`sidebar-primary-item${activeSection === 'scheduled' ? ' sidebar-primary-item--active' : ''}`}
           type="button"
-          aria-current={activeSection === 'tasks' ? 'page' : undefined}
-          onClick={onNavigateTasks}
+          aria-current={activeSection === 'scheduled' ? 'page' : undefined}
+          onClick={() => onNavigate('scheduled')}
         >
-          <Icon name="list" size={16} />
-          <span>工作记录</span>
-        </button>
-        <button
-          className={`sidebar-primary-item${activeSection === 'memory' ? ' sidebar-primary-item--active' : ''}`}
-          type="button"
-          aria-current={activeSection === 'memory' ? 'page' : undefined}
-          onClick={onNavigateMemory}
-        >
-          <Icon name="database" size={16} />
-          <span>记忆</span>
-        </button>
-        <button
-          className={`sidebar-primary-item${activeSection === 'files' ? ' sidebar-primary-item--active' : ''}`}
-          type="button"
-          aria-current={activeSection === 'files' ? 'page' : undefined}
-          onClick={onNavigateFiles}
-        >
-          <Icon name="file-tree" size={16} />
-          <span>文件</span>
-        </button>
-        <button className="sidebar-primary-item sidebar-settings-link" type="button" onClick={onOpenSettings}>
-          <Icon name="settings" size={16} />
-          <span>设置</span>
+          <Icon name="calendar" size={15} />
+          <span>已安排</span>
         </button>
       </nav>
 
@@ -839,6 +815,30 @@ export function Sidebar({
           </li>
         )}
       </ul>
+
+      {recentSessions.length > 0 && (
+        <section className="sidebar-recent" aria-label="最近">
+          <h2 className="sidebar-section-title">最近</h2>
+          <ul className="session-list">
+            {recentSessions.map(renderSession)}
+          </ul>
+        </section>
+      )}
+
+      <div className="sidebar-tools">
+        <button className="sidebar-tool" type="button" onClick={() => onNavigate('memory')}>
+          <Icon name="database" size={15} />
+          <span>记忆</span>
+        </button>
+        <button className="sidebar-tool" type="button" onClick={() => onNavigate('files')}>
+          <Icon name="file-tree" size={15} />
+          <span>文件</span>
+        </button>
+        <button className="sidebar-tool" type="button" onClick={onOpenSettings}>
+          <Icon name="settings" size={15} />
+          <span>设置</span>
+        </button>
+      </div>
       </aside>
 
       {projectDialogPresence.mounted && openProject && createPortal(

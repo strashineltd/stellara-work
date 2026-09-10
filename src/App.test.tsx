@@ -148,7 +148,7 @@ describe('App panel shortcut focus management', () => {
 describe('App Settings presence and focus management', () => {
   it('retains Settings as inert and hidden until only the backdrop transition completes exit', async () => {
     const container = await renderApp();
-    const opener = container.querySelector('.sidebar-settings-link') as HTMLButtonElement;
+    const opener = Array.from(container.querySelectorAll('.sidebar-tool')).find((el) => el.textContent === '设置') as HTMLButtonElement;
     opener.focus();
     await fireClick(opener);
     const backdrop = container.querySelector('.modal-backdrop') as HTMLElement;
@@ -176,7 +176,7 @@ describe('App Settings presence and focus management', () => {
 
   it('restores focus to the captured connected opener immediately on close request', async () => {
     const container = await renderApp();
-    const opener = container.querySelector('.sidebar-settings-link') as HTMLButtonElement;
+    const opener = Array.from(container.querySelectorAll('.sidebar-tool')).find((el) => el.textContent === '设置') as HTMLButtonElement;
     opener.focus();
     await fireClick(opener);
     const backdrop = container.querySelector('.modal-backdrop') as HTMLElement;
@@ -218,7 +218,7 @@ describe('App Settings presence and focus management', () => {
 
   it('reinvokes already-open Settings from Ctrl+K without replacing its original return target', async () => {
     const container = await renderApp();
-    const opener = container.querySelector('.sidebar-settings-link') as HTMLButtonElement;
+    const opener = Array.from(container.querySelectorAll('.sidebar-tool')).find((el) => el.textContent === '设置') as HTMLButtonElement;
     opener.focus();
     await fireClick(opener);
     const settings = container.querySelector('.settings-modal') as HTMLElement;

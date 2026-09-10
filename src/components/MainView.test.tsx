@@ -23,6 +23,7 @@ beforeEach(() => {
 async function renderMainView(
   overrides: Partial<React.ComponentProps<typeof MainView>> = {},
   Component: React.ComponentType<React.ComponentProps<typeof MainView>> = MainView,
+  options: { navigateToTasks?: boolean } = {},
 ) {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -60,13 +61,13 @@ async function renderMainView(
     root.render(<Component {...props} />);
   });
   await act(async () => { /* flush session-load promise */ });
-  // TabBar only renders in the tasks view — navigate there via the sidebar nav
-  act(() => {
-    const nav = Array.from(container.querySelectorAll('.sidebar-primary-item')).find(
-      (el) => el.textContent && el.textContent.includes('工作记录'),
-    );
-    nav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
+  // TabBar only renders in the tasks view — open a session from the sidebar to get there
+  if (options.navigateToTasks !== false) {
+    act(() => {
+      const row = container.querySelector('.sidebar [data-session-id="a"]');
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  }
   return {
     container,
     rerender: async (nextOverrides: Partial<React.ComponentProps<typeof MainView>>) => {
@@ -479,16 +480,11 @@ describe('MainView files section', () => {
 
   it('renders the sidebar file view when navigating to the files section', async () => {
     const { querySelector, querySelectorAll } = await renderMainView();
-    const fileNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+    const fileNav = Array.from(querySelectorAll('.sidebar-tool')).find(
       (el) => el.textContent && el.textContent.includes('文件'),
     );
-    expect(fileNav?.getAttribute('aria-current')).toBeNull();
     fireClick(fileNav);
     expect(querySelector('.sidebar-file-view')).not.toBeNull();
-    const fileNavAfter = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-      (el) => el.textContent && el.textContent.includes('文件'),
-    );
-    expect(fileNavAfter?.getAttribute('aria-current')).toBe('page');
   });
 });
 
@@ -736,26 +732,26 @@ describe('MainView without a configured model', () => {
   });
 
   it('renders with a null config and shows the home no-model banner', async () => {
-    const { querySelector, querySelectorAll, container } = await renderMainView({ config: null, activeSessionId: null });
-    const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-      (el) => el.textContent && el.textContent.includes('首页'),
+    const { querySelector, container } = await renderMainView(
+      { config: null, activeSessionId: null },
+      undefined,
+      { navigateToTasks: false },
     );
-    fireClick(homeNav);
     expect(querySelector('.dashboard--home')).not.toBeNull();
     expect(container.textContent).toContain('尚未配置模型，Agent 暂时无法执行任务');
   });
 
   it('prompts to configure a model when sending from home without a config', async () => {
     const onOpenSettings = vi.fn();
-    const { querySelector, querySelectorAll, container } = await renderMainView({
-      config: null,
-      activeSessionId: null,
-      onOpenSettings,
-    });
-    const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-      (el) => el.textContent && el.textContent.includes('首页'),
+    const { querySelector, container } = await renderMainView(
+      {
+        config: null,
+        activeSessionId: null,
+        onOpenSettings,
+      },
+      undefined,
+      { navigateToTasks: false },
     );
-    fireClick(homeNav);
     const textarea = querySelector('textarea')!;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -771,14 +767,11 @@ describe('MainView without a configured model', () => {
   });
 
   it('returns focus to the header model pill after settings closes when sending from home without a config', async () => {
-    const { querySelector, querySelectorAll } = await renderMainView(
+    const { querySelector } = await renderMainView(
       { config: null, activeSessionId: null },
       SettingsCloseHarness,
+      { navigateToTasks: false },
     );
-    const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-      (el) => el.textContent && el.textContent.includes('首页'),
-    );
-    fireClick(homeNav);
     const textarea = querySelector('textarea')!;
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -892,15 +885,6 @@ describe('MainView home composer attachments', () => {
     };
   });
 
-  async function goHome(querySelectorAll: (sel: string) => NodeListOf<Element>) {
-    act(() => {
-      const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-        (el) => el.textContent && el.textContent.includes('首页'),
-      );
-      homeNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-  }
-
   function dropFileOn(picker: Element, name: string) {
     const file = new File(['x'], name);
     const drop = new Event('drop', { bubbles: true, cancelable: true });
@@ -911,10 +895,11 @@ describe('MainView home composer attachments', () => {
   }
 
   it('adds dropped attachments from the home composer via attachments.add', async () => {
-    const { querySelector, querySelectorAll } = await renderMainView({
-      config: { ...CONFIG, workDir: 'D:/proj' },
-    });
-    await goHome(querySelectorAll);
+    const { querySelector, querySelectorAll } = await renderMainView(
+      { config: { ...CONFIG, workDir: 'D:/proj' } },
+      undefined,
+      { navigateToTasks: false },
+    );
     const picker = querySelector('.attach-picker')!;
     expect(picker).toBeTruthy();
     dropFileOn(picker, 'design.png');
@@ -926,10 +911,11 @@ describe('MainView home composer attachments', () => {
 
   it('adds files picked via the home composer attach button', async () => {
     (window as any).electronAPI.dialog.openAttachmentFiles = vi.fn().mockResolvedValue(['D:/proj/a.txt']);
-    const { querySelector, querySelectorAll } = await renderMainView({
-      config: { ...CONFIG, workDir: 'D:/proj' },
-    });
-    await goHome(querySelectorAll);
+    const { querySelector, querySelectorAll } = await renderMainView(
+      { config: { ...CONFIG, workDir: 'D:/proj' } },
+      undefined,
+      { navigateToTasks: false },
+    );
     const btn = querySelector('.attach-btn') as HTMLButtonElement;
     expect(btn).toBeTruthy();
     fireClick(btn);
@@ -1418,7 +1404,7 @@ describe('MainView command and task modal presence', () => {
     await clickAndFlush(command('新建会话'));
 
     expect(document.body.querySelector('.project-dialog')).toBeNull();
-    expect(view.querySelector('#projects-page-title')).not.toBeNull();
+    expect(view.querySelector('main.dashboard--home')).not.toBeNull();
     expect(document.activeElement).toBe(opener);
     expect(restoreSpy).toHaveBeenCalledOnce();
     expect(paletteBackdrop.dataset.motionState).toBe('closing');
@@ -1454,7 +1440,7 @@ describe('MainView command and task modal presence', () => {
     expect(menuItem.isConnected).toBe(false);
   });
 
-  it('falls back to the projects-page create button when New Session removes its TabBar trigger', async () => {
+  it('falls back to the sidebar create-project button when New Session removes its TabBar trigger', async () => {
     view = await renderMainView({ projects: [] });
     const trigger = view.querySelector('[aria-label="新建会话标签页"]') as HTMLButtonElement;
     trigger.focus();
@@ -1468,10 +1454,10 @@ describe('MainView command and task modal presence', () => {
 
     fireClick(cancel);
 
-    expect(document.activeElement).toBe(view.querySelector('.dashboard-create-button'));
+    expect(document.activeElement).toBe(view.querySelector('[aria-label="新建项目"]'));
   });
 
-  it('falls back to the projects-page create button for native-menu New Session', async () => {
+  it('falls back to the sidebar create-project button for native-menu New Session', async () => {
     const addEventListener = vi.spyOn(window, 'addEventListener');
     view = await renderMainView({ activeSessionId: null, projects: [], sessions: [] });
     const menuActionCall = [...addEventListener.mock.calls]
@@ -1489,10 +1475,10 @@ describe('MainView command and task modal presence', () => {
 
     fireClick(cancel);
 
-    expect(document.activeElement).toBe(view.querySelector('.dashboard-create-button'));
+    expect(document.activeElement).toBe(view.querySelector('[aria-label="新建项目"]'));
   });
 
-  it('focuses the persistent create button before an empty-state project creation updates its parent', async () => {
+  it('focuses the persistent sidebar create button before a project creation updates its parent', async () => {
     let resolveCreate!: (project: Project) => void;
     const createPromise = new Promise<Project>((resolve) => {
       resolveCreate = resolve;
@@ -1508,12 +1494,8 @@ describe('MainView command and task modal presence', () => {
       { projects: [], onProjectCreated },
       ProjectCreationHarness,
     );
-    const projectsNav = Array.from(view.querySelectorAll('.sidebar-primary-item')).find(
-      (item) => item.textContent?.includes('项目'),
-    );
-    fireClick(projectsNav);
-    const emptyTrigger = view.getByText('创建第一个项目')?.closest('button') as HTMLButtonElement;
-    fireClick(emptyTrigger);
+    const persistentCreate = view.querySelector('[aria-label="新建项目"]') as HTMLButtonElement;
+    fireClick(persistentCreate);
     const dialog = document.body.querySelector('.project-dialog') as HTMLElement;
     const backdrop = dialog.closest('.project-dialog-backdrop') as HTMLElement;
     const name = dialog.querySelector('#project-dialog-name') as HTMLInputElement;
@@ -1529,7 +1511,6 @@ describe('MainView command and task modal presence', () => {
     });
     const submit = Array.from(dialog.querySelectorAll('button')).find((button) => button.textContent === '创建项目')!;
     fireClick(submit);
-    const persistentCreate = view.querySelector('.dashboard-create-button') as HTMLButtonElement;
 
     await act(async () => {
       resolveCreate({
@@ -1545,7 +1526,6 @@ describe('MainView command and task modal presence', () => {
     expect(focusAtParentUpdate).toBe(persistentCreate);
     expect(inertAtParentUpdate).toBe(false);
     expect(document.activeElement).toBe(persistentCreate);
-    expect(emptyTrigger.isConnected).toBe(false);
     expect(backdrop.dataset.motionState).toBe('closing');
     expect(backdrop.hasAttribute('inert')).toBe(true);
   });
@@ -1562,11 +1542,8 @@ describe('MainView command and task modal presence', () => {
       return 1;
     }));
     view = await renderMainView({ projects: [] });
-    const projectsNav = Array.from(view.querySelectorAll('.sidebar-primary-item')).find(
-      (item) => item.textContent?.includes('项目'),
-    );
-    fireClick(projectsNav);
-    fireClick(view.getByText('创建第一个项目'));
+    const trigger = view.querySelector('[aria-label="新建项目"]') as HTMLButtonElement;
+    fireClick(trigger);
     const dialog = document.body.querySelector('.project-dialog') as HTMLElement;
     const backdrop = dialog.closest('.project-dialog-backdrop') as HTMLElement;
     const name = dialog.querySelector('#project-dialog-name') as HTMLInputElement;
@@ -1598,34 +1575,6 @@ describe('MainView command and task modal presence', () => {
     expect(name.value).toBe('保留的项目草稿');
     expect(dialog.textContent).toContain('new-project');
     expect(dialog.textContent).toContain('项目创建失败：disk full');
-  });
-
-  it('restores the dashboard create trigger before the retained form becomes inert', async () => {
-    view = await renderMainView({ config: { ...CONFIG, workDir: 'D:/proj' } });
-    const projectsNav = Array.from(view.querySelectorAll('.sidebar-primary-item')).find(
-      (item) => item.textContent?.includes('项目'),
-    );
-    fireClick(projectsNav);
-    const trigger = view.querySelector('.dashboard-create-button') as HTMLButtonElement;
-
-    fireClick(trigger);
-
-    const dialog = document.body.querySelector('.project-dialog') as HTMLElement;
-    const backdrop = dialog.closest('.project-dialog-backdrop') as HTMLElement;
-    expect(document.activeElement).toBe(dialog.querySelector('#project-dialog-name'));
-    let inertWhenRestored: boolean | null = null;
-    const restoreTriggerFocus = trigger.focus.bind(trigger);
-    vi.spyOn(trigger, 'focus').mockImplementation((options?: FocusOptions) => {
-      inertWhenRestored = backdrop.hasAttribute('inert');
-      restoreTriggerFocus(options);
-    });
-
-    fireClick(dialog.querySelector('[aria-label="关闭项目窗口"]'));
-
-    expect(inertWhenRestored).toBe(false);
-    expect(document.activeElement).toBe(trigger);
-    expect(backdrop.dataset.motionState).toBe('closing');
-    expect(backdrop.hasAttribute('inert')).toBe(true);
   });
 
   it('restores the create-project trigger before the retained form becomes inert', async () => {
@@ -1740,36 +1689,34 @@ describe('MainView page entrance markers', () => {
     }
   });
 
-  it('marks home and projects roots and replaces the host root on section switch', async () => {
-    const { querySelector, querySelectorAll } = await renderMainView();
-    act(() => {
-      const homeNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-        (el) => el.textContent?.includes('首页'),
-      );
-      homeNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
+  it('marks the home root and replaces it with the pull request placeholder on section switch', async () => {
+    const { querySelector, querySelectorAll } = await renderMainView(
+      {},
+      undefined,
+      { navigateToTasks: false },
+    );
     const homeRoot = querySelector('main.dashboard--home') as HTMLElement;
     expect(homeRoot).toBeTruthy();
     expect(homeRoot.dataset.motion).toBe('page-enter');
     expect(homeRoot.dataset.page).toBe('home');
 
     act(() => {
-      const projectsNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-        (el) => el.textContent?.includes('项目'),
+      const prNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+        (el) => el.textContent?.includes('Pull Request'),
       );
-      projectsNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      prNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    const projectsRoot = querySelector('main.dashboard--projects') as HTMLElement;
-    expect(projectsRoot).toBeTruthy();
-    expect(projectsRoot.dataset.motion).toBe('page-enter');
-    expect(projectsRoot.dataset.page).toBe('projects');
+    const placeholder = querySelector('.placeholder-page') as HTMLElement;
+    expect(placeholder).toBeTruthy();
+    expect(placeholder.dataset.motion).toBe('page-enter');
+    expect(placeholder.textContent).toContain('Pull Request 将在后续版本推出');
     expect(homeRoot.isConnected).toBe(false);
   });
 
   it('marks the memory and files roots with page markers', async () => {
     const { querySelector, querySelectorAll } = await renderMainView();
     act(() => {
-      const memoryNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      const memoryNav = Array.from(querySelectorAll('.sidebar-tool')).find(
         (el) => el.textContent?.includes('记忆'),
       );
       memoryNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1781,7 +1728,7 @@ describe('MainView page entrance markers', () => {
     expect(memoryRoot.dataset.page).toBe('memory');
 
     act(() => {
-      const filesNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      const filesNav = Array.from(querySelectorAll('.sidebar-tool')).find(
         (el) => el.textContent?.includes('文件'),
       );
       filesNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1856,7 +1803,7 @@ describe('MainView live entry motion', () => {
 
   function clickSidebar(querySelectorAll: (sel: string) => NodeListOf<Element>, label: string) {
     act(() => {
-      const nav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      const nav = Array.from(querySelectorAll('.sidebar-primary-item, .sidebar-tool')).find(
         (el) => el.textContent && el.textContent.includes(label),
       );
       nav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1986,8 +1933,8 @@ describe('MainView live entry motion', () => {
     const { querySelector, querySelectorAll } = await renderMainView();
     await typeAndSend(querySelector, '写个测试');
     expect(querySelectorAll('.entry--live').length).toBe(2);
-    clickSidebar(querySelectorAll, '首页');
-    clickSidebar(querySelectorAll, '工作记录');
+    clickSidebar(querySelectorAll, 'Pull Request');
+    fireClick(querySelector('[data-session-id="a"]'));
     const wrappers = querySelectorAll('.entry');
     expect(wrappers.length).toBe(2);
     for (const w of Array.from(wrappers)) {
@@ -2004,11 +1951,11 @@ describe('MainView live entry motion', () => {
     (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({ streamId: 's1', events: stream.events });
     const { querySelector, querySelectorAll } = await renderMainView();
     await typeAndSend(querySelector, '写个测试');
-    clickSidebar(querySelectorAll, '首页');
+    clickSidebar(querySelectorAll, 'Pull Request');
     stream.push({ type: 'content', content: '后台输出' });
     stream.push({ type: 'tool_call', toolCall: { id: 'tc-1', type: 'function', function: { name: 'read_file', arguments: '{}' } } });
     await act(async () => {});
-    clickSidebar(querySelectorAll, '工作记录');
+    fireClick(querySelector('[data-session-id="a"]'));
     expect(querySelectorAll('.entry--live').length).toBe(0);
     expect(querySelectorAll('.entry--status-live').length).toBe(0);
     expect(querySelectorAll('.entry').length).toBe(3);

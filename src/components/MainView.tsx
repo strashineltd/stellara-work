@@ -11,7 +11,7 @@ import {
   applyStreamEventToEntries, generateReportFromEntries, clearEntryEnterMotion,
 } from '../lib/chat-utils';
 import { useReducedMotion } from '../hooks/useReducedMotion';
-import type { ApprovalMode } from '../lib/navigation';
+import type { AppSection, ApprovalMode } from '../lib/navigation';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
@@ -23,6 +23,7 @@ import { HomeDashboard } from './HomeDashboard';
 import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
+import { PlaceholderPage } from './shell/PlaceholderPage';
 import { CommandPalette } from './CommandPalette';
 import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
 import { type OpenSettings } from './SettingsPanel';
@@ -116,7 +117,7 @@ export function MainView(props: MainViewProps) {
   // 用户在本流内收起面板后，不再自动展开
   const browserPanelDismissedRef = useRef(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<'home' | 'projects' | 'tasks' | 'memory' | 'files'>('home');
+  const [activeSection, setActiveSection] = useState<AppSection>('home');
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -180,7 +181,7 @@ export function MainView(props: MainViewProps) {
     setEntries((prev) => [...prev, presentWithKey({ kind: 'error', message }, 'status', errorKey)]);
   }
 
-  function navigateToSection(next: 'home' | 'projects' | 'tasks' | 'memory' | 'files') {
+  function navigateToSection(next: AppSection) {
     const previous = activeSectionRef.current;
     activeSectionRef.current = next;
     if (previous === 'tasks' && next !== 'tasks') {
@@ -238,7 +239,7 @@ export function MainView(props: MainViewProps) {
     if (!createProjectOpen) return;
     restoreFocusTarget(
       createProjectReturnFocusRef.current,
-      document.querySelector<HTMLButtonElement>('.dashboard-create-button'),
+      document.querySelector<HTMLButtonElement>('.btn-new-project'),
     );
     setCreateProjectOpen(false);
   }
@@ -385,15 +386,15 @@ export function MainView(props: MainViewProps) {
     return () => window.removeEventListener('menu-action', onMenuAction);
   });
 
-  // M2.4: Finder/ Dock 拖入的文件 → 打开所在项目（或跳到项目页）
+  // M2.4: Finder/ Dock 拖入的文件 → 打开所在项目（或跳到首页）
   function handleOpenPath(filePath: string) {
     const project = projects.find((p) => p.workDir != null && filePath.startsWith(p.workDir));
     if (project) {
       const session = sessions.find((s) => s.projectId === project.id);
       if (session) void props.onSessionSwitched(session.id);
-      else navigateToSection('projects');
+      else navigateToSection('home');
     } else {
-      navigateToSection('projects');
+      navigateToSection('home');
     }
   }
 
@@ -808,7 +809,7 @@ export function MainView(props: MainViewProps) {
     if (busy || !config) return;
     const targetProjectId = projectId ?? activeSession?.projectId;
     if (!targetProjectId) {
-      navigateToSection('projects');
+      navigateToSection('home');
       if (projects.length === 0 && !createProjectOpen) {
         openCreateProject(returnFocus);
         return true;
@@ -830,7 +831,7 @@ export function MainView(props: MainViewProps) {
       entryFile: selection.entryFile,
     });
     restoreFocusTarget(
-      document.querySelector<HTMLButtonElement>('.dashboard-create-button'),
+      document.querySelector<HTMLButtonElement>('.btn-new-project'),
       createProjectReturnFocusRef.current,
     );
     onProjectCreated(project);
@@ -888,7 +889,7 @@ export function MainView(props: MainViewProps) {
         workDir={activeWorkDir}
         projectName={activeProject?.name}
         onChooseProject={() => {
-          navigateToSection('projects');
+          navigateToSection('home');
           if (!activeProject && projects.length === 0) openCreateProject();
         }}
         onOpenFileTree={() => { openFileTree(); }}
@@ -908,11 +909,7 @@ export function MainView(props: MainViewProps) {
             activeId={activeSessionId}
             mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
             activeSection={activeSection}
-            onNavigateHome={() => navigateToSection('home')}
-            onNavigateProjects={() => navigateToSection('projects')}
-            onNavigateTasks={() => navigateToSection('tasks')}
-            onNavigateMemory={() => navigateToSection('memory')}
-            onNavigateFiles={() => navigateToSection('files')}
+            onNavigate={(section) => navigateToSection(section)}
             onOpenSettings={() => onOpenSettings()}
             onSelect={handleSelectSession}
             onNew={(returnFocus) => void handleNewSession(undefined, returnFocus)}
@@ -1032,6 +1029,20 @@ export function MainView(props: MainViewProps) {
             <MemoryCenter />
           ) : activeSection === 'files' ? (
             <SidebarFileView workDir={activeWorkDir ?? null} onOpenFullScreen={() => { openFileTree(); }} />
+          ) : activeSection === 'pull-requests' ? (
+            <PlaceholderPage
+              title="Pull Request"
+              description="Pull Request 将在后续版本推出"
+              icon="copy"
+              onBackHome={() => navigateToSection('home')}
+            />
+          ) : activeSection === 'scheduled' ? (
+            <PlaceholderPage
+              title="已安排"
+              description="定时任务将在后续版本推出"
+              icon="calendar"
+              onBackHome={() => navigateToSection('home')}
+            />
           ) : (
             <HomeDashboard
               section={activeSection}

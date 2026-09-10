@@ -20,6 +20,7 @@ const TWO_PROJECTS = [
 
 const PROJECT_PROPS = {
   projects: [],
+  onNavigate: vi.fn(),
   onProjectCreate: vi.fn(),
   onProjectDelete: vi.fn(),
   onProjectRename: vi.fn(),
@@ -163,45 +164,33 @@ describe('Sidebar', () => {
     expect(onNew).toHaveBeenCalledWith(button);
   });
 
-  it('exposes one persistent settings control in the primary navigation', () => {
+  it('exposes one persistent settings control in the sidebar tools', () => {
     const onOpenSettings = vi.fn();
     const { querySelectorAll } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} onOpenSettings={onOpenSettings} />);
-    const settingsButtons = querySelectorAll('.sidebar-settings-link');
+    const settingsButtons = Array.from(querySelectorAll('.sidebar-tool')).filter((el) => el.textContent === '设置');
     expect(settingsButtons.length).toBe(1);
     fireClick(settingsButtons[0]!);
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
-  it('switches between home, projects and work records from primary navigation', () => {
-    const onNavigateHome = vi.fn();
-    const onNavigateProjects = vi.fn();
-    const onNavigateTasks = vi.fn();
-    const { getByText } = render(
-      <Sidebar
-        sessions={SESSIONS}
-        activeId={null}
-        activeSection="home"
-        onSelect={vi.fn()}
-        onNew={vi.fn()}
-        onDelete={vi.fn()}
-        onRename={vi.fn()}
-        onExport={vi.fn()}
-        {...PROJECT_PROPS}
-        onNavigateHome={onNavigateHome}
-        onNavigateProjects={onNavigateProjects}
-        onNavigateTasks={onNavigateTasks}
-      />,
-    );
-    fireClick(getByText('首页'));
-    fireClick(getByText('项目'));
-    fireClick(getByText('工作记录'));
-    expect(onNavigateHome).toHaveBeenCalledOnce();
-    expect(onNavigateProjects).toHaveBeenCalledOnce();
-    expect(onNavigateTasks).toHaveBeenCalledOnce();
+  it('renders the primary navigation as 新对话, Pull Request and 已安排 without 插件', () => {
+    const { querySelectorAll } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
+    const labels = Array.from(querySelectorAll('.sidebar-primary-item')).map((el) => el.textContent);
+    expect(labels).toEqual(['新对话', 'Pull Request', '已安排']);
+    expect(labels.some((label) => label?.includes('插件'))).toBe(false);
   });
 
-  it('navigates to the files section from primary navigation', () => {
-    const onNavigateFiles = vi.fn();
+  it('invokes onNew from the 新对话 primary action', () => {
+    const onNew = vi.fn();
+    const { getByText } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={onNew} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
+    const button = getByText('新对话')?.closest('button') as HTMLButtonElement;
+    fireClick(button);
+    expect(onNew).toHaveBeenCalledOnce();
+    expect(onNew).toHaveBeenCalledWith(button);
+  });
+
+  it('navigates to Pull Request and 已安排 from the primary navigation', () => {
+    const onNavigate = vi.fn();
     const { getByText } = render(
       <Sidebar
         sessions={SESSIONS}
@@ -212,19 +201,21 @@ describe('Sidebar', () => {
         onRename={vi.fn()}
         onExport={vi.fn()}
         {...PROJECT_PROPS}
-        onNavigateFiles={onNavigateFiles}
+        onNavigate={onNavigate}
       />,
     );
-    fireClick(getByText('文件'));
-    expect(onNavigateFiles).toHaveBeenCalledOnce();
+    fireClick(getByText('Pull Request'));
+    expect(onNavigate).toHaveBeenCalledWith('pull-requests');
+    fireClick(getByText('已安排'));
+    expect(onNavigate).toHaveBeenCalledWith('scheduled');
   });
 
-  it('marks the files nav item as the active section', () => {
+  it('marks the pull request nav item as the active section', () => {
     const { querySelectorAll } = render(
       <Sidebar
         sessions={SESSIONS}
         activeId={null}
-        activeSection="files"
+        activeSection="pull-requests"
         onSelect={vi.fn()}
         onNew={vi.fn()}
         onDelete={vi.fn()}
@@ -233,11 +224,80 @@ describe('Sidebar', () => {
         {...PROJECT_PROPS}
       />,
     );
-    const fileBtn = Array.from(querySelectorAll('.sidebar-primary-item')).find(
-      (el) => el.textContent && el.textContent.includes('文件'),
+    const btn = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      (el) => el.textContent && el.textContent.includes('Pull Request'),
     );
-    expect(fileBtn?.getAttribute('aria-current')).toBe('page');
-    expect(fileBtn?.className).toContain('sidebar-primary-item--active');
+    expect(btn?.getAttribute('aria-current')).toBe('page');
+    expect(btn?.className).toContain('sidebar-primary-item--active');
+  });
+
+  it('renders the bottom tools with 记忆, 文件 and 设置', () => {
+    const onNavigate = vi.fn();
+    const onOpenSettings = vi.fn();
+    const { querySelectorAll } = render(
+      <Sidebar
+        sessions={SESSIONS}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+        onNavigate={onNavigate}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+    const tools = Array.from(querySelectorAll('.sidebar-tool'));
+    expect(tools.map((el) => el.textContent)).toEqual(['记忆', '文件', '设置']);
+    fireClick(tools[0]!);
+    expect(onNavigate).toHaveBeenCalledWith('memory');
+    fireClick(tools[1]!);
+    expect(onNavigate).toHaveBeenCalledWith('files');
+    fireClick(tools[2]!);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it('lists unassigned recent sessions by updatedAt and caps at five', () => {
+    const sessions: SessionSummary[] = Array.from({ length: 6 }, (_, index) => ({
+      id: `recent-${index}`,
+      title: `最近会话 ${index}`,
+      modelId: 'deepseek',
+      messageCount: 1,
+      updatedAt: index * 1000,
+    }));
+    const onSelect = vi.fn();
+    const { querySelector, querySelectorAll, getByText } = render(
+      <Sidebar sessions={sessions} activeId={null} onSelect={onSelect} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />,
+    );
+    expect(getByText('最近')).toBeTruthy();
+    const rows = querySelectorAll('.sidebar-recent .session-row');
+    expect(rows.length).toBe(5);
+    expect(Array.from(rows).map((el) => el.getAttribute('data-session-id'))).toEqual([
+      'recent-5', 'recent-4', 'recent-3', 'recent-2', 'recent-1',
+    ]);
+    fireClick(rows[0]!);
+    expect(onSelect).toHaveBeenCalledWith('recent-5');
+    expect(querySelector('.sidebar-recent .session-row[data-session-id="recent-0"]')).toBeNull();
+  });
+
+  it('excludes project sessions from the recent group', () => {
+    const sessions: SessionSummary[] = [
+      { id: 'loose', title: '无项目会话', modelId: 'deepseek', messageCount: 1, updatedAt: 2 },
+      { id: 'pinned', title: '项目会话', modelId: 'deepseek', messageCount: 1, updatedAt: 3, projectId: 'p1' },
+    ];
+    const { querySelectorAll } = render(<Sidebar sessions={sessions} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />);
+    const recentIds = Array.from(querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'));
+    expect(recentIds).toEqual(['loose']);
+  });
+
+  it('does not render the recent group when every session belongs to a project', () => {
+    const sessions: SessionSummary[] = [
+      { id: 'pinned', title: '项目会话', modelId: 'deepseek', messageCount: 1, updatedAt: 3, projectId: 'p1' },
+    ];
+    const { container, querySelector } = render(<Sidebar sessions={sessions} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />);
+    expect(querySelector('.sidebar-recent')).toBeNull();
+    expect(Array.from(container.querySelectorAll('.sidebar-section-title')).some((el) => el.textContent === '最近')).toBe(false);
   });
 
   it('opens a session from the keyboard', () => {
