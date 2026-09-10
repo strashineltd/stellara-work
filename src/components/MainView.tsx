@@ -427,7 +427,7 @@ export function MainView(props: MainViewProps) {
     const project = projects.find((p) => p.workDir != null && filePath.startsWith(p.workDir));
     if (project) {
       const session = sessions.find((s) => s.projectId === project.id);
-      if (session) void props.onSessionSwitched(session.id);
+      if (session) navigateToSection('tasks', session.id);
       else navigateToSection('home');
     } else {
       navigateToSection('home');

@@ -931,6 +931,45 @@ describe('MainView shell navigation', () => {
     view.unmount();
   });
 
+  it('opens the session for a dropped file path through nav history', async () => {
+    const project = { id: 'p1', name: '项目一', workDir: 'D:/proj', updatedAt: 1, sessionCount: 1 };
+    const projectSession = {
+      id: 's-proj', title: '项目会话', modelId: CONFIG.id, messageCount: 1, updatedAt: 0, projectId: 'p1',
+    };
+    (window as any).electronAPI.sessions.get.mockImplementation((id: string) =>
+      Promise.resolve({
+        session: id === 's-proj' ? projectSession : SESSIONS[0],
+        messages: [{ sessionId: id, position: 0, role: 'user', content: id === 's-proj' ? '项目任务' : 'A 的任务', createdAt: 0 }],
+      }),
+    );
+    const addEventListener = vi.spyOn(window, 'addEventListener');
+    const view = await renderMainView(
+      { projects: [project], sessions: [SESSIONS[0], projectSession] },
+      SessionSwitchHarness,
+    );
+    expect(view.container.textContent).toContain('A 的任务');
+    const menuActionCall = [...addEventListener.mock.calls]
+      .reverse()
+      .find(([eventName]) => eventName === 'menu-action');
+    if (!menuActionCall) throw new Error('MainView did not register its native menu listener');
+
+    act(() => {
+      (menuActionCall[1] as EventListener)(new CustomEvent('menu-action', { detail: 'open-path:D:/proj/src/index.ts' }));
+    });
+    await act(async () => {});
+
+    expect(view.container.textContent).toContain('项目任务');
+    expect(view.container.textContent).not.toContain('A 的任务');
+
+    // 历史同步 effect 不得把会话切回去
+    await act(async () => {});
+    expect(view.container.textContent).toContain('项目任务');
+
+    fireClick(view.querySelector('[aria-label="后退"]'));
+    await act(async () => {});
+    expect(view.container.textContent).toContain('A 的任务');
+  });
+
   it('fetches the git branch for the active work dir', async () => {
     const view = await renderMainView(
       { config: { ...CONFIG, workDir: 'D:/proj' } },
