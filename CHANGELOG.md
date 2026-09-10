@@ -2,6 +2,12 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.9.2.1] - 2026-09-10
+
+### Fixed · 修复
+
+- **macOS 安装后提示「已损坏，无法打开」**：构建启用 ad-hoc bundle 签名（`mac.identity: "-"`），生成完整的 `_CodeSignature/CodeResources` 资源封印，`codesign --verify --deep --strict` 通过。此前签名被完全禁用，主二进制仅有 linker 裸签名、bundle 缺资源封印，被 Gatekeeper 判定为损坏。
+
 ## [Unreleased]
 
 ### Added · 新增

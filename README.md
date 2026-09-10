@@ -56,15 +56,20 @@ Your API key, sessions, files, and configuration **never leave your machine**. S
 
 ## Downloads
 
-**Latest release: v0.9.2**
+**Latest release: v0.9.2.1**
 
 | Platform | Installer |
 |---|---|
-| macOS (Apple Silicon) | [Stellara Work-0.9.2-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
-| macOS (Intel) | [Stellara Work-0.9.2-x64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
-| Windows (x64) | [Stellara Work-Setup-0.9.2-x64.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Apple Silicon) | [Stellara Work-0.9.2.1-arm64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| macOS (Intel) | [Stellara Work-0.9.2.1-x64.dmg](https://github.com/strashineltd/stellara-work/releases/latest) |
+| Windows (x64) | [Stellara Work-Setup-0.9.2.1-x64.exe](https://github.com/strashineltd/stellara-work/releases/latest) |
 
-> **Note:** Builds are currently unsigned. On macOS, right-click → Open to bypass Gatekeeper. On Windows, click "More info → Run anyway" in SmartScreen.
+> **Note (macOS):** builds are ad-hoc signed but not notarized (no Apple Developer certificate). If macOS blocks the first launch — 「无法验证开发者 / Apple 无法检查其是否包含恶意软件」— use one of:
+> 1. **右键 App → 打开** → 再次确认「打开」（macOS 14 及更早）
+> 2. **系统设置 → 隐私与安全性 → 仍要打开**（macOS 15 Sequoia 及更新版本）
+> 3. 终端执行：`xattr -dr com.apple.quarantine "/Applications/Stellara Work.app"`
+>
+> **Note (Windows):** click "More info → Run anyway" in SmartScreen.
 
 ---
 
