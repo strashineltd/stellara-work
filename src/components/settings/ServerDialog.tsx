@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ServerEntry, ServerInput } from '../../../shared/ipc';
 
 interface ServerDialogProps {
@@ -68,7 +69,7 @@ export function ServerDialog({ mode, entry, onCancel, onSaved }: ServerDialogPro
 
   const title = mode === 'add' ? '添加服务器' : '编辑服务器';
 
-  return (
+  return createPortal(
     <div className="modal-backdrop server-dialog-backdrop" onClick={onCancel}>
       <div
         className="modal server-dialog"
@@ -147,6 +148,7 @@ export function ServerDialog({ mode, entry, onCancel, onSaved }: ServerDialogPro
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

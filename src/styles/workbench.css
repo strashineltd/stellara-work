@@ -6972,3 +6972,28 @@ html[data-page-hidden] .kbd.rec {
 }
 
 .server-dialog__error { color: var(--color-danger); font-size: var(--fs-sm); }
+
+.server-dialog__head {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.server-dialog__head h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-md);
+}
+
+.server-dialog__head .sub {
+  margin-top: var(--space-1);
+  color: var(--color-text-soft);
+  font-size: var(--fs-sm);
+}
+
+.server-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}

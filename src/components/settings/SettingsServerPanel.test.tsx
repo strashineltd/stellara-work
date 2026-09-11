@@ -158,7 +158,7 @@ describe('SettingsServerPanel', () => {
     const { container } = await render(<SettingsServerPanel onChanged={vi.fn()} />);
 
     await fireClick(container.querySelector('.settings-server-add'));
-    const dialog = container.querySelector('.server-dialog');
+    const dialog = document.querySelector('.server-dialog');
     expect(dialog).toBeTruthy();
 
     const urlInput = dialog!.querySelector('#server-url') as HTMLInputElement;
@@ -169,14 +169,14 @@ describe('SettingsServerPanel', () => {
 
     expect(mocks.add).not.toHaveBeenCalled();
     expect(byText(dialog!, '请填写服务器 URL')).toBeTruthy();
-    expect(container.querySelector('.server-dialog')).toBeTruthy();
+    expect(document.querySelector('.server-dialog')).toBeTruthy();
   });
 
   it('adds a server with url/name/password, closes the dialog and refreshes the list', async () => {
     const { container } = await render(<SettingsServerPanel onChanged={vi.fn()} />);
 
     await fireClick(container.querySelector('.settings-server-add'));
-    const dialog = container.querySelector('.server-dialog') as HTMLElement;
+    const dialog = document.querySelector('.server-dialog') as HTMLElement;
     fireChange(dialog.querySelector('#server-url') as HTMLInputElement, 'http://127.0.0.1:4096');
     fireChange(dialog.querySelector('#server-name') as HTMLInputElement, '开发服务器');
     fireChange(dialog.querySelector('#server-password') as HTMLInputElement, 'secret');
@@ -188,7 +188,7 @@ describe('SettingsServerPanel', () => {
       name: '开发服务器',
       password: 'secret',
     });
-    expect(container.querySelector('.server-dialog')).toBeNull();
+    expect(document.querySelector('.server-dialog')).toBeNull();
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });
 
@@ -295,7 +295,7 @@ describe('SettingsServerPanel', () => {
     await openMenu(container, 'srv-1');
     await fireClick(menuItem(row(container, 'srv-1'), '编辑'));
 
-    const dialog = container.querySelector('.server-dialog') as HTMLElement;
+    const dialog = document.querySelector('.server-dialog') as HTMLElement;
     expect(dialog).toBeTruthy();
     expect((dialog.querySelector('#server-url') as HTMLInputElement).value).toBe('http://localhost:4096');
     expect((dialog.querySelector('#server-name') as HTMLInputElement).value).toBe('本地服务器');
@@ -312,7 +312,7 @@ describe('SettingsServerPanel', () => {
       url: 'http://localhost:4096',
       name: '改名服务器',
     });
-    expect(container.querySelector('.server-dialog')).toBeNull();
+    expect(document.querySelector('.server-dialog')).toBeNull();
   });
 
   it('maps auth and protocol save failures to Chinese hints and keeps the dialog open', async () => {
@@ -320,18 +320,18 @@ describe('SettingsServerPanel', () => {
 
     mocks.add.mockRejectedValueOnce(new Error('鉴权失败: HTTP 401'));
     await fireClick(container.querySelector('.settings-server-add'));
-    let dialog = container.querySelector('.server-dialog') as HTMLElement;
+    let dialog = document.querySelector('.server-dialog') as HTMLElement;
     fireChange(dialog.querySelector('#server-url') as HTMLInputElement, 'http://localhost:4096');
     fireChange(dialog.querySelector('#server-password') as HTMLInputElement, 'bad');
     await fireClick(dialog.querySelector('.server-dialog__save'));
 
     expect(byText(dialog, '鉴权失败，请检查用户名或密码')).toBeTruthy();
-    expect(container.querySelector('.server-dialog')).toBeTruthy();
+    expect(document.querySelector('.server-dialog')).toBeTruthy();
 
     mocks.add.mockRejectedValueOnce(new Error('服务器 URL 必须是 http:// 或 https:// 地址'));
     await fireClick(dialog.querySelector('.server-dialog__cancel'));
     await fireClick(container.querySelector('.settings-server-add'));
-    dialog = container.querySelector('.server-dialog') as HTMLElement;
+    dialog = document.querySelector('.server-dialog') as HTMLElement;
     fireChange(dialog.querySelector('#server-url') as HTMLInputElement, 'file:///etc/passwd');
     await fireClick(dialog.querySelector('.server-dialog__save'));
 
@@ -348,7 +348,7 @@ describe('SettingsServerPanel', () => {
     const { container } = await render(<SettingsServerPanel onChanged={vi.fn()} />);
 
     await fireClick(container.querySelector('.settings-server-add'));
-    const dialog = container.querySelector('.server-dialog') as HTMLElement;
+    const dialog = document.querySelector('.server-dialog') as HTMLElement;
     const save = dialog.querySelector('.server-dialog__save') as HTMLButtonElement;
     await fireClick(save);
 
@@ -359,6 +359,6 @@ describe('SettingsServerPanel', () => {
       resolveAdd(NEW_SERVER);
       await Promise.resolve();
     });
-    expect(container.querySelector('.server-dialog')).toBeNull();
+    expect(document.querySelector('.server-dialog')).toBeNull();
   });
 });
