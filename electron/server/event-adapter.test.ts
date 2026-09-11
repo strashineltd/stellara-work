@@ -77,19 +77,52 @@ describe('EventAdapter', () => {
     expect(adapter.handle(delta('tool', '{}') as never).events).toEqual([]);
   });
 
-  it('dedupes deltas already covered by a full snapshot', () => {
+  it('emits repeated identical deltas without dropping characters', () => {
+    const adapter = new EventAdapter();
+    const delta = (value: string) =>
+      ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
+    const first = adapter.handle(delta('哈')).events;
+    const second = adapter.handle(delta('哈')).events;
+    expect(first).toEqual([{ type: 'content', content: '哈' }]);
+    expect(second).toEqual([{ type: 'content', content: '哈' }]);
+    const rendered = [...first, ...second]
+      .map((event) => (event.type === 'content' ? event.content : ''))
+      .join('');
+    expect(rendered).toBe('哈哈');
+  });
+
+  it('keeps append-only text when a snapshot truncates and later regrows', () => {
     const adapter = new EventAdapter();
     const snapshot = (text: string) =>
       ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
     const delta = (value: string) =>
       ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
-    expect(adapter.handle(snapshot('你好')).events).toEqual([{ type: 'content', content: '你好' }]);
-    // 同一内容的 delta 与快照尾部重合：跳过
-    expect(adapter.handle(delta('你好')).events).toEqual([]);
-    expect(adapter.handle(delta('世界')).events).toEqual([{ type: 'content', content: '世界' }]);
+    expect(adapter.handle(delta('abc')).events).toEqual([{ type: 'content', content: 'abc' }]);
+    // 截断快照：忽略且不重置 emitted
+    expect(adapter.handle(snapshot('ab')).events).toEqual([]);
+    // 重新延长：只输出超出已发出文本的部分
+    expect(adapter.handle(snapshot('abcd')).events).toEqual([{ type: 'content', content: 'd' }]);
   });
 
-  it('emits only the unseen suffix when snapshots arrive after deltas', () => {
+  it('skips an equal snapshot after a delta', () => {
+    const adapter = new EventAdapter();
+    const snapshot = (text: string) =>
+      ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
+    const delta = (value: string) =>
+      ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
+    expect(adapter.handle(delta('你好')).events).toEqual([{ type: 'content', content: '你好' }]);
+    expect(adapter.handle(snapshot('你好')).events).toEqual([]);
+  });
+
+  it('emits full text for growing snapshots without deltas', () => {
+    const adapter = new EventAdapter();
+    const snapshot = (text: string) =>
+      ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
+    expect(adapter.handle(snapshot('')).events).toEqual([]);
+    expect(adapter.handle(snapshot('你好')).events).toEqual([{ type: 'content', content: '你好' }]);
+  });
+
+  it('catches up missed text when snapshots arrive after deltas', () => {
     const adapter = new EventAdapter();
     const snapshot = (text: string) =>
       ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
@@ -99,19 +132,6 @@ describe('EventAdapter', () => {
     expect(adapter.handle(delta('好')).events).toEqual([{ type: 'content', content: '好' }]);
     expect(adapter.handle(snapshot('你好')).events).toEqual([]);
     expect(adapter.handle(snapshot('你好世界')).events).toEqual([{ type: 'content', content: '世界' }]);
-    // 快照已包含的增量尾部重放：跳过
-    expect(adapter.handle(delta('世界')).events).toEqual([]);
-  });
-
-  it('resets the baseline without duplicate output when a snapshot regresses after deltas', () => {
-    const adapter = new EventAdapter();
-    const snapshot = (text: string) =>
-      ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
-    const delta = (value: string) =>
-      ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
-    expect(adapter.handle(delta('abc')).events).toEqual([{ type: 'content', content: 'abc' }]);
-    expect(adapter.handle(snapshot('ab')).events).toEqual([]);
-    expect(adapter.handle(snapshot('abcd')).events).toEqual([{ type: 'content', content: 'cd' }]);
   });
 
   it('maps session lifecycle and ignores unknown events', () => {
@@ -124,7 +144,7 @@ describe('EventAdapter', () => {
     expect(adapter.handle({ type: 'nonsense' } as never).events).toEqual([]);
   });
 
-  it('emits reasoning deltas and resets tracking on rewrite', () => {
+  it('emits reasoning deltas and ignores diverged snapshots without resetting', () => {
     const adapter = new EventAdapter();
     const reasoning = (text: string) => ({
       type: 'message.part.updated',
@@ -132,11 +152,14 @@ describe('EventAdapter', () => {
     });
     expect(adapter.handle(reasoning('思') as never).events).toEqual([{ type: 'reasoning', content: '思' }]);
     expect(adapter.handle(reasoning('思考') as never).events).toEqual([{ type: 'reasoning', content: '考' }]);
-    expect(adapter.handle(reasoning('想') as never).events).toEqual([{ type: 'reasoning', content: '想' }]);
-    expect(adapter.handle(reasoning('想法') as never).events).toEqual([{ type: 'reasoning', content: '法' }]);
+    // 分叉/重写快照：忽略且不重置 emitted
+    expect(adapter.handle(reasoning('想') as never).events).toEqual([]);
+    expect(adapter.handle(reasoning('想法') as never).events).toEqual([]);
+    // 重新基于已发出文本延长：追赶输出
+    expect(adapter.handle(reasoning('思考了') as never).events).toEqual([{ type: 'reasoning', content: '了' }]);
   });
 
-  it('skips unchanged text snapshots and rewrites emit the full text', () => {
+  it('skips unchanged snapshots and ignores truncation without resetting', () => {
     const adapter = new EventAdapter();
     const text = (value: string) => ({
       type: 'message.part.updated',
@@ -144,8 +167,9 @@ describe('EventAdapter', () => {
     });
     expect(adapter.handle(text('abc') as never).events).toEqual([{ type: 'content', content: 'abc' }]);
     expect(adapter.handle(text('abc') as never).events).toEqual([]);
-    expect(adapter.handle(text('ab') as never).events).toEqual([{ type: 'content', content: 'ab' }]);
-    expect(adapter.handle(text('abcd') as never).events).toEqual([{ type: 'content', content: 'cd' }]);
+    // 截断快照：忽略且不重置 emitted
+    expect(adapter.handle(text('ab') as never).events).toEqual([]);
+    expect(adapter.handle(text('abcd') as never).events).toEqual([{ type: 'content', content: 'd' }]);
   });
 
   it('emits tool_call once per call and tolerates unseen completed calls', () => {
