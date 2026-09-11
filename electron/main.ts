@@ -342,17 +342,24 @@ function registerIpcHandlers(): void {
 
   // Chat
   handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
-    const { getSession } = await import('./store/db');
+    const { getSession, updateSessionMeta } = await import('./store/db');
     if (getSession(request.sessionId)?.runtime === 'server') {
       // 远端 server 持有会话历史：只发送最后一条用户文本
       const lastUser = [...request.messages].reverse().find((message) => message.role === 'user');
       if (!lastUser) throw new Error('消息历史末尾必须是 user 消息');
-      return requireServerRuntime().chat.start(
+      const started = await requireServerRuntime().chat.start(
         request.sessionId,
         lastUser.content,
         request.serverModel,
         request.serverAgent,
       );
+      // prompt 已成功启动：把本次使用的模型持久化到映射行（spec 4.4）
+      if (request.serverModel) {
+        updateSessionMeta(request.sessionId, {
+          modelId: `${request.serverModel.providerID}/${request.serverModel.modelID}`,
+        });
+      }
+      return started;
     }
 
     const configured = await resolveSessionExecutionContext(request.sessionId);

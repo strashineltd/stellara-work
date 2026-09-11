@@ -728,6 +728,8 @@ export interface CreateSessionArgs {
   runtime?: 'local' | 'server';
   /** runtime='server' 时的目标服务器 id */
   serverId?: string;
+  /** runtime='server' 时的模型映射，落库为 'providerID/modelID'（Plan 2B 传入） */
+  serverModel?: { providerID: string; modelID: string };
 }
 
 // ============================================

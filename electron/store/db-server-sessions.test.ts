@@ -59,6 +59,12 @@ describe('server session rows', () => {
     expect(reread?.updatedAt).toBe(123);
   });
 
+  it('updates modelId through updateSessionMeta', () => {
+    createSession({ id: 'l2', title: '本地', modelId: 'old' });
+    updateSessionMeta('l2', { modelId: 'anthropic/claude-sonnet-4' });
+    expect(getSession('l2')?.modelId).toBe('anthropic/claude-sonnet-4');
+  });
+
   it('migrates a legacy sessions table by adding runtime columns', () => {
     const legacyFile = path.join(tmpDir, 'legacy.db');
     const legacyDb = new Database(legacyFile);

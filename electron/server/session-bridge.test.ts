@@ -45,7 +45,20 @@ describe('SessionBridge', () => {
     const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'local-1' });
     const session = await bridge.create({ runtime: 'server', serverId: 'srv-1' });
     expect(session).toMatchObject({ id: 'local-1', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1', title: '远端' });
-    expect(db.rows.get('local-1')).toMatchObject({ remoteSessionId: 'ses_1' });
+    expect(db.rows.get('local-1')).toMatchObject({ remoteSessionId: 'ses_1', modelId: '' });
+  });
+
+  it('stores the server model in the mapping row when provided', async () => {
+    const db = makeDb();
+    const client = { createSession: vi.fn(async () => remoteSession) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'local-1' });
+    const session = await bridge.create({
+      runtime: 'server',
+      serverId: 'srv-1',
+      serverModel: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+    });
+    expect(session.modelId).toBe('anthropic/claude-sonnet-4');
+    expect(db.rows.get('local-1')).toMatchObject({ modelId: 'anthropic/claude-sonnet-4' });
   });
 
   it('merges server sessions when connected and marks offline rows otherwise', async () => {

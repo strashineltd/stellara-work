@@ -346,7 +346,7 @@ export function deleteSessionByRemote(serverId: string, remoteSessionId: string)
     .run(serverId, remoteSessionId);
 }
 
-export function updateSessionMeta(id: string, patch: { title?: string; updatedAt?: number }): void {
+export function updateSessionMeta(id: string, patch: { title?: string; updatedAt?: number; modelId?: string }): void {
   const sets: string[] = [];
   const params: Array<string | number> = [];
   if (patch.title !== undefined) {
@@ -356,6 +356,10 @@ export function updateSessionMeta(id: string, patch: { title?: string; updatedAt
   if (patch.updatedAt !== undefined) {
     sets.push('updated_at = ?');
     params.push(patch.updatedAt);
+  }
+  if (patch.modelId !== undefined) {
+    sets.push('model_id = ?');
+    params.push(patch.modelId);
   }
   if (sets.length === 0) return;
   params.push(id);

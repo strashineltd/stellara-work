@@ -36,7 +36,7 @@ export interface SessionBridgeDb {
   deleteSession(id: string): void;
   deleteSessionByRemote(serverId: string, remoteSessionId: string): void;
   renameSession(id: string, title: string): void;
-  updateSessionMeta(id: string, patch: { title?: string; updatedAt?: number }): void;
+  updateSessionMeta(id: string, patch: { title?: string; updatedAt?: number; modelId?: string }): void;
   getMessages(sessionId: string): MessageRow[];
 }
 
@@ -104,7 +104,7 @@ export class SessionBridge {
       return this.db.createSession({
         id: this.uuid(),
         title: remote.title ?? args.title ?? REMOTE_FALLBACK_TITLE,
-        modelId: '',
+        modelId: args.serverModel ? `${args.serverModel.providerID}/${args.serverModel.modelID}` : '',
         runtime: 'server',
         serverId: args.serverId,
         remoteSessionId: remote.id,
