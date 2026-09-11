@@ -82,6 +82,39 @@ describe('SessionBridge', () => {
     expect(db.rows.has('stale')).toBe(false);
   });
 
+  it('skips child sessions from the server list', async () => {
+    const db = makeDb();
+    const parent = { id: 'ses_parent', title: '父', time: { created: 1, updated: 2 } };
+    const child = { id: 'ses_child', title: 'Review 2B-T6 (@general subagent)', parentID: 'ses_parent', time: { created: 1, updated: 2 } };
+    const client = { listSessions: vi.fn(async () => [parent, child]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    const list = await bridge.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'u1', runtime: 'server', remoteSessionId: 'ses_parent' });
+    expect([...db.rows.values()].some((r) => r.remoteSessionId === 'ses_child')).toBe(false);
+  });
+
+  it('treats an empty parentID as a top-level session', async () => {
+    const db = makeDb();
+    const client = { listSessions: vi.fn(async () => [{ ...remoteSession, parentID: '' }]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    const list = await bridge.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'u1', remoteSessionId: 'ses_1' });
+  });
+
+  it('reconciles cached mapping rows for child sessions on the next list', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'child-map', title: '子', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_child' });
+    const parent = { id: 'ses_parent', title: '父' };
+    const child = { id: 'ses_child', title: '子', parentID: 'ses_parent' };
+    const client = { listSessions: vi.fn(async () => [parent, child]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
+    await bridge.list();
+    expect(db.rows.has('child-map')).toBe(false);
+    expect([...db.rows.values()].some((r) => r.remoteSessionId === 'ses_parent')).toBe(true);
+  });
+
   it('reads server session messages through the adapter', async () => {
     const db = makeDb();
     db.createSession({ id: 'l1', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });

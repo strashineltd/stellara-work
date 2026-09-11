@@ -30,6 +30,17 @@ describe('OpencodeClient', () => {
     expect(calls).toEqual(['POST http://localhost:4096/session', 'GET http://localhost:4096/session/ses_1/message']);
   });
 
+  it('preserves parentID on listed sessions', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([
+      { id: 'ses_parent', title: '父' },
+      { id: 'ses_child', title: '子', parentID: 'ses_parent' },
+    ]));
+    const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const sessions = await client.listSessions();
+    expect(sessions.find((s) => s.id === 'ses_child')).toMatchObject({ parentID: 'ses_parent' });
+    expect(sessions.find((s) => s.id === 'ses_parent')).not.toHaveProperty('parentID');
+  });
+
   it('posts prompt_async with model and agent', async () => {
     let body: unknown;
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

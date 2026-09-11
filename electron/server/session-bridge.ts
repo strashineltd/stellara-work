@@ -87,6 +87,9 @@ export class SessionBridge {
         for (const remote of remotes ?? []) {
           const remoteId = typeof remote?.id === 'string' ? remote.id : '';
           if (!remoteId) continue;
+          // 子会话（subagent）不进侧栏；不加入 remoteIds，下一轮对账会清掉历史映射行。
+          const parentID = typeof remote?.parentID === 'string' ? remote.parentID : '';
+          if (parentID !== '') continue;
           remoteIds.add(remoteId);
           this.upsertRemoteRow(serverId, remoteId, remote);
         }
