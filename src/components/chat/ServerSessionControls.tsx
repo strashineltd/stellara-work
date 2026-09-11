@@ -1,5 +1,8 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 import type { ServerAgentSummary, ServerProvidersResult } from '../../../shared/ipc';
+import { usePresence } from '../../hooks/usePresence';
+import { presenceRootProps } from '../../lib/presence-ui';
+import { Icon } from '../Icon';
 
 export interface ServerSessionSelection {
   providerID: string;
@@ -21,6 +24,8 @@ interface ModelOption {
   name: string;
 }
 
+type OpenMenu = 'model' | 'agent';
+
 function splitModelId(modelId: string | undefined): { providerID: string; modelID: string } | null {
   if (!modelId) return null;
   const slash = modelId.indexOf('/');
@@ -28,20 +33,38 @@ function splitModelId(modelId: string | undefined): { providerID: string; modelI
   return { providerID: modelId.slice(0, slash), modelID: modelId.slice(slash + 1) };
 }
 
+/** 同名模型跨 provider 时用 providerID 前缀消歧义。 */
+function displayModelName(model: ModelOption, models: ModelOption[]): string {
+  const name = model.name || model.modelID;
+  const duplicated = models.some(
+    (other) =>
+      other.name === model.name
+      && (other.providerID !== model.providerID || other.modelID !== model.modelID),
+  );
+  return duplicated ? `${model.providerID} · ${name}` : name;
+}
+
 /**
  * 服务器会话的模型 / Agent 控件：加载远端 providers（含默认）与 agents。
  * 模型默认取「会话已存 modelId → 服务器 default → 第一个模型」；Agent 默认 build（无 agents 时隐藏）。
+ * 下拉复用审批模式菜单的样式化菜单模式（向上展开、点外部 / Escape 关闭）。
  */
 export function ServerSessionControls(props: ServerSessionControlsProps) {
   const [providers, setProviders] = useState<ServerProvidersResult | null>(null);
   const [agents, setAgents] = useState<ServerAgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
+  const modelMenuOpen = openMenu === 'model';
+  const agentMenuOpen = openMenu === 'agent';
+  const modelPresence = usePresence(modelMenuOpen, 120);
+  const agentPresence = usePresence(agentMenuOpen, 120);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setProviders(null);
     setAgents([]);
+    setOpenMenu(null);
     void (async () => {
       const api = window.electronAPI?.servers;
       if (!api) {
@@ -62,13 +85,37 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
     };
   }, [props.serverId]);
 
+  // 点外部 / Escape 关闭服务器模型 / Agent 下拉
+  useEffect(() => {
+    if (openMenu === null) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('.server-session-controls')) return;
+      setOpenMenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenu(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openMenu]);
+
   if (loading) {
     return (
       <span className="server-session-controls" data-state="loading" title={`${props.serverName}：正在加载模型…`}>
         <span className="server-session-badge">{props.serverName}</span>
-        <select className="server-session-controls__model" aria-label="服务器模型" disabled>
-          <option value="">加载模型…</option>
-        </select>
+        <button
+          className="server-session-controls__model server-session-controls__trigger"
+          type="button"
+          aria-label="服务器模型"
+          disabled
+        >
+          <span className="server-session-controls__trigger-label">加载模型…</span>
+        </button>
       </span>
     );
   }
@@ -81,9 +128,14 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
     return (
       <span className="server-session-controls" data-state="empty" title={`${props.serverName}：无可用模型`}>
         <span className="server-session-badge">{props.serverName}</span>
-        <select className="server-session-controls__model" aria-label="服务器模型" disabled>
-          <option value="">无可用模型</option>
-        </select>
+        <button
+          className="server-session-controls__model server-session-controls__trigger"
+          type="button"
+          aria-label="服务器模型"
+          disabled
+        >
+          <span className="server-session-controls__trigger-label">无可用模型</span>
+        </button>
       </span>
     );
   }
@@ -97,10 +149,14 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
 
   const storedModel = splitModelId(props.sessionModelId);
   const defaultValue = providers?.default;
-  const selectedModel = (hasModel(props.value) ? props.value : null)
+  const selectedModelRef = (hasModel(props.value) ? props.value : null)
     ?? (hasModel(storedModel) ? storedModel : null)
     ?? (hasModel(defaultValue) ? defaultValue : null)
     ?? models[0];
+  const selectedModel = models.find(
+    (model) =>
+      model.providerID === selectedModelRef.providerID && model.modelID === selectedModelRef.modelID,
+  ) ?? models[0];
 
   const agentNames = agents.map((agent) => agent.name);
   const defaultAgent = agentNames.includes('build') ? 'build' : agentNames[0];
@@ -108,10 +164,7 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
     ? props.value.agent
     : (defaultAgent ?? '');
 
-  function handleModelChange(event: ChangeEvent<HTMLSelectElement>) {
-    const [providerID, ...rest] = event.target.value.split('/');
-    const modelID = rest.join('/');
-    if (!providerID || !modelID) return;
+  function commitModel(providerID: string, modelID: string) {
     props.onChange({
       providerID,
       modelID,
@@ -119,45 +172,101 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
     });
   }
 
-  function handleAgentChange(event: ChangeEvent<HTMLSelectElement>) {
+  function commitAgent(agent: string) {
     props.onChange({
       providerID: selectedModel.providerID,
       modelID: selectedModel.modelID,
-      agent: event.target.value,
+      agent,
     });
   }
 
   return (
     <span className="server-session-controls" data-state="ready" title={props.serverName}>
       <span className="server-session-badge">{props.serverName}</span>
-      <select
-        className="server-session-controls__model"
-        aria-label="服务器模型"
-        value={`${selectedModel.providerID}/${selectedModel.modelID}`}
-        onChange={handleModelChange}
-      >
-        {models.map((model) => (
-          <option
-            key={`${model.providerID}/${model.modelID}`}
-            value={`${model.providerID}/${model.modelID}`}
-          >
-            {model.name}
-          </option>
-        ))}
-      </select>
-      {selectedAgent !== '' && (
-        <select
-          className="server-session-controls__agent"
-          aria-label="服务器 Agent"
-          value={selectedAgent}
-          onChange={handleAgentChange}
+      <span className="server-session-controls__field">
+        <button
+          className="server-session-controls__model server-session-controls__trigger"
+          type="button"
+          aria-label="服务器模型"
+          aria-haspopup="listbox"
+          aria-expanded={modelMenuOpen}
+          onClick={() => setOpenMenu(modelMenuOpen ? null : 'model')}
         >
-          {agents.map((agent) => (
-            <option key={agent.name} value={agent.name}>
-              {agent.name}
-            </option>
-          ))}
-        </select>
+          <span className="server-session-controls__trigger-label">
+            {displayModelName(selectedModel, models)}
+          </span>
+          <Icon name="chevron-down" size={12} />
+        </button>
+        {modelPresence.mounted && (
+          <div
+            className="server-session-controls__menu"
+            role="listbox"
+            aria-label="服务器模型"
+            {...presenceRootProps(modelPresence)}
+          >
+            {models.map((model) => {
+              const active = model.providerID === selectedModel.providerID
+                && model.modelID === selectedModel.modelID;
+              return (
+                <button
+                  key={`${model.providerID}/${model.modelID}`}
+                  className={`server-session-controls__item${active ? ' active' : ''}`}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => {
+                    setOpenMenu(null);
+                    commitModel(model.providerID, model.modelID);
+                  }}
+                >
+                  {displayModelName(model, models)}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </span>
+      {selectedAgent !== '' && (
+        <span className="server-session-controls__field">
+          <button
+            className="server-session-controls__agent server-session-controls__trigger"
+            type="button"
+            aria-label="服务器 Agent"
+            aria-haspopup="listbox"
+            aria-expanded={agentMenuOpen}
+            onClick={() => setOpenMenu(agentMenuOpen ? null : 'agent')}
+          >
+            <span className="server-session-controls__trigger-label">{selectedAgent}</span>
+            <Icon name="chevron-down" size={12} />
+          </button>
+          {agentPresence.mounted && (
+            <div
+              className="server-session-controls__menu"
+              role="listbox"
+              aria-label="服务器 Agent"
+              {...presenceRootProps(agentPresence)}
+            >
+              {agents.map((agent) => {
+                const active = agent.name === selectedAgent;
+                return (
+                  <button
+                    key={agent.name}
+                    className={`server-session-controls__item${active ? ' active' : ''}`}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => {
+                      setOpenMenu(null);
+                      commitAgent(agent.name);
+                    }}
+                  >
+                    {agent.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </span>
       )}
     </span>
   );

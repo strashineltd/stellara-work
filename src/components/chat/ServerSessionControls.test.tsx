@@ -37,13 +37,38 @@ function installApi(providers: ServerProvidersResult = PROVIDERS, agents: Server
   return servers;
 }
 
-function selectOption(select: HTMLSelectElement | null, value: string) {
-  if (!select) throw new Error('select not found');
+function fireClick(element: Element | null) {
+  if (!element) throw new Error('Element not found for click');
   act(() => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
-    setter.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
+}
+
+function firePointerDown(element: Element | Document) {
+  act(() => {
+    element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  });
+}
+
+function fireEscape() {
+  act(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+}
+
+function fireTransitionEnd(element: Element | null) {
+  if (!element) throw new Error('Element not found for transitionend');
+  act(() => {
+    element.dispatchEvent(new Event('transitionend', { bubbles: true }));
+  });
+}
+
+function menuItem(menu: HTMLElement | null, text: string): HTMLButtonElement {
+  const item = Array.from(
+    menu?.querySelectorAll<HTMLButtonElement>('.server-session-controls__item') ?? [],
+  ).find((element) => element.textContent?.includes(text));
+  if (!item) throw new Error(`menu item not found: ${text}`);
+  return item;
 }
 
 async function renderControls(overrides: Partial<React.ComponentProps<typeof ServerSessionControls>> = {}) {
@@ -70,8 +95,14 @@ async function renderControls(overrides: Partial<React.ComponentProps<typeof Ser
         root.render(<ServerSessionControls {...props} />);
       });
     },
-    model: () => container.querySelector<HTMLSelectElement>('.server-session-controls__model'),
-    agent: () => container.querySelector<HTMLSelectElement>('.server-session-controls__agent'),
+    model: () => container.querySelector<HTMLButtonElement>('.server-session-controls__model'),
+    agent: () => container.querySelector<HTMLButtonElement>('.server-session-controls__agent'),
+    modelMenu: () =>
+      container.querySelector<HTMLElement>('[role="listbox"][aria-label="服务器模型"]'),
+    agentMenu: () =>
+      container.querySelector<HTMLElement>('[role="listbox"][aria-label="服务器 Agent"]'),
+    openModelMenu: () => fireClick(container.querySelector('.server-session-controls__model')),
+    openAgentMenu: () => fireClick(container.querySelector('.server-session-controls__agent')),
     unmount: () => {
       act(() => root.unmount());
       container.remove();
@@ -88,14 +119,16 @@ describe('ServerSessionControls', () => {
 
   it('loads providers and agents and defaults to the server default model and build agent', async () => {
     const servers = installApi();
-    const { model, agent, unmount } = await renderControls();
+    const { model, agent, modelMenu, openModelMenu, unmount } = await renderControls();
 
     expect(servers.providers).toHaveBeenCalledWith('srv-1');
     expect(servers.agents).toHaveBeenCalledWith('srv-1');
-    expect(model()?.value).toBe('p1/m2');
-    expect(model()?.textContent).toContain('模型一');
-    expect(model()?.textContent).toContain('模型三');
-    expect(agent()?.value).toBe('build');
+    expect(model()?.textContent?.trim()).toBe('模型二');
+    expect(model()?.disabled).toBe(false);
+    openModelMenu();
+    expect(modelMenu()?.textContent).toContain('模型一');
+    expect(modelMenu()?.textContent).toContain('模型三');
+    expect(agent()?.textContent?.trim()).toBe('build');
     unmount();
   });
 
@@ -111,28 +144,34 @@ describe('ServerSessionControls', () => {
     installApi();
     const { model, unmount } = await renderControls({ sessionModelId: 'p2/m3' });
 
-    expect(model()?.value).toBe('p2/m3');
+    expect(model()?.textContent?.trim()).toBe('模型三');
     unmount();
   });
 
-  it('uses the controlled value when provided', async () => {
+  it('uses the controlled value when provided and marks it selected', async () => {
     installApi();
-    const { model, agent, unmount } = await renderControls({
+    const { model, agent, modelMenu, openModelMenu, unmount } = await renderControls({
       value: { providerID: 'p2', modelID: 'm3', agent: 'plan' },
     });
 
-    expect(model()?.value).toBe('p2/m3');
-    expect(agent()?.value).toBe('plan');
+    expect(model()?.textContent?.trim()).toBe('模型三');
+    expect(agent()?.textContent?.trim()).toBe('plan');
+    openModelMenu();
+    expect(menuItem(modelMenu(), '模型三').getAttribute('aria-selected')).toBe('true');
+    expect(menuItem(modelMenu(), '模型一').getAttribute('aria-selected')).toBe('false');
     unmount();
   });
 
   it('ignores a controlled agent that the server no longer exposes', async () => {
     installApi();
-    const { agent, unmount } = await renderControls({
+    const { agent, agentMenu, openAgentMenu, unmount } = await renderControls({
       value: { providerID: 'p1', modelID: 'm1', agent: 'ghost' },
     });
 
-    expect(agent()?.value).toBe('build');
+    expect(agent()?.textContent?.trim()).toBe('build');
+    openAgentMenu();
+    expect(menuItem(agentMenu(), 'build').getAttribute('aria-selected')).toBe('true');
+    expect(agentMenu()?.textContent).not.toContain('ghost');
     unmount();
   });
 
@@ -142,27 +181,98 @@ describe('ServerSessionControls', () => {
     });
     const { model, unmount } = await renderControls();
 
-    expect(model()?.value).toBe('p1/m1');
+    expect(model()?.textContent?.trim()).toBe('模型一');
+    unmount();
+  });
+
+  it('disambiguates duplicate model names with the provider id', async () => {
+    installApi({
+      providers: [
+        { id: 'p1', name: 'Provider One', models: [{ id: 'm1', name: '共享模型' }] },
+        { id: 'p2', name: 'Provider Two', models: [{ id: 'm2', name: '共享模型' }] },
+      ],
+      default: { providerID: 'p1', modelID: 'm1' },
+    });
+    const { model, modelMenu, openModelMenu, unmount } = await renderControls();
+
+    expect(model()?.textContent?.trim()).toBe('p1 · 共享模型');
+    openModelMenu();
+    expect(modelMenu()?.textContent).toContain('p1 · 共享模型');
+    expect(modelMenu()?.textContent).toContain('p2 · 共享模型');
     unmount();
   });
 
   it('reports model switches with the current agent', async () => {
     installApi();
-    const { model, onChange, unmount } = await renderControls();
+    const { model, modelMenu, onChange, openModelMenu, unmount } = await renderControls();
 
-    selectOption(model(), 'p1/m1');
+    openModelMenu();
+    fireClick(menuItem(modelMenu(), '模型一'));
 
     expect(onChange).toHaveBeenCalledWith({ providerID: 'p1', modelID: 'm1', agent: 'build' });
+    expect(model()?.getAttribute('aria-expanded')).toBe('false');
     unmount();
   });
 
   it('reports agent switches with the current model', async () => {
     installApi();
-    const { agent, onChange, unmount } = await renderControls();
+    const { agent, agentMenu, onChange, openAgentMenu, unmount } = await renderControls();
 
-    selectOption(agent(), 'plan');
+    openAgentMenu();
+    fireClick(menuItem(agentMenu(), 'plan'));
 
     expect(onChange).toHaveBeenCalledWith({ providerID: 'p1', modelID: 'm2', agent: 'plan' });
+    expect(agent()?.getAttribute('aria-expanded')).toBe('false');
+    unmount();
+  });
+
+  it('closes the model menu on outside pointerdown', async () => {
+    installApi();
+    const { model, modelMenu, openModelMenu, unmount } = await renderControls();
+
+    openModelMenu();
+    const menu = modelMenu();
+    expect(menu).not.toBeNull();
+
+    firePointerDown(document.body);
+
+    expect(menu!.getAttribute('data-motion-state')).toBe('closing');
+    fireTransitionEnd(menu);
+    expect(modelMenu()).toBeNull();
+    expect(model()?.getAttribute('aria-expanded')).toBe('false');
+    unmount();
+  });
+
+  it('closes the model menu on Escape', async () => {
+    installApi();
+    const { model, modelMenu, openModelMenu, unmount } = await renderControls();
+
+    openModelMenu();
+    const menu = modelMenu();
+    expect(menu).not.toBeNull();
+
+    fireEscape();
+
+    expect(menu!.getAttribute('data-motion-state')).toBe('closing');
+    fireTransitionEnd(menu);
+    expect(modelMenu()).toBeNull();
+    expect(model()?.getAttribute('aria-expanded')).toBe('false');
+    unmount();
+  });
+
+  it('does not double-handle a pointerdown on the trigger', async () => {
+    installApi();
+    const { model, modelMenu, unmount } = await renderControls();
+    const trigger = model();
+
+    firePointerDown(trigger!);
+    fireClick(trigger);
+    expect(trigger!.getAttribute('aria-expanded')).toBe('true');
+    expect(modelMenu()).not.toBeNull();
+
+    firePointerDown(trigger!);
+    fireClick(trigger);
+    expect(trigger!.getAttribute('aria-expanded')).toBe('false');
     unmount();
   });
 
@@ -171,15 +281,17 @@ describe('ServerSessionControls', () => {
     const { model, agent, unmount } = await renderControls();
 
     expect(agent()).toBeNull();
-    expect(model()?.value).toBe('p1/m2');
+    expect(model()?.textContent?.trim()).toBe('模型二');
     unmount();
   });
 
   it('shows a disabled placeholder when providers are empty', async () => {
     installApi({ providers: [] });
-    const { container, model, agent, unmount } = await renderControls();
+    const { container, model, agent, modelMenu, openModelMenu, unmount } = await renderControls();
 
     expect(model()?.disabled).toBe(true);
+    openModelMenu();
+    expect(modelMenu()).toBeNull();
     expect(container.textContent).toContain('无可用模型');
     expect(agent()).toBeNull();
     unmount();

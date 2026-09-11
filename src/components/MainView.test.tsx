@@ -106,15 +106,6 @@ function fireClick(el: Element | null | undefined) {
   });
 }
 
-function selectOption(el: Element | null | undefined, value: string) {
-  if (!el) throw new Error('Element not found for select');
-  act(() => {
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
-    setter.call(el as HTMLSelectElement, value);
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
-
 describe('MainView session deletion confirmation', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -2779,6 +2770,16 @@ describe('MainView execution target selector', () => {
     });
   }
 
+  function pickServerMenuItem(
+    querySelectorAll: (sel: string) => NodeListOf<Element>,
+    text: string,
+  ) {
+    const item = Array.from(querySelectorAll('.server-session-controls__item'))
+      .find((el) => el.textContent?.includes(text));
+    if (!item) throw new Error(`server menu item not found: ${text}`);
+    fireClick(item);
+  }
+
   it('keeps the local model switcher for local sessions', async () => {
     installApi();
     const { querySelector, unmount } = await renderMainView({ config: CONFIG });
@@ -2799,9 +2800,9 @@ describe('MainView execution target selector', () => {
 
     expect(querySelector('.server-session-controls')).not.toBeNull();
     expect(querySelector('.model-switcher')).toBeNull();
-    expect((querySelector('.server-session-controls__model') as HTMLSelectElement).value)
-      .toBe('anthropic/claude-sonnet-4');
-    expect((querySelector('.server-session-controls__agent') as HTMLSelectElement).value)
+    expect((querySelector('.server-session-controls__model') as HTMLButtonElement).textContent?.trim())
+      .toBe('Claude Sonnet 4');
+    expect((querySelector('.server-session-controls__agent') as HTMLButtonElement).textContent?.trim())
       .toBe('build');
     unmount();
   });
@@ -2823,15 +2824,17 @@ describe('MainView execution target selector', () => {
     installApi();
     const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
     (window as any).electronAPI.chat.start = chatStart;
-    const { querySelector, unmount } = await renderMainView({
+    const { querySelector, querySelectorAll, unmount } = await renderMainView({
       config: null,
       sessions: [serverSession({ modelId: 'anthropic/claude-sonnet-4' })],
       activeSessionId: 'a',
     });
     await act(async () => {});
 
-    selectOption(querySelector('.server-session-controls__model'), 'anthropic/claude-opus-4');
-    selectOption(querySelector('.server-session-controls__agent'), 'plan');
+    fireClick(querySelector('.server-session-controls__model'));
+    pickServerMenuItem(querySelectorAll, 'Claude Opus 4');
+    fireClick(querySelector('.server-session-controls__agent'));
+    pickServerMenuItem(querySelectorAll, 'plan');
     typeAndSend(querySelector, '服务器任务');
     await act(async () => {});
 
