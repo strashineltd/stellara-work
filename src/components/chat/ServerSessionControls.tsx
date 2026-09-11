@@ -65,6 +65,7 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
   if (loading) {
     return (
       <span className="server-session-controls" data-state="loading" title={`${props.serverName}：正在加载模型…`}>
+        <span className="server-session-badge">{props.serverName}</span>
         <select className="server-session-controls__model" aria-label="服务器模型" disabled>
           <option value="">加载模型…</option>
         </select>
@@ -79,6 +80,7 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
   if (models.length === 0) {
     return (
       <span className="server-session-controls" data-state="empty" title={`${props.serverName}：无可用模型`}>
+        <span className="server-session-badge">{props.serverName}</span>
         <select className="server-session-controls__model" aria-label="服务器模型" disabled>
           <option value="">无可用模型</option>
         </select>
@@ -127,6 +129,7 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
 
   return (
     <span className="server-session-controls" data-state="ready" title={props.serverName}>
+      <span className="server-session-badge">{props.serverName}</span>
       <select
         className="server-session-controls__model"
         aria-label="服务器模型"

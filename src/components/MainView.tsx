@@ -938,12 +938,19 @@ export function MainView(props: MainViewProps) {
     if (busy) return;
     if (executionTarget.kind === 'server') {
       // 服务器会话不要求本地模型/项目，远端使用服务器工作目录
+      const serverStatus = statuses.find((entry) => entry.id === executionTarget.serverId)?.status;
+      if (serverStatus !== 'connected') {
+        appendLocalError('服务器未连接，请先在顶栏重连');
+        return;
+      }
       void window.electronAPI.sessions.create({ runtime: 'server', serverId: executionTarget.serverId })
         .then((session) => {
           onSessionCreated(session);
           navigateToSection('tasks', session.id);
         })
-        .catch((error) => console.error('New session failed:', error));
+        .catch((error) => {
+          appendLocalError('无法创建服务器会话：' + (error instanceof Error ? error.message : String(error)));
+        });
       return;
     }
     if (!config) return;

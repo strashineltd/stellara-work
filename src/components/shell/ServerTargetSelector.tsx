@@ -64,7 +64,7 @@ export function ServerTargetSelector(props: ServerTargetSelectorProps) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <i className="server-target__dot" aria-hidden="true" />
+        <span className="server-status-dot" data-status={currentStatus} aria-hidden="true" />
         <span>{currentName}</span>
         <Icon name="chevron-down" size={12} />
       </button>
@@ -77,7 +77,7 @@ export function ServerTargetSelector(props: ServerTargetSelectorProps) {
             aria-checked={props.value.kind === 'local'}
             onClick={() => select({ kind: 'local' })}
           >
-            <i className="server-target__dot" aria-hidden="true" />
+            <span className="server-status-dot" data-status="connected" aria-hidden="true" />
             <span>{LOCAL_LABEL}</span>
           </button>
           {props.servers.map((server) => {
@@ -93,7 +93,7 @@ export function ServerTargetSelector(props: ServerTargetSelectorProps) {
                   data-status={status}
                   onClick={() => select({ kind: 'server', serverId: server.id })}
                 >
-                  <i className="server-target__dot" data-status={status} aria-hidden="true" />
+                  <span className="server-status-dot" data-status={status} aria-hidden="true" />
                   <span>{server.name}</span>
                 </button>
                 {status === 'error' && (

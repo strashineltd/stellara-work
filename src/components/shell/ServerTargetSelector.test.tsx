@@ -92,6 +92,9 @@ describe('ServerTargetSelector', () => {
     const trigger = container.querySelector('.server-target__trigger');
     expect(trigger?.textContent).toContain('本地');
     expect(trigger?.getAttribute('data-status')).toBe('connected');
+    const dot = trigger?.querySelector('.server-status-dot');
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute('data-status')).toBe('connected');
     unmount();
   });
 
@@ -100,6 +103,7 @@ describe('ServerTargetSelector', () => {
     const trigger = container.querySelector('.server-target__trigger');
     expect(trigger?.textContent).toContain('远程开发机');
     expect(trigger?.getAttribute('data-status')).toBe('error');
+    expect(trigger?.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
     unmount();
   });
 
@@ -109,9 +113,17 @@ describe('ServerTargetSelector', () => {
 
     expect(container.querySelector('.server-target__menu')).not.toBeNull();
     const items = Array.from(container.querySelectorAll('.server-target__item'));
-    expect(items.some((item) => item.textContent?.includes('本地'))).toBe(true);
+    const localItem = items.find((item) => item.textContent?.includes('本地'));
+    expect(localItem).toBeTruthy();
+    expect(localItem?.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('connected');
     expect(container.querySelector('.server-target__item[data-status="connected"]')?.textContent).toContain('本地服务器');
     expect(container.querySelector('.server-target__item[data-status="error"]')?.textContent).toContain('远程开发机');
+    expect(
+      container.querySelector('.server-target__item[data-status="connected"] .server-status-dot')?.getAttribute('data-status'),
+    ).toBe('connected');
+    expect(
+      container.querySelector('.server-target__item[data-status="error"] .server-status-dot')?.getAttribute('data-status'),
+    ).toBe('error');
     unmount();
   });
 

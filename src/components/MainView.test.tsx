@@ -2605,6 +2605,35 @@ describe('MainView execution target selector', () => {
     unmount();
   });
 
+  it('blocks creating a server session while the target server is offline and surfaces an error', async () => {
+    const api = installApi();
+    const { querySelector, container, unmount } = await renderMainView({ config: null, projects: [] });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="error"]'));
+    fireClick(querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('服务器未连接，请先在顶栏重连');
+    unmount();
+  });
+
+  it('surfaces an error when creating a server session fails', async () => {
+    const api = installApi();
+    api.sessions.create.mockRejectedValue(new Error('远端拒绝'));
+    const { querySelector, container, unmount } = await renderMainView({ config: null, projects: [] });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+    fireClick(querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).toHaveBeenCalledWith({ runtime: 'server', serverId: 'srv-1' });
+    expect(container.textContent).toContain('无法创建服务器会话：远端拒绝');
+    unmount();
+  });
+
   it('sends to the active server session by its local mapping id without a local model config', async () => {
     const api = installApi();
     const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });

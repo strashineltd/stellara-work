@@ -99,6 +99,14 @@ describe('ServerSessionControls', () => {
     unmount();
   });
 
+  it('shows the server name as a visible badge', async () => {
+    installApi();
+    const { container, unmount } = await renderControls();
+
+    expect(container.querySelector('.server-session-badge')?.textContent).toBe('本地服务器');
+    unmount();
+  });
+
   it('prefers the session-stored model over the server default', async () => {
     installApi();
     const { model, unmount } = await renderControls({ sessionModelId: 'p2/m3' });
@@ -188,6 +196,7 @@ describe('ServerSessionControls', () => {
 
     expect(model()?.disabled).toBe(true);
     expect(container.textContent).toContain('加载');
+    expect(container.querySelector('.server-session-badge')?.textContent).toBe('本地服务器');
     unmount();
   });
 
