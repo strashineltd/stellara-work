@@ -1478,7 +1478,9 @@ html[data-platform='darwin'] .app-topbar {
 
 .project-action-panel {
   display: grid;
-  margin: 2px var(--space-2) var(--space-2) 28px;
+  gap: 2px;
+  width: 200px;
+  margin: 0;
 }
 
 .project-children {
@@ -3285,7 +3287,7 @@ button.attach-chip:hover {
 .sidebar,
 .workspace-panel {
   opacity: 1;
-  transform: translateX(0);
+  transform: none;
   transition:
     opacity var(--motion-slow) var(--ease-out),
     transform var(--motion-slow) var(--ease-out);

@@ -4268,7 +4268,8 @@ button:disabled {
 .project-action-panel {
   display: grid;
   gap: 2px;
-  margin: 2px var(--space-2) var(--space-2) 30px;
+  width: 200px;
+  margin: 0;
   padding: var(--space-1);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

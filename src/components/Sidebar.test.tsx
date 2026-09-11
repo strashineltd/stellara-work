@@ -838,6 +838,39 @@ describe('Sidebar', () => {
     expect(getByText('删除项目')).toBeTruthy();
   });
 
+  it('renders the project action panel as a viewport-fixed popover', () => {
+    const view = render(
+      <Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />,
+    );
+    const actions = view.querySelector('button[aria-label="项目操作：Alpha"]') as HTMLButtonElement;
+    fireClick(actions);
+    const panel = view.querySelector('.project-action-panel') as HTMLElement;
+    expect(panel).toBeTruthy();
+    expect(panel.style.position).toBe('fixed');
+    expect(panel.style.top).not.toBe('');
+    expect(panel.style.left).not.toBe('');
+    expect(panel.style.maxHeight).not.toBe('');
+    expect(actions.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('closes the project action panel when the window scrolls', () => {
+    const view = render(
+      <Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />,
+    );
+    const actions = view.querySelector('button[aria-label="项目操作：Alpha"]') as HTMLButtonElement;
+    fireClick(actions);
+    const panel = view.querySelector('.project-action-panel') as HTMLElement;
+    expect(panel).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+
+    expect(view.querySelector('.project-action-panel')).toBe(panel);
+    expect(panel.dataset.motionState).toBe('closing');
+    expect(actions.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('renders a bottom project panel and retains it through Escape until its root completes', () => {
     const view = render(
       <Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} {...PROJECT_PROPS} projects={PROJECTS} />,

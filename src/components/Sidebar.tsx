@@ -59,12 +59,54 @@ type SessionMenuState = SessionMenuPosition & {
   session: SessionSummary;
 };
 
-type ProjectMenuState = {
+type ProjectMenuAnchor = {
+  top: number;
+  left: number;
+  maxHeight: number;
+  flipUp: boolean;
+};
+
+type ProjectMenuState = ProjectMenuAnchor & {
   open: boolean;
   project: ProjectSummary;
 };
 
 const UNKNOWN_SERVER_NAME = '未知服务器';
+
+const PROJECT_MENU_WIDTH = 200;
+const PROJECT_MENU_ESTIMATED_HEIGHT = 260;
+const PROJECT_MENU_MIN_HEIGHT = 160;
+const PROJECT_MENU_GUTTER = 8;
+
+/** 触发器在视口内的固定定位锚点：优先下方，空间不足时上翻并限制高度。 */
+function computeProjectMenuAnchor(trigger: HTMLElement | null): ProjectMenuAnchor {
+  const rect = trigger?.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const triggerTop = rect?.top ?? PROJECT_MENU_GUTTER;
+  const triggerBottom = rect?.bottom ?? PROJECT_MENU_GUTTER;
+  const triggerLeft = rect?.left ?? PROJECT_MENU_GUTTER;
+  const left = Math.max(
+    PROJECT_MENU_GUTTER,
+    Math.min(triggerLeft, viewportWidth - PROJECT_MENU_WIDTH - PROJECT_MENU_GUTTER),
+  );
+  const belowTop = triggerBottom + 4;
+  if (belowTop + PROJECT_MENU_ESTIMATED_HEIGHT <= viewportHeight - PROJECT_MENU_GUTTER) {
+    return {
+      top: belowTop,
+      left,
+      maxHeight: Math.max(PROJECT_MENU_MIN_HEIGHT, viewportHeight - belowTop - PROJECT_MENU_GUTTER),
+      flipUp: false,
+    };
+  }
+  const top = Math.max(PROJECT_MENU_GUTTER, triggerTop - 4 - PROJECT_MENU_ESTIMATED_HEIGHT);
+  return {
+    top,
+    left,
+    maxHeight: Math.max(PROJECT_MENU_MIN_HEIGHT, triggerTop - 4 - top - PROJECT_MENU_GUTTER),
+    flipUp: true,
+  };
+}
 
 type ServerGroup = {
   serverId: string | null;
@@ -309,14 +351,17 @@ export function Sidebar({
     };
     const onViewportChange = () => {
       if (sessionMenuOpen) closeSessionMenu(false);
+      if (projectMenuOpen) closeProjectMenu(false);
     };
     document.addEventListener('click', onClick);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', onViewportChange);
+    window.addEventListener('scroll', onViewportChange, true);
     return () => {
       document.removeEventListener('click', onClick);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', onViewportChange);
+      window.removeEventListener('scroll', onViewportChange, true);
     };
   }, [projectMenuOpen, sessionMenuOpen]);
 
@@ -471,14 +516,18 @@ export function Sidebar({
     openSessionMenu(s, e.clientX, e.clientY, listRect?.right ?? window.innerWidth, listRect?.bottom ?? window.innerHeight, rowTop - 4, e.currentTarget);
   }
 
-  function handleProjectContextMenu(e: React.MouseEvent, p: ProjectSummary) {
+  function handleProjectContextMenu(e: React.MouseEvent<HTMLElement>, p: ProjectSummary) {
     e.preventDefault();
     e.stopPropagation();
     const actions = e.currentTarget.querySelector<HTMLElement>('.project-actions-button');
-    toggleProjectMenu(p, actions);
+    toggleProjectMenu(p, actions, e.currentTarget);
   }
 
-  function toggleProjectMenu(p: ProjectSummary, returnFocus: HTMLElement | null) {
+  function toggleProjectMenu(
+    p: ProjectSummary,
+    returnFocus: HTMLElement | null,
+    anchorElement: HTMLElement | null = returnFocus,
+  ) {
     if (projectMenuOpenRef.current && projectMenu?.project.id === p.id) {
       closeProjectMenu(false);
       return;
@@ -489,7 +538,7 @@ export function Sidebar({
     projectMenuReturnFocusRef.current = captureFocusTarget(returnFocus);
     const projectIndex = projects.findIndex((project) => project.id === p.id);
     projectMenuIndexRef.current = projectIndex === -1 ? projects.length : projectIndex;
-    setProjectMenu({ open: true, project: p });
+    setProjectMenu({ open: true, project: p, ...computeProjectMenuAnchor(anchorElement) });
   }
 
   function openProjectDialog(projectId: string, returnFocus: HTMLElement | null) {
@@ -633,8 +682,16 @@ export function Sidebar({
             role="menu"
             aria-label={`${projectMenu.project.name} 项目操作`}
             data-motion="menu"
-            data-side="bottom"
+            data-side={projectMenu.flipUp ? 'top' : 'bottom'}
             {...presenceRootProps(projectMenuPresence)}
+            style={{
+              position: 'fixed',
+              top: projectMenu.top,
+              left: projectMenu.left,
+              maxHeight: projectMenu.maxHeight,
+              overflowY: 'auto',
+              zIndex: 'var(--z-popover)',
+            }}
             onClick={(event) => event.stopPropagation()}
           >
             <button
