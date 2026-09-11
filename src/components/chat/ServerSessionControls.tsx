@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ServerAgentSummary, ServerProvidersResult } from '../../../shared/ipc';
 import { usePresence } from '../../hooks/usePresence';
 import { presenceRootProps } from '../../lib/presence-ui';
@@ -25,6 +25,8 @@ interface ModelOption {
 }
 
 type OpenMenu = 'model' | 'agent';
+
+const MODEL_MENU_LIMIT = 60;
 
 function splitModelId(modelId: string | undefined): { providerID: string; modelID: string } | null {
   if (!modelId) return null;
@@ -54,6 +56,7 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
   const [agents, setAgents] = useState<ServerAgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
+  const [modelQuery, setModelQuery] = useState('');
   const modelMenuOpen = openMenu === 'model';
   const agentMenuOpen = openMenu === 'agent';
   const modelPresence = usePresence(modelMenuOpen, 120);
@@ -104,6 +107,30 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
     };
   }, [openMenu]);
 
+  const models: ModelOption[] = useMemo(
+    () =>
+      (providers?.providers ?? []).flatMap((provider) =>
+        provider.models.map((model) => ({
+          providerID: provider.id,
+          modelID: model.id,
+          name: model.name,
+        })),
+      ),
+    [providers],
+  );
+
+  const filteredModels = useMemo(() => {
+    const query = modelQuery.trim().toLowerCase();
+    if (query === '') return models;
+    return models.filter((model) => {
+      const haystack = `${model.providerID} ${model.modelID} ${displayModelName(model, models)}`;
+      return haystack.toLowerCase().includes(query);
+    });
+  }, [modelQuery, models]);
+
+  const visibleModels = filteredModels.slice(0, MODEL_MENU_LIMIT);
+  const hiddenModelCount = filteredModels.length - visibleModels.length;
+
   if (loading) {
     return (
       <span className="server-session-controls" data-state="loading" title={`${props.serverName}：正在加载模型…`}>
@@ -119,10 +146,6 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
       </span>
     );
   }
-
-  const models: ModelOption[] = (providers?.providers ?? []).flatMap((provider) =>
-    provider.models.map((model) => ({ providerID: provider.id, modelID: model.id, name: model.name })),
-  );
 
   if (models.length === 0) {
     return (
@@ -190,7 +213,14 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
           aria-label="服务器模型"
           aria-haspopup="listbox"
           aria-expanded={modelMenuOpen}
-          onClick={() => setOpenMenu(modelMenuOpen ? null : 'model')}
+          onClick={() => {
+            if (modelMenuOpen) {
+              setOpenMenu(null);
+            } else {
+              setModelQuery('');
+              setOpenMenu('model');
+            }
+          }}
         >
           <span className="server-session-controls__trigger-label">
             {displayModelName(selectedModel, models)}
@@ -204,7 +234,16 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
             aria-label="服务器模型"
             {...presenceRootProps(modelPresence)}
           >
-            {models.map((model) => {
+            <input
+              className="server-session-controls__search"
+              type="search"
+              autoFocus
+              placeholder="搜索模型…"
+              aria-label="搜索模型"
+              value={modelQuery}
+              onChange={(event) => setModelQuery(event.target.value)}
+            />
+            {visibleModels.map((model) => {
               const active = model.providerID === selectedModel.providerID
                 && model.modelID === selectedModel.modelID;
               return (
@@ -223,6 +262,11 @@ export function ServerSessionControls(props: ServerSessionControlsProps) {
                 </button>
               );
             })}
+            {hiddenModelCount > 0 && (
+              <div className="server-session-controls__more">
+                还有 {hiddenModelCount} 个匹配，继续输入以筛选
+              </div>
+            )}
           </div>
         )}
       </span>

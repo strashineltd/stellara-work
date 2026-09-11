@@ -28,6 +28,28 @@ const AGENTS: ServerAgentSummary[] = [
   { name: 'plan', mode: 'primary' },
 ];
 
+const BULK_PROVIDERS: ServerProvidersResult = {
+  providers: [
+    {
+      id: 'alpha',
+      name: 'Alpha',
+      models: Array.from({ length: 150 }, (_, index) => ({
+        id: `alpha-model-${String(index).padStart(3, '0')}`,
+        name: `Alpha 模型 ${index}`,
+      })),
+    },
+    {
+      id: 'beta',
+      name: 'Beta',
+      models: Array.from({ length: 50 }, (_, index) => ({
+        id: `beta-model-${String(index).padStart(3, '0')}`,
+        name: `Beta 模型 ${index}`,
+      })),
+    },
+  ],
+  default: { providerID: 'alpha', modelID: 'alpha-model-000' },
+};
+
 function installApi(providers: ServerProvidersResult = PROVIDERS, agents: ServerAgentSummary[] = AGENTS) {
   const servers = {
     providers: vi.fn().mockResolvedValue(providers),
@@ -63,6 +85,19 @@ function fireTransitionEnd(element: Element | null) {
   });
 }
 
+function typeSearch(input: HTMLInputElement | null, value: string) {
+  if (!input) throw new Error('Search input not found');
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  act(() => {
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function optionCount(menu: HTMLElement | null): number {
+  return menu?.querySelectorAll('[role="option"]').length ?? 0;
+}
+
 function menuItem(menu: HTMLElement | null, text: string): HTMLButtonElement {
   const item = Array.from(
     menu?.querySelectorAll<HTMLButtonElement>('.server-session-controls__item') ?? [],
@@ -96,6 +131,8 @@ async function renderControls(overrides: Partial<React.ComponentProps<typeof Ser
       });
     },
     model: () => container.querySelector<HTMLButtonElement>('.server-session-controls__model'),
+    searchInput: () =>
+      container.querySelector<HTMLInputElement>('.server-session-controls__search'),
     agent: () => container.querySelector<HTMLButtonElement>('.server-session-controls__agent'),
     modelMenu: () =>
       container.querySelector<HTMLElement>('[role="listbox"][aria-label="服务器模型"]'),
@@ -211,6 +248,56 @@ describe('ServerSessionControls', () => {
 
     expect(onChange).toHaveBeenCalledWith({ providerID: 'p1', modelID: 'm1', agent: 'build' });
     expect(model()?.getAttribute('aria-expanded')).toBe('false');
+    unmount();
+  });
+
+  it('caps a large model menu at 60 options and shows a remaining-match hint', async () => {
+    installApi(BULK_PROVIDERS);
+    const { modelMenu, openModelMenu, searchInput, unmount } = await renderControls();
+
+    openModelMenu();
+    const menu = modelMenu();
+    expect(menu).not.toBeNull();
+    expect(searchInput()?.getAttribute('placeholder')).toBe('搜索模型…');
+    expect(document.activeElement).toBe(searchInput());
+    expect(optionCount(menu)).toBeLessThanOrEqual(60);
+    expect(menu!.querySelector('.server-session-controls__more')?.textContent).toContain('还有 140 个匹配');
+    unmount();
+  });
+
+  it('filters models case-insensitively and updates the remaining-match hint', async () => {
+    installApi(BULK_PROVIDERS);
+    const { modelMenu, openModelMenu, searchInput, unmount } = await renderControls();
+
+    openModelMenu();
+    typeSearch(searchInput(), 'BETA');
+    expect(optionCount(modelMenu())).toBe(50);
+    expect(modelMenu()?.querySelector('.server-session-controls__more')).toBeNull();
+
+    typeSearch(searchInput(), 'ALPHA');
+    expect(optionCount(modelMenu())).toBe(60);
+    expect(modelMenu()?.querySelector('.server-session-controls__more')?.textContent)
+      .toContain('还有 90 个匹配');
+
+    typeSearch(searchInput(), 'alpha-model-149');
+    expect(optionCount(modelMenu())).toBe(1);
+    expect(modelMenu()?.textContent).toContain('Alpha 模型 149');
+    unmount();
+  });
+
+  it('reports the selected model from filtered results', async () => {
+    installApi(BULK_PROVIDERS);
+    const { modelMenu, onChange, openModelMenu, searchInput, unmount } = await renderControls();
+
+    openModelMenu();
+    typeSearch(searchInput(), 'beta-model-042');
+    fireClick(menuItem(modelMenu(), 'Beta 模型 42'));
+
+    expect(onChange).toHaveBeenCalledWith({
+      providerID: 'beta',
+      modelID: 'beta-model-042',
+      agent: 'build',
+    });
     unmount();
   });
 
