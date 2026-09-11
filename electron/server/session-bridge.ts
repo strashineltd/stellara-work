@@ -151,9 +151,11 @@ export class SessionBridge {
     if (!session) return;
 
     if (session.runtime === 'server') {
-      const client = this.requireClient(session.serverId);
-      if (!session.remoteSessionId) throw new Error('会话缺少远端映射');
-      await client.deleteSession(session.remoteSessionId);
+      const client = this.connectedClient(session.serverId);
+      if (client) {
+        if (!session.remoteSessionId) throw new Error('会话缺少远端映射');
+        await client.deleteSession(session.remoteSessionId);
+      }
     }
 
     this.db.deleteSession(id);
@@ -164,9 +166,11 @@ export class SessionBridge {
     if (!session) throw new Error(`Session 不存在: ${id}`);
 
     if (session.runtime === 'server') {
-      const client = this.requireClient(session.serverId);
-      if (!session.remoteSessionId) throw new Error('会话缺少远端映射');
-      await client.updateSession(session.remoteSessionId, title);
+      const client = this.connectedClient(session.serverId);
+      if (client) {
+        if (!session.remoteSessionId) throw new Error('会话缺少远端映射');
+        await client.updateSession(session.remoteSessionId, title);
+      }
     }
 
     this.db.renameSession(id, title);
@@ -193,15 +197,17 @@ export class SessionBridge {
     this.db.deleteSessionByRemote(serverId, remoteSessionId);
   }
 
+  private connectedClient(serverId: string | undefined): OpencodeClient | null {
+    if (!serverId) return null;
+    const status = this.manager.statuses().find((entry) => entry.id === serverId);
+    if (status?.status !== 'connected') return null;
+    return this.manager.getClient(serverId);
+  }
+
   private requireClient(serverId: string | undefined): OpencodeClient {
-    if (serverId) {
-      const status = this.manager.statuses().find((entry) => entry.id === serverId);
-      if (status?.status === 'connected') {
-        const client = this.manager.getClient(serverId);
-        if (client) return client;
-      }
-    }
-    throw new Error(SERVER_NOT_CONNECTED);
+    const client = this.connectedClient(serverId);
+    if (!client) throw new Error(SERVER_NOT_CONNECTED);
+    return client;
   }
 
   private upsertRemoteRow(serverId: string, remoteId: string, remote: RemoteSession): void {

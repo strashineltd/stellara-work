@@ -425,6 +425,49 @@ describe('Sidebar', () => {
     expect(Array.from(view.querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'))).toEqual(['local']);
   });
 
+  it('renders configured servers with no sessions as empty groups before 未知服务器', () => {
+    const ghost: SessionSummary = {
+      id: 'ghost', title: '已删除服务器的会话', modelId: 'deepseek', messageCount: 1, updatedAt: 10, runtime: 'server', serverId: 'srv-deleted',
+    };
+    const view = render(
+      <Sidebar
+        sessions={[ghost]}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+        servers={SERVERS}
+        serverStatuses={SERVER_STATUSES}
+      />,
+    );
+
+    const groups = view.querySelectorAll('.sidebar-server-group');
+    expect(groups.length).toBe(3);
+    const empty = view.querySelector('.sidebar-server-group[data-server-id="srv-1"]')!;
+    expect(empty.textContent).toContain('本地服务器');
+    expect(empty.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('connected');
+    expect(empty.textContent).not.toContain('离线');
+    expect(empty.querySelectorAll('.session-row').length).toBe(0);
+    expect(empty.querySelector('.session-empty')?.textContent).toBe('暂无会话');
+    const offlineEmpty = view.querySelector('.sidebar-server-group[data-server-id="srv-2"]')!;
+    expect(offlineEmpty.textContent).toContain('远程开发机');
+    expect(offlineEmpty.textContent).toContain('离线');
+    expect(offlineEmpty.querySelector('.session-empty')?.textContent).toBe('暂无会话');
+    const unknown = view.getByText('未知服务器')?.closest('.sidebar-server-group') as HTMLElement;
+    expect(unknown?.querySelector('[data-session-id="ghost"]')).toBeTruthy();
+    expect(empty.compareDocumentPosition(unknown) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('renders no server groups when no servers are configured', () => {
+    const view = render(
+      <Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />,
+    );
+    expect(view.querySelectorAll('.sidebar-server-group').length).toBe(0);
+  });
+
   it('prefers live status over session.offline and falls back to it when status is missing', () => {
     const sessions: SessionSummary[] = [
       { id: 'live', title: '状态优先', modelId: 'deepseek', messageCount: 1, updatedAt: 10, runtime: 'server', serverId: 'srv-1', offline: true },

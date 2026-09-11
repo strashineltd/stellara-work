@@ -251,8 +251,7 @@ export function Sidebar({
     const knownServerIds = new Set(serverList.map((server) => server.id));
     const nextServerGroups: ServerGroup[] = [];
     for (const server of serverList) {
-      const groupSessions = serverMap.get(server.id);
-      if (!groupSessions) continue;
+      const groupSessions = serverMap.get(server.id) ?? [];
       nextServerGroups.push(buildServerGroup(groupSessions, {
         serverId: server.id,
         name: server.name,
@@ -916,6 +915,9 @@ export function Sidebar({
             {group.offline && <span className="server-offline-badge">离线</span>}
           </h2>
           <ul className="session-list">
+            {group.sessions.length === 0 && (
+              <li className="session-empty">暂无会话</li>
+            )}
             {group.sessions.map(renderSession)}
           </ul>
         </section>

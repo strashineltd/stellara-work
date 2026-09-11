@@ -200,6 +200,22 @@ describe('SessionBridge', () => {
     expect(db.rows.has('l1')).toBe(false);
   });
 
+  it('deletes the local mapping row when the server is offline', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await expect(bridge.remove('l1')).resolves.toBeUndefined();
+    expect(db.rows.has('l1')).toBe(false);
+  });
+
+  it('deletes the local mapping row when the server is unknown', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-deleted', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await expect(bridge.remove('l1')).resolves.toBeUndefined();
+    expect(db.rows.has('l1')).toBe(false);
+  });
+
   it('removes local sessions from the database', async () => {
     const db = makeDb();
     db.createSession({ id: 'l1', title: 'X', modelId: 'm1', runtime: 'local' });
@@ -215,6 +231,14 @@ describe('SessionBridge', () => {
     const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'u1' });
     await bridge.rename('l1', '新');
     expect(client.updateSession).toHaveBeenCalledWith('ses_1', '新');
+    expect(db.rows.get('l1')).toMatchObject({ title: '新' });
+  });
+
+  it('renames an offline server session locally', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'l1', title: '旧', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    await bridge.rename('l1', '新');
     expect(db.rows.get('l1')).toMatchObject({ title: '新' });
   });
 
