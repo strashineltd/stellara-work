@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
-  AppInfo, ApprovalRequest, AttachmentMeta, ConfiguredModel, ModelListItem,
+  AppInfo, ApprovalRequest, AttachmentMeta, ChatRequest, ConfiguredModel, ModelListItem,
   SessionSummary, Session, SkillDef, Project, ContextStateView, ChatStreamEvent,
 } from '../../shared/ipc';
 import {
@@ -126,6 +126,8 @@ export function MainView(props: MainViewProps) {
   const activeSection: AppSection = nav.current.section;
   const { servers, statuses, refresh: refreshServers } = useServers();
   const [executionTarget, setExecutionTarget] = useState<ExecutionTarget>({ kind: 'local' });
+  // 每会话服务器模型/Agent 选择由 Task 6 接入；当前映射恒为空，发送时透传 undefined 给主进程
+  const [serverSelections] = useState<Record<string, { providerID: string; modelID: string; agent?: string }>>({});
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -522,7 +524,10 @@ export function MainView(props: MainViewProps) {
 
   async function handleSend(returnFocus?: HTMLElement | null) {
     if (!input.trim() || busy) return;
-    if (!config) {
+    const activeServerSession = activeSession?.runtime === 'server';
+    // 服务器会话（或服务器目标下尚无会话）不要求本地模型配置
+    const serverMode = activeServerSession || (!activeSession && executionTarget.kind === 'server');
+    if (!config && !serverMode) {
       appendLocalError('请先配置模型后再发送任务。');
       onOpenSettings(undefined, returnFocus ?? document.querySelector<HTMLButtonElement>('.no-model-banner__btn--settings'));
       return;
@@ -544,7 +549,7 @@ export function MainView(props: MainViewProps) {
     setBrowserEvents([]);
     setBrowserPanelOpen(false);
     browserPanelDismissedRef.current = false;
-    if (attachments.length > 0 && !activeWorkDir) {
+    if (attachments.length > 0 && !activeWorkDir && !activeServerSession) {
       appendLocalError('请先创建项目或设置工作目录，再发送附件。');
       return;
     }
@@ -553,6 +558,15 @@ export function MainView(props: MainViewProps) {
     const history = [...buildHistory(entries), { role: 'user' as const, content: userContent, attachments: sentAttachments }];
     const usePlanMode = planMode;
     setLastUserForRetry(null);
+    // 服务器会话：Task 6 写入每会话选择；当前为空映射，主进程用服务器默认模型
+    const serverOverrides: Pick<ChatRequest, 'serverModel' | 'serverAgent'> = {};
+    if (activeServerSession && activeSessionId) {
+      const selection = serverSelections[activeSessionId];
+      if (selection) {
+        serverOverrides.serverModel = { providerID: selection.providerID, modelID: selection.modelID };
+        if (selection.agent) serverOverrides.serverAgent = selection.agent;
+      }
+    }
 
     const userKey = nextLiveKey();
     const assistantKey = nextLiveKey();
@@ -575,6 +589,7 @@ export function MainView(props: MainViewProps) {
         planMode: usePlanMode,
         attachments: sentAttachments,
         activeSkillName: activeSkill?.name,
+        ...serverOverrides,
       });
       setStreamId(result.streamId);
       // 技能只对本次请求生效，发送成功后清除
@@ -896,7 +911,18 @@ export function MainView(props: MainViewProps) {
 
   // ---- Session CRUD ----
   function handleNewSession(projectId?: string, returnFocus?: HTMLElement | null): true | void {
-    if (busy || !config) return;
+    if (busy) return;
+    if (executionTarget.kind === 'server') {
+      // 服务器会话不要求本地模型/项目，远端使用服务器工作目录
+      void window.electronAPI.sessions.create({ runtime: 'server', serverId: executionTarget.serverId })
+        .then((session) => {
+          onSessionCreated(session);
+          navigateToSection('tasks', session.id);
+        })
+        .catch((error) => console.error('New session failed:', error));
+      return;
+    }
+    if (!config) return;
     const targetProjectId = projectId ?? activeSession?.projectId;
     if (!targetProjectId) {
       navigateToSection('home');
@@ -1141,7 +1167,12 @@ export function MainView(props: MainViewProps) {
               attachments={attachments}
               hasWorkDir={!!activeWorkDir}
               approvalMode={approvalMode}
-              modelMissing={!config}
+              modelMissing={!config && executionTarget.kind !== 'server'}
+              serverTarget={
+                executionTarget.kind === 'server'
+                  ? { name: servers.find((server) => server.id === executionTarget.serverId)?.name ?? '服务器' }
+                  : null
+              }
               onOpenSettings={() => onOpenSettings()}
               onInputChange={setInput}
               onAttachmentsChange={setAttachments}

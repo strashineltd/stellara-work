@@ -4,7 +4,7 @@ import { act, useState } from 'react';
 import { MainView } from './MainView';
 import { captureFocusTarget, restoreFocusTarget } from '../lib/presence-ui';
 import type {
-  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerEntry, ServerStatusEntry, SessionSummary,
+  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerEntry, ServerStatusEntry, Session, SessionSummary,
 } from '../../shared/ipc';
 
 const CONFIG: ConfiguredModel = {
@@ -2398,15 +2398,26 @@ describe('MainView execution target selector', () => {
       connect: vi.fn().mockResolvedValue({ id: 'srv-2', status: 'connecting' } as ServerStatusEntry),
       onStatusChanged: vi.fn().mockReturnValue(() => {}),
     };
+    const sessions = {
+      get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      list: vi.fn().mockResolvedValue([]),
+      saveMessages: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        id: 'srv-new',
+        title: 'New session',
+        modelId: '',
+        createdAt: 0,
+        updatedAt: 0,
+        messageCount: 0,
+        runtime: 'server',
+        serverId: 'srv-1',
+      } as Session),
+    };
     let settingsCb: (() => void) | null = null;
     (window as any).electronAPI = {
       models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
-      sessions: {
-        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
-        delete: vi.fn().mockResolvedValue(undefined),
-        list: vi.fn().mockResolvedValue([]),
-        saveMessages: vi.fn().mockResolvedValue(undefined),
-      },
+      sessions,
       chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
       skills: { list: vi.fn().mockResolvedValue([]) },
       memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
@@ -2423,6 +2434,7 @@ describe('MainView execution target selector', () => {
     };
     return {
       servers,
+      sessions,
       setServers: (next: ServerEntry[]) => {
         serverList = next;
       },
@@ -2503,6 +2515,76 @@ describe('MainView execution target selector', () => {
     fireClick(querySelector('.server-target__manage'));
 
     expect(onOpenSettings).toHaveBeenCalledWith('servers');
+    unmount();
+  });
+
+  it('creates a server session from 新对话 without a local model config', async () => {
+    const api = installApi();
+    const onSessionCreated = vi.fn();
+    const { querySelector, unmount } = await renderMainView({ config: null, projects: [], onSessionCreated });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+    fireClick(querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).toHaveBeenCalledWith({ runtime: 'server', serverId: 'srv-1' });
+    expect(onSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: 'srv-new', runtime: 'server' }));
+    unmount();
+  });
+
+  it('sends to the active server session by its local mapping id without a local model config', async () => {
+    const api = installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const serverSession: SessionSummary = {
+      id: 'a',
+      title: '服务器会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 0,
+      runtime: 'server',
+      serverId: 'srv-1',
+    };
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession],
+      activeSessionId: 'a',
+    });
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '服务器任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+
+    expect(chatStart).toHaveBeenCalledTimes(1);
+    const request = chatStart.mock.calls[0]![0];
+    expect(request.sessionId).toBe('a');
+    expect(request.serverModel).toBeUndefined();
+    expect(request.serverAgent).toBeUndefined();
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('shows the selected server chip on the home composer instead of the project chip', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      activeSessionId: null,
+      projects: [{ id: 'p1', name: '现有项目', updatedAt: 1, sessionCount: 0 }],
+      sessions: [],
+    });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+
+    expect(querySelector('.home-composer__target')?.textContent).toContain('本地服务器');
+    expect(querySelector('.home-composer__project')).toBeNull();
     unmount();
   });
 });

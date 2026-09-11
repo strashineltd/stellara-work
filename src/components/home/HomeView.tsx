@@ -18,6 +18,7 @@ interface HomeViewProps {
   modelMissing?: boolean;
   modelControl?: ReactNode;
   projectControl?: ReactNode;
+  serverTarget?: { name: string } | null;
   onOpenSettings?: () => void;
   onInputChange: (value: string) => void;
   onAttachmentsChange: (next: AttachmentMeta[]) => void;
@@ -59,6 +60,7 @@ export function HomeView(props: HomeViewProps) {
         attachments={props.attachments}
         hasWorkDir={props.hasWorkDir}
         projectName={activeProject?.name}
+        serverTarget={props.serverTarget}
         branch={props.branch}
         approvalMode={props.approvalMode}
         modelControl={props.modelControl}
