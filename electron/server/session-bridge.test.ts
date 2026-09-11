@@ -12,8 +12,13 @@ function makeDb() {
       rows.set(input.id as string, row);
       return row;
     },
-    findSessionByRemote: (_sid: string, remote: string) => [...rows.values()].find((r) => r.remoteSessionId === remote),
+    findSessionByRemote: (sid: string, remote: string) => [...rows.values()].find((r) => r.serverId === sid && r.remoteSessionId === remote),
+    findSessionByRemoteId: (remote: string) =>
+      [...rows.values()]
+        .filter((r) => r.runtime === 'server' && r.remoteSessionId === remote)
+        .sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number))[0],
     listServerSessions: (sid: string) => [...rows.values()].filter((r) => r.serverId === sid),
+    reassignServerSession: (id: string, sid: string) => { rows.set(id, { ...rows.get(id)!, serverId: sid }); },
     deleteSession: (id: string) => { rows.delete(id); },
     deleteSessionByRemote: (sid: string, remote: string) => {
       const row = [...rows.values()].find((r) => r.serverId === sid && r.remoteSessionId === remote);
@@ -27,10 +32,10 @@ function makeDb() {
   };
 }
 
-function makeManager(client: Record<string, unknown> | null, status = 'connected') {
+function makeManager(client: Record<string, unknown> | null, status = 'connected', serverId = 'srv-1') {
   return {
     list: async () => [],
-    statuses: () => [{ id: 'srv-1', status }],
+    statuses: () => [{ id: serverId, status }],
     getClient: () => client,
     onEvent: () => () => {},
   };
@@ -159,6 +164,55 @@ describe('SessionBridge', () => {
     expect(list.find((s) => s.id === 'map')).toMatchObject({
       title: '新', updatedAt: 300, runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1',
     });
+  });
+
+  it('re-homes an orphaned mapping row when the server is re-added with a new id', async () => {
+    const db = makeDb();
+    db.createSession({
+      id: 'orphan', title: '旧标题', modelId: 'old/model', runtime: 'server',
+      serverId: 'srv-old', remoteSessionId: 'ses_X',
+    });
+    const client = {
+      listSessions: vi.fn(async () => [{
+        id: 'ses_X', title: '新标题', time: { created: 1, updated: 500 },
+        model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      }]),
+    };
+    const bridge = new SessionBridge({ manager: makeManager(client as never, 'connected', 'srv-new') as never, db: db as never, uuid: () => 'duplicate' });
+    const list = await bridge.list();
+    expect(db.rows.size).toBe(1);
+    expect(db.rows.has('duplicate')).toBe(false);
+    expect(db.rows.get('orphan')).toMatchObject({
+      serverId: 'srv-new', remoteSessionId: 'ses_X', title: '新标题', updatedAt: 500,
+      modelId: 'anthropic/claude-sonnet-4',
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'orphan', runtime: 'server', serverId: 'srv-new', title: '新标题' });
+  });
+
+  it('keeps refreshing the mapping row already owned by the server', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'own', title: '旧', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const client = { listSessions: vi.fn(async () => [{ ...remoteSession, title: '新' }]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'duplicate' });
+    const list = await bridge.list();
+    expect(db.rows.size).toBe(1);
+    expect(db.rows.has('duplicate')).toBe(false);
+    expect(list[0]).toMatchObject({ id: 'own', title: '新', serverId: 'srv-1' });
+  });
+
+  it('leaves orphaned rows whose remote id is absent untouched during list', async () => {
+    const db = makeDb();
+    db.createSession({
+      id: 'orphan', title: '孤儿', modelId: '', runtime: 'server',
+      serverId: 'srv-old', remoteSessionId: 'ses_orphan',
+    });
+    const client = { listSessions: vi.fn(async () => [{ id: 'ses_other', title: '在', time: { created: 1, updated: 2 } }]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never, 'connected', 'srv-new') as never, db: db as never, uuid: () => 'fresh' });
+    const list = await bridge.list();
+    expect(db.rows.get('orphan')).toMatchObject({ serverId: 'srv-old', remoteSessionId: 'ses_orphan' });
+    expect(db.rows.get('fresh')).toMatchObject({ serverId: 'srv-new', remoteSessionId: 'ses_other' });
+    expect(list).toHaveLength(2);
   });
 
   it('creates local sessions through the local path', async () => {

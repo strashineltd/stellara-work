@@ -333,6 +333,19 @@ export function findSessionByRemote(serverId: string, remoteSessionId: string): 
   return row ? rowToSession(row) : undefined;
 }
 
+/** 按远端会话 ID 查找映射行（不限 server_id），用于认领服务器重建后的孤儿映射。 */
+export function findSessionByRemoteId(remoteSessionId: string): Session | undefined {
+  const row = getDb()
+    .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? ORDER BY updated_at DESC LIMIT 1")
+    .get(remoteSessionId) as Record<string, unknown> | undefined;
+  return row ? rowToSession(row) : undefined;
+}
+
+/** 把映射行改挂到另一个服务器（不改变远端会话 ID）。 */
+export function reassignServerSession(id: string, serverId: string): void {
+  getDb().prepare('UPDATE sessions SET server_id = ? WHERE id = ?').run(serverId, id);
+}
+
 export function listServerSessions(serverId: string): Session[] {
   const rows = getDb()
     .prepare('SELECT * FROM sessions WHERE server_id = ? ORDER BY updated_at DESC')

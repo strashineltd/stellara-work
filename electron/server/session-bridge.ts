@@ -32,6 +32,8 @@ export interface SessionBridgeDb {
     remoteSessionId?: string;
   }): Session;
   findSessionByRemote(serverId: string, remoteSessionId: string): Session | undefined;
+  findSessionByRemoteId(remoteSessionId: string): Session | undefined;
+  reassignServerSession(id: string, serverId: string): void;
   listServerSessions(serverId: string): Session[];
   deleteSession(id: string): void;
   deleteSessionByRemote(serverId: string, remoteSessionId: string): void;
@@ -56,6 +58,18 @@ export interface RemoteSessionUpdate {
 
 const REMOTE_FALLBACK_TITLE = '远端会话';
 const SERVER_NOT_CONNECTED = '服务器未连接';
+
+/** 从远端列表会话里解析 `provider/model`（字段宽容处理）。 */
+function readRemoteModelId(remote: RemoteSession): string | undefined {
+  const model = remote.model;
+  if (typeof model !== 'object' || model === null) return undefined;
+  const providerID = (model as { providerID?: unknown }).providerID;
+  const id = (model as { id?: unknown }).id;
+  if (typeof providerID === 'string' && providerID !== '' && typeof id === 'string' && id !== '') {
+    return `${providerID}/${id}`;
+  }
+  return undefined;
+}
 
 export class SessionBridge {
   private readonly manager: SessionBridgeManager;
@@ -218,6 +232,15 @@ export class SessionBridge {
 
     if (existing) {
       this.db.updateSessionMeta(existing.id, patch);
+      return;
+    }
+
+    // 服务器删除后重建会换 server_id：按远端会话 ID 认领孤儿映射行，避免生成重复行。
+    const orphan = this.db.findSessionByRemoteId(remoteId);
+    if (orphan) {
+      this.db.reassignServerSession(orphan.id, serverId);
+      const modelId = readRemoteModelId(remote);
+      this.db.updateSessionMeta(orphan.id, modelId !== undefined ? { ...patch, modelId } : patch);
       return;
     }
 
