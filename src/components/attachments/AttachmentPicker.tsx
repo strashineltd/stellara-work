@@ -11,6 +11,8 @@ interface AttachmentPickerProps {
   /** 拖拽提取出的文件路径（父组件负责转成附件元数据） */
   onAddPaths?: (paths: string[]) => void;
   disabled?: boolean;
+  /** 禁用原因（如「服务器会话暂不支持附件」）：按钮 title 与内联提示都用它 */
+  disabledHint?: string;
 }
 
 /**
@@ -22,6 +24,7 @@ export function AttachmentPicker({
   onPick,
   onAddPaths,
   disabled,
+  disabledHint,
 }: AttachmentPickerProps) {
   const [dropActive, setDropActive] = useState(false);
 
@@ -61,13 +64,16 @@ export function AttachmentPicker({
       <button
         className="attach-btn"
         type="button"
-        title="添加附件（也可拖拽文件到此处）"
+        title={disabled && disabledHint ? disabledHint : '添加附件（也可拖拽文件到此处）'}
         aria-label="添加附件"
         onClick={() => onPick?.()}
         disabled={disabled}
       >
         <Icon name="paperclip" size={14} />
       </button>
+      {disabled && disabledHint && (
+        <span className="hint attach-hint" role="status">{disabledHint}</span>
+      )}
       {attachments.length > 0 && (
         <div className="attach-chips">
           {attachments.map((a) => (

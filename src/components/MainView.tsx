@@ -549,7 +549,11 @@ export function MainView(props: MainViewProps) {
     setBrowserEvents([]);
     setBrowserPanelOpen(false);
     browserPanelDismissedRef.current = false;
-    if (attachments.length > 0 && !activeWorkDir && !activeServerSession) {
+    if (activeServerSession && attachments.length > 0) {
+      appendLocalError('服务器会话暂不支持附件');
+      return;
+    }
+    if (attachments.length > 0 && !activeWorkDir) {
       appendLocalError('请先创建项目或设置工作目录，再发送附件。');
       return;
     }

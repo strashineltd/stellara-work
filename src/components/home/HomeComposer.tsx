@@ -69,7 +69,8 @@ export function HomeComposer(props: HomeComposerProps) {
           onAttachmentsChange={props.onAttachmentsChange}
           onPick={props.onPickAttachments}
           onAddPaths={props.onAddPaths}
-          disabled={props.busy || (!props.hasWorkDir && !props.serverTarget)}
+          disabled={props.busy || !props.hasWorkDir || !!props.serverTarget}
+          disabledHint={props.serverTarget ? '服务器会话暂不支持附件' : undefined}
         />
         <ApprovalModeMenu mode={props.approvalMode} onModeChange={props.onApprovalModeChange} disabled={props.busy} />
         {props.modelControl}

@@ -2429,6 +2429,17 @@ describe('MainView execution target selector', () => {
         getGitBranch: vi.fn().mockResolvedValue(null),
       },
       fs: { listTree: vi.fn().mockResolvedValue(null) },
+      dialog: {
+        getPathForFile: vi.fn((file: File) => `/tmp/${file.name}`),
+        openAttachmentFiles: vi.fn().mockResolvedValue([]),
+      },
+      attachments: {
+        add: vi.fn().mockResolvedValue({
+          attachments: [
+            { id: 'att-1', name: '需求文档.md', size: 2048, mimeType: 'text/markdown', kind: 'file', relPath: 'a/att-1' },
+          ],
+        }),
+      },
       servers,
       settings: { get: vi.fn().mockResolvedValue({ defaultServerId: options.defaultServerId ?? null }) },
     };
@@ -2585,6 +2596,54 @@ describe('MainView execution target selector', () => {
 
     expect(querySelector('.home-composer__target')?.textContent).toContain('本地服务器');
     expect(querySelector('.home-composer__project')).toBeNull();
+    expect(querySelector('.attach-btn')?.hasAttribute('disabled')).toBe(true);
+    expect(querySelector('.home-composer')?.textContent).toContain('服务器会话暂不支持附件');
+    unmount();
+  });
+
+  it('blocks sending attachments to a server session with a clear error', async () => {
+    const api = installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const serverSession: SessionSummary = {
+      id: 'a',
+      title: '服务器会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 0,
+      runtime: 'server',
+      serverId: 'srv-1',
+    };
+    const { querySelector, querySelectorAll, container, unmount } = await renderMainView({
+      config: { ...CONFIG, workDir: 'D:/proj' },
+      sessions: [serverSession],
+      activeSessionId: 'a',
+    });
+
+    const picker = querySelector('.attach-picker')!;
+    const file = new File(['x'], 'design.png');
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
+    act(() => {
+      picker.dispatchEvent(drop);
+    });
+    await act(async () => {});
+    expect(querySelectorAll('.attach-chip').length).toBe(1);
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '服务器任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+
+    expect(chatStart).not.toHaveBeenCalled();
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('服务器会话暂不支持附件');
     unmount();
   });
 

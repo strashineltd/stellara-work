@@ -105,11 +105,28 @@ describe('HomeView', () => {
     unmount();
   });
 
-  it('does not gate the attachment picker on a local workDir in server mode', () => {
+  it('disables the attachment picker and shows the unsupported hint in server mode', () => {
     const { container, unmount } = render(
       <HomeView {...BASE_PROPS} hasWorkDir={false} serverTarget={{ name: '本地服务器' }} />,
     );
+    expect(container.querySelector<HTMLButtonElement>('.attach-btn')?.disabled).toBe(true);
+    expect(container.textContent).toContain('服务器会话暂不支持附件');
+    unmount();
+  });
+
+  it('keeps the attachment picker disabled in server mode even with a local work dir', () => {
+    const { container, unmount } = render(
+      <HomeView {...BASE_PROPS} hasWorkDir serverTarget={{ name: '本地服务器' }} />,
+    );
+    expect(container.querySelector<HTMLButtonElement>('.attach-btn')?.disabled).toBe(true);
+    expect(container.textContent).toContain('服务器会话暂不支持附件');
+    unmount();
+  });
+
+  it('leaves the attachment picker and hint untouched for a local target', () => {
+    const { container, unmount } = render(<HomeView {...BASE_PROPS} serverTarget={null} />);
     expect(container.querySelector<HTMLButtonElement>('.attach-btn')?.disabled).toBe(false);
+    expect(container.textContent).not.toContain('服务器会话暂不支持附件');
     unmount();
   });
 
