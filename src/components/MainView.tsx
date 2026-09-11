@@ -12,7 +12,7 @@ import {
 } from '../lib/chat-utils';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useNavHistory } from '../hooks/useNavHistory';
-import { INITIAL_NAV, type AppSection, type ApprovalMode } from '../lib/navigation';
+import { INITIAL_NAV, type AppSection, type ApprovalMode, type ExecutionTarget } from '../lib/navigation';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
@@ -25,11 +25,13 @@ import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
 import { AppTopBar } from './shell/AppTopBar';
+import { ServerTargetSelector } from './shell/ServerTargetSelector';
 import { PlaceholderPage } from './shell/PlaceholderPage';
 import { CommandPalette } from './CommandPalette';
 import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
 import { type OpenSettings } from './SettingsPanel';
 import { useShortcuts } from '../hooks/useShortcuts';
+import { useServers } from '../hooks/useServers';
 import { usePresence } from '../hooks/usePresence';
 import { captureFocusTarget, presenceRootProps, restoreFocusTarget } from '../lib/presence-ui';
 
@@ -122,6 +124,8 @@ export function MainView(props: MainViewProps) {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const nav = useNavHistory(INITIAL_NAV);
   const activeSection: AppSection = nav.current.section;
+  const { servers, statuses, refresh: refreshServers } = useServers();
+  const [executionTarget, setExecutionTarget] = useState<ExecutionTarget>({ kind: 'local' });
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -832,11 +836,54 @@ export function MainView(props: MainViewProps) {
     });
   }
 
-  // 技能/MCP 等设置被其他窗口（设置窗口）修改 → 广播 settings-changed → 重载 slash 技能列表
+  // ---- Execution target ----
+  // settings.defaultServerId 未加载完为 undefined；据此区分「设置未到」与「无默认」
+  const [defaultServerId, setDefaultServerId] = useState<string | null | undefined>(undefined);
+  const defaultServerAppliedRef = useRef(false);
+  const serversSeenRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await window.electronAPI?.settings?.get?.();
+        if (!cancelled) setDefaultServerId(settings?.defaultServerId ?? null);
+      } catch {
+        if (!cancelled) setDefaultServerId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 挂载后：默认服务器指向已配置服务器 → 选中它（一次性）
+  useEffect(() => {
+    if (defaultServerAppliedRef.current) return;
+    if (defaultServerId === undefined) return;
+    if (servers.length === 0) return;
+    defaultServerAppliedRef.current = true;
+    if (defaultServerId && servers.some((server) => server.id === defaultServerId)) {
+      setExecutionTarget({ kind: 'server', serverId: defaultServerId });
+    }
+  }, [defaultServerId, servers]);
+
+  // 选中的服务器被删除 → 回退本地
+  useEffect(() => {
+    if (servers.length > 0) serversSeenRef.current = true;
+    if (executionTarget.kind !== 'server') return;
+    if (!serversSeenRef.current) return;
+    if (!servers.some((server) => server.id === executionTarget.serverId)) {
+      setExecutionTarget({ kind: 'local' });
+    }
+  }, [executionTarget, servers]);
+
+  // 技能/MCP 等设置被其他窗口（设置窗口）修改 → 广播 settings-changed → 重载 slash 技能列表与服务器
   useEffect(() => {
     return window.electronAPI.app.onSettingsChanged(() => {
       setSlash((s) => ({ ...s, skillsLoaded: false }));
       void handleLoadSkills();
+      refreshServers();
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -919,6 +966,16 @@ export function MainView(props: MainViewProps) {
         workspaceOpen={props.workspaceOpen}
         onToggleSidebar={onToggleSidebar}
         onToggleWorkspace={props.onToggleWorkspace}
+        executionTarget={
+          <ServerTargetSelector
+            servers={servers}
+            statuses={statuses}
+            value={executionTarget}
+            onChange={setExecutionTarget}
+            onManageServers={() => onOpenSettings('servers')}
+            onReconnect={(id) => void window.electronAPI.servers.connect(id)}
+          />
+        }
       />
 
       <div className="main-layout">

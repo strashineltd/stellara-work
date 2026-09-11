@@ -3,7 +3,9 @@ import { createRoot, Root } from 'react-dom/client';
 import { act, useState } from 'react';
 import { MainView } from './MainView';
 import { captureFocusTarget, restoreFocusTarget } from '../lib/presence-ui';
-import type { AppInfo, AttachmentMeta, ConfiguredModel, Project, SessionSummary } from '../../shared/ipc';
+import type {
+  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerEntry, ServerStatusEntry, SessionSummary,
+} from '../../shared/ipc';
 
 const CONFIG: ConfiguredModel = {
   id: 'deepseek-v4-pro', label: 'DeepSeek-v4-Pro', baseUrl: 'https://x', model: 'd', isCustom: false, hasKey: true,
@@ -2364,5 +2366,143 @@ describe('MainView browser panel', () => {
     expect(querySelector('.browser-tab')).toBeNull();
     stream.push({ type: 'done' });
     await act(async () => {});
+  });
+});
+
+describe('MainView execution target selector', () => {
+  const SERVER_A: ServerEntry = {
+    id: 'srv-1',
+    name: '本地服务器',
+    url: 'http://localhost:4096',
+    hasPassword: false,
+    isDefault: false,
+    createdAt: '2026-09-10T00:00:00Z',
+  };
+  const SERVER_B: ServerEntry = {
+    id: 'srv-2',
+    name: '远程开发机',
+    url: 'http://10.0.0.5:4096',
+    hasPassword: true,
+    isDefault: true,
+    createdAt: '2026-09-10T00:00:00Z',
+  };
+
+  function installApi(options: { defaultServerId?: string | null; servers?: ServerEntry[] } = {}) {
+    let serverList = options.servers ?? [SERVER_A, SERVER_B];
+    const servers = {
+      list: vi.fn().mockImplementation(() => Promise.resolve(serverList)),
+      status: vi.fn().mockResolvedValue([
+        { id: 'srv-1', status: 'connected' } as ServerStatusEntry,
+        { id: 'srv-2', status: 'error', error: '连接失败' } as ServerStatusEntry,
+      ]),
+      connect: vi.fn().mockResolvedValue({ id: 'srv-2', status: 'connecting' } as ServerStatusEntry),
+      onStatusChanged: vi.fn().mockReturnValue(() => {}),
+    };
+    let settingsCb: (() => void) | null = null;
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: {
+        onSettingsChanged: vi.fn((cb: () => void) => {
+          settingsCb = cb;
+          return () => {};
+        }),
+        getGitBranch: vi.fn().mockResolvedValue(null),
+      },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+      servers,
+      settings: { get: vi.fn().mockResolvedValue({ defaultServerId: options.defaultServerId ?? null }) },
+    };
+    return {
+      servers,
+      setServers: (next: ServerEntry[]) => {
+        serverList = next;
+      },
+      fireSettingsChanged: () => {
+        act(() => settingsCb?.());
+      },
+    };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+  });
+
+  it('renders the local execution target by default', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView();
+
+    const trigger = querySelector('.server-target__trigger');
+    expect(trigger?.textContent).toContain('本地');
+    expect(trigger?.getAttribute('data-status')).toBe('connected');
+    unmount();
+  });
+
+  it('selects the server from settings.defaultServerId after mount', async () => {
+    installApi({ defaultServerId: 'srv-2' });
+    const { querySelector, unmount } = await renderMainView();
+    await act(async () => {});
+
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('远程开发机');
+    expect(querySelector('.server-target__trigger')?.getAttribute('data-status')).toBe('error');
+    unmount();
+  });
+
+  it('switches the execution target from the topbar menu', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView();
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('本地服务器');
+    unmount();
+  });
+
+  it('falls back to local when the selected server disappears', async () => {
+    const api = installApi({ defaultServerId: 'srv-2' });
+    const { querySelector, unmount } = await renderMainView();
+    await act(async () => {});
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('远程开发机');
+
+    api.setServers([SERVER_A]);
+    api.fireSettingsChanged();
+    await act(async () => {});
+
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('本地');
+    unmount();
+  });
+
+  it('reconnects an errored server from the menu', async () => {
+    const api = installApi();
+    const { querySelector, unmount } = await renderMainView();
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__row[data-server-id="srv-2"] .server-target__reconnect'));
+
+    expect(api.servers.connect).toHaveBeenCalledWith('srv-2');
+    unmount();
+  });
+
+  it('opens the servers settings tab from 管理服务器…', async () => {
+    installApi();
+    const onOpenSettings = vi.fn();
+    const { querySelector, unmount } = await renderMainView({ onOpenSettings });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__manage'));
+
+    expect(onOpenSettings).toHaveBeenCalledWith('servers');
+    unmount();
   });
 });
