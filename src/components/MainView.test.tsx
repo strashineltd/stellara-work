@@ -2587,4 +2587,21 @@ describe('MainView execution target selector', () => {
     expect(querySelector('.home-composer__project')).toBeNull();
     unmount();
   });
+
+  it('hides the no-model banner on home when a server target is selected without a local config', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      activeSessionId: null,
+      projects: [],
+      sessions: [],
+      config: null,
+    });
+    expect(querySelector('.no-model-banner')).not.toBeNull();
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+
+    expect(querySelector('.no-model-banner')).toBeNull();
+    unmount();
+  });
 });
