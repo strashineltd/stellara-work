@@ -25,6 +25,9 @@ function installApi() {
     onSettingsChanged: vi.fn().mockReturnValue(() => {}),
     settingsGet: vi.fn().mockResolvedValue({ theme: 'light' }),
     getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
+    serversList: vi.fn().mockResolvedValue([]),
+    serversStatus: vi.fn().mockResolvedValue([]),
+    serversOnStatusChanged: vi.fn().mockReturnValue(() => {}),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
@@ -34,6 +37,11 @@ function installApi() {
       },
       settings: {
         get: mocks.settingsGet,
+      },
+      servers: {
+        list: mocks.serversList,
+        status: mocks.serversStatus,
+        onStatusChanged: mocks.serversOnStatusChanged,
       },
       models: {
         getAll: mocks.getAll,
@@ -99,13 +107,32 @@ describe('SettingsPanel', () => {
     document.body.replaceChildren();
   });
 
-  it('renders 7 nav tabs with the models panel by default', async () => {
+  it('renders 8 nav tabs with the models panel by default', async () => {
     const { container } = await render(<SettingsPanel onClose={vi.fn()} />);
 
     const items = container.querySelectorAll('.settings-nav__item');
-    expect(items.length).toBe(7);
+    expect(items.length).toBe(8);
+    const labels = Array.from(items).map((item) => item.textContent);
+    expect(labels).toContain('服务器');
+    expect(labels).toContain('账号');
     expect(container.querySelector('.settings-nav__item.active')?.textContent).toContain('模型');
     expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('模型');
+  });
+
+  it('mounts the servers panel when its nav tab is selected', async () => {
+    const { container } = await render(<SettingsPanel onClose={vi.fn()} />);
+
+    const serversTab = container.querySelector('.settings-nav__item[data-tab="servers"]');
+    expect(serversTab).toBeTruthy();
+    await act(async () => {
+      serversTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('.settings-nav__item.active')?.textContent).toContain('服务器');
+    expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('服务器');
+    expect(mocks.serversList).toHaveBeenCalledTimes(1);
+    expect(mocks.serversStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.serversOnStatusChanged).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to models tab for an invalid initialTab', async () => {

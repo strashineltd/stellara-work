@@ -48,6 +48,9 @@ export function getDb(): Database.Database {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       message_count INTEGER DEFAULT 0,
+      runtime TEXT NOT NULL DEFAULT 'local',
+      server_id TEXT,
+      remote_session_id TEXT,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS messages (
@@ -125,7 +128,18 @@ export function getDb(): Database.Database {
   if (!sessionColumns.some((column) => column.name === 'project_id')) {
     _db.exec('ALTER TABLE sessions ADD COLUMN project_id TEXT');
   }
+  // 运行端字段（v0.9.3）：local 为默认，server 行记录服务器与远端会话映射
+  if (!sessionColumns.some((column) => column.name === 'runtime')) {
+    _db.exec("ALTER TABLE sessions ADD COLUMN runtime TEXT NOT NULL DEFAULT 'local'");
+  }
+  if (!sessionColumns.some((column) => column.name === 'server_id')) {
+    _db.exec('ALTER TABLE sessions ADD COLUMN server_id TEXT');
+  }
+  if (!sessionColumns.some((column) => column.name === 'remote_session_id')) {
+    _db.exec('ALTER TABLE sessions ADD COLUMN remote_session_id TEXT');
+  }
   _db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)');
+  _db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_server ON sessions(server_id)');
 
   const projectColumns = _db
     .prepare('PRAGMA table_info(projects)')
@@ -171,6 +185,9 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  runtime: 'local' | 'server';
+  serverId?: string;
+  remoteSessionId?: string;
 }
 
 export interface Project {
@@ -201,12 +218,15 @@ function rowToSession(row: Record<string, unknown>): Session {
   return {
     id: row.id as string,
     title: row.title as string,
-    modelId: row.model_id as string,
+    modelId: (row.model_id as string | null) ?? '',
     workDir: (row.work_dir as string | null) ?? undefined,
     projectId: (row.project_id as string | null) ?? undefined,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
-    messageCount: row.message_count as number,
+    messageCount: (row.message_count as number | null) ?? 0,
+    runtime: ((row.runtime as string | null) ?? 'local') === 'server' ? 'server' : 'local',
+    serverId: (row.server_id as string | null) ?? undefined,
+    remoteSessionId: (row.remote_session_id as string | null) ?? undefined,
   };
 }
 
@@ -271,14 +291,79 @@ export function getSession(id: string): Session | null {
   return row ? rowToSession(row) : null;
 }
 
-export function createSession(s: { id: string; title: string; modelId: string; workDir?: string; projectId?: string }): Session {
+export function createSession(s: {
+  id: string;
+  title: string;
+  modelId: string;
+  workDir?: string;
+  projectId?: string;
+  runtime?: 'local' | 'server';
+  serverId?: string;
+  remoteSessionId?: string;
+}): Session {
   const now = Date.now();
+  const runtime = s.runtime === 'server' ? 'server' : 'local';
   getDb()
     .prepare(
-      'INSERT INTO sessions (id, title, model_id, work_dir, project_id, created_at, updated_at, message_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
+      'INSERT INTO sessions (id, title, model_id, work_dir, project_id, created_at, updated_at, message_count, runtime, server_id, remote_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
     )
-    .run(s.id, s.title, s.modelId, s.workDir ?? null, s.projectId ?? null, now, now);
-  return { ...s, createdAt: now, updatedAt: now, messageCount: 0 };
+    .run(
+      s.id, s.title, s.modelId, s.workDir ?? null, s.projectId ?? null, now, now,
+      runtime, s.serverId ?? null, s.remoteSessionId ?? null,
+    );
+  return {
+    id: s.id,
+    title: s.title,
+    modelId: s.modelId,
+    workDir: s.workDir,
+    projectId: s.projectId,
+    createdAt: now,
+    updatedAt: now,
+    messageCount: 0,
+    runtime,
+    serverId: s.serverId,
+    remoteSessionId: s.remoteSessionId,
+  };
+}
+
+export function findSessionByRemote(serverId: string, remoteSessionId: string): Session | undefined {
+  const row = getDb()
+    .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ?')
+    .get(serverId, remoteSessionId) as Record<string, unknown> | undefined;
+  return row ? rowToSession(row) : undefined;
+}
+
+export function listServerSessions(serverId: string): Session[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM sessions WHERE server_id = ? ORDER BY updated_at DESC')
+    .all(serverId) as Record<string, unknown>[];
+  return rows.map(rowToSession);
+}
+
+export function deleteSessionByRemote(serverId: string, remoteSessionId: string): void {
+  getDb()
+    .prepare('DELETE FROM sessions WHERE server_id = ? AND remote_session_id = ?')
+    .run(serverId, remoteSessionId);
+}
+
+export function updateSessionMeta(id: string, patch: { title?: string; updatedAt?: number; modelId?: string }): void {
+  const sets: string[] = [];
+  const params: Array<string | number> = [];
+  if (patch.title !== undefined) {
+    sets.push('title = ?');
+    params.push(patch.title);
+  }
+  if (patch.updatedAt !== undefined) {
+    sets.push('updated_at = ?');
+    params.push(patch.updatedAt);
+  }
+  if (patch.modelId !== undefined) {
+    sets.push('model_id = ?');
+    params.push(patch.modelId);
+  }
+  if (sets.length === 0) return;
+  params.push(id);
+  getDb().prepare(`UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 }
 
 export function deleteSession(id: string): void {

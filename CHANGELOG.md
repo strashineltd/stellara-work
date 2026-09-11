@@ -12,6 +12,9 @@ All notable changes to Stellara Work are documented here. Versions follow [Seman
 
 ### Added · 新增
 
+- **服务器连接**：设置 → 服务器支持添加/编辑/测试/设为默认与加密凭据
+- **服务器会话**：顶栏执行端切换，支持创建会话、流式对话、审批、模型与 Agent 切换
+- **侧栏服务器分组**：会话按服务器归类，离线显示徽标并支持重连
 - AI 浏览器 L3：观察窗实时画面（WebContentsView 嵌入，默认只读 + 接管交互，实时/快照双视图）
 - AI 浏览器 C3：浏览记忆 — 会话末将 web_search/browser_* 成果并入记忆提取（新增「网页」记忆类型，记忆中心可筛选）
 - AI 浏览器 C2：登录保留站点（允许列表 + 退出清理非列表站点 Cookie，设置面板维护）

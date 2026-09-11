@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type {
-  AppInfo, ApprovalRequest, AttachmentMeta, ConfiguredModel, ModelListItem,
+  AppInfo, ApprovalRequest, AttachmentMeta, ChatRequest, ConfiguredModel, ModelListItem,
   SessionSummary, Session, SkillDef, Project, ContextStateView, ChatStreamEvent,
 } from '../../shared/ipc';
 import {
@@ -12,24 +12,27 @@ import {
 } from '../lib/chat-utils';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useNavHistory } from '../hooks/useNavHistory';
-import { INITIAL_NAV, type AppSection, type ApprovalMode } from '../lib/navigation';
+import { INITIAL_NAV, type AppSection, type ApprovalMode, type ExecutionTarget } from '../lib/navigation';
 import { Sidebar } from './Sidebar';
 import { FileTreeModal } from './FileTreeModal';
 import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, type ContextStats, type SubagentInfo } from './WorkspacePanel';
 import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
 import { ModelSwitcher } from './chat/ModelSwitcher';
+import { ServerSessionControls } from './chat/ServerSessionControls';
 import { TabBar, type TabBarTab } from './chat/TabBar';
 import { HomeView } from './home/HomeView';
 import { ProjectDialog } from './ProjectDialog';
 import { MemoryCenter } from './memory/MemoryCenter';
 import { SidebarFileView } from './files/SidebarFileView';
 import { AppTopBar } from './shell/AppTopBar';
+import { ServerTargetSelector } from './shell/ServerTargetSelector';
 import { PlaceholderPage } from './shell/PlaceholderPage';
 import { CommandPalette } from './CommandPalette';
 import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
 import { type OpenSettings } from './SettingsPanel';
 import { useShortcuts } from '../hooks/useShortcuts';
+import { useServers } from '../hooks/useServers';
 import { usePresence } from '../hooks/usePresence';
 import { captureFocusTarget, presenceRootProps, restoreFocusTarget } from '../lib/presence-ui';
 
@@ -60,6 +63,14 @@ interface MainViewProps {
   onSessionsChanged: (sessions: SessionSummary[]) => void;
   onModelChanged: (config: ConfiguredModel) => void;
   onThemeChange?: (theme: import('../../shared/ipc').ThemeName) => void;
+}
+
+/** 服务器会话持久化的 modelId 形如 `providerID/modelID`；无法解析时返回 null（主进程回退服务器默认）。 */
+function parseServerModelId(modelId: string | undefined): { providerID: string; modelID: string } | null {
+  if (!modelId) return null;
+  const slash = modelId.indexOf('/');
+  if (slash <= 0 || slash === modelId.length - 1) return null;
+  return { providerID: modelId.slice(0, slash), modelID: modelId.slice(slash + 1) };
 }
 
 export function MainView(props: MainViewProps) {
@@ -108,8 +119,9 @@ export function MainView(props: MainViewProps) {
   });
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
-  // 仅当会话引用的模型已从配置中删除时才提示（切换活跃模型不算）
-  const sessionModelMissing = !!activeSession && !modelList.some((m) => m.id === activeSession.modelId);
+  // 仅当本地会话引用的模型已从配置中删除时才提示（服务器会话的 modelId 是远端 provider/model，不走本地列表）
+  const sessionModelMissing = !!activeSession && activeSession.runtime !== 'server'
+    && !modelList.some((m) => m.id === activeSession.modelId);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
@@ -122,6 +134,17 @@ export function MainView(props: MainViewProps) {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const nav = useNavHistory(INITIAL_NAV);
   const activeSection: AppSection = nav.current.section;
+  const { servers, statuses, refresh: refreshServers } = useServers();
+  const [executionTarget, setExecutionTarget] = useState<ExecutionTarget>({ kind: 'local' });
+  // 每会话服务器模型/Agent 选择（未显式选择时 handleSend 回退到会话已存 modelId / 服务器默认）
+  const [serverSelections, setServerSelections] = useState<Record<string, { providerID: string; modelID: string; agent?: string }>>({});
+  const activeServerId = activeSession?.runtime === 'server' ? activeSession.serverId : undefined;
+  const activeServerName = activeServerId
+    ? servers.find((server) => server.id === activeServerId)?.name
+    : undefined;
+  const activeServerConnected = activeServerId !== undefined
+    && statuses.some((entry) => entry.id === activeServerId && entry.status === 'connected');
+  const serverOffline = activeSession?.runtime === 'server' && !activeServerConnected;
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -518,7 +541,12 @@ export function MainView(props: MainViewProps) {
 
   async function handleSend(returnFocus?: HTMLElement | null) {
     if (!input.trim() || busy) return;
-    if (!config) {
+    // 服务器离线：发送按钮已禁用，这里再拦截快捷键/程序化调用
+    if (serverOffline) return;
+    const activeServerSession = activeSession?.runtime === 'server';
+    // 服务器会话（或服务器目标下尚无会话）不要求本地模型配置
+    const serverMode = activeServerSession || (!activeSession && executionTarget.kind === 'server');
+    if (!config && !serverMode) {
       appendLocalError('请先配置模型后再发送任务。');
       onOpenSettings(undefined, returnFocus ?? document.querySelector<HTMLButtonElement>('.no-model-banner__btn--settings'));
       return;
@@ -540,6 +568,10 @@ export function MainView(props: MainViewProps) {
     setBrowserEvents([]);
     setBrowserPanelOpen(false);
     browserPanelDismissedRef.current = false;
+    if (activeServerSession && attachments.length > 0) {
+      appendLocalError('服务器会话暂不支持附件');
+      return;
+    }
     if (attachments.length > 0 && !activeWorkDir) {
       appendLocalError('请先创建项目或设置工作目录，再发送附件。');
       return;
@@ -549,6 +581,16 @@ export function MainView(props: MainViewProps) {
     const history = [...buildHistory(entries), { role: 'user' as const, content: userContent, attachments: sentAttachments }];
     const usePlanMode = planMode;
     setLastUserForRetry(null);
+    // 服务器会话：显式选择优先，其次回退到会话已存 modelId（`providerID/modelID`）
+    const serverOverrides: Pick<ChatRequest, 'serverModel' | 'serverAgent'> = {};
+    if (activeServerSession && activeSessionId) {
+      const selection = serverSelections[activeSessionId]
+        ?? parseServerModelId(activeSession?.modelId);
+      if (selection) {
+        serverOverrides.serverModel = { providerID: selection.providerID, modelID: selection.modelID };
+        if (selection.agent) serverOverrides.serverAgent = selection.agent;
+      }
+    }
 
     const userKey = nextLiveKey();
     const assistantKey = nextLiveKey();
@@ -571,6 +613,7 @@ export function MainView(props: MainViewProps) {
         planMode: usePlanMode,
         attachments: sentAttachments,
         activeSkillName: activeSkill?.name,
+        ...serverOverrides,
       });
       setStreamId(result.streamId);
       // 技能只对本次请求生效，发送成功后清除
@@ -832,11 +875,54 @@ export function MainView(props: MainViewProps) {
     });
   }
 
-  // 技能/MCP 等设置被其他窗口（设置窗口）修改 → 广播 settings-changed → 重载 slash 技能列表
+  // ---- Execution target ----
+  // settings.defaultServerId 未加载完为 undefined；据此区分「设置未到」与「无默认」
+  const [defaultServerId, setDefaultServerId] = useState<string | null | undefined>(undefined);
+  const defaultServerAppliedRef = useRef(false);
+  const serversSeenRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await window.electronAPI?.settings?.get?.();
+        if (!cancelled) setDefaultServerId(settings?.defaultServerId ?? null);
+      } catch {
+        if (!cancelled) setDefaultServerId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 挂载后：默认服务器指向已配置服务器 → 选中它（一次性）
+  useEffect(() => {
+    if (defaultServerAppliedRef.current) return;
+    if (defaultServerId === undefined) return;
+    if (servers.length === 0) return;
+    defaultServerAppliedRef.current = true;
+    if (defaultServerId && servers.some((server) => server.id === defaultServerId)) {
+      setExecutionTarget({ kind: 'server', serverId: defaultServerId });
+    }
+  }, [defaultServerId, servers]);
+
+  // 选中的服务器被删除 → 回退本地
+  useEffect(() => {
+    if (servers.length > 0) serversSeenRef.current = true;
+    if (executionTarget.kind !== 'server') return;
+    if (!serversSeenRef.current) return;
+    if (!servers.some((server) => server.id === executionTarget.serverId)) {
+      setExecutionTarget({ kind: 'local' });
+    }
+  }, [executionTarget, servers]);
+
+  // 技能/MCP 等设置被其他窗口（设置窗口）修改 → 广播 settings-changed → 重载 slash 技能列表与服务器
   useEffect(() => {
     return window.electronAPI.app.onSettingsChanged(() => {
       setSlash((s) => ({ ...s, skillsLoaded: false }));
       void handleLoadSkills();
+      refreshServers();
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -849,7 +935,25 @@ export function MainView(props: MainViewProps) {
 
   // ---- Session CRUD ----
   function handleNewSession(projectId?: string, returnFocus?: HTMLElement | null): true | void {
-    if (busy || !config) return;
+    if (busy) return;
+    if (executionTarget.kind === 'server') {
+      // 服务器会话不要求本地模型/项目，远端使用服务器工作目录
+      const serverStatus = statuses.find((entry) => entry.id === executionTarget.serverId)?.status;
+      if (serverStatus !== 'connected') {
+        appendLocalError('服务器未连接，请先在顶栏重连');
+        return;
+      }
+      void window.electronAPI.sessions.create({ runtime: 'server', serverId: executionTarget.serverId })
+        .then((session) => {
+          onSessionCreated(session);
+          navigateToSection('tasks', session.id);
+        })
+        .catch((error) => {
+          appendLocalError('无法创建服务器会话：' + (error instanceof Error ? error.message : String(error)));
+        });
+      return;
+    }
+    if (!config) return;
     const targetProjectId = projectId ?? activeSession?.projectId;
     if (!targetProjectId) {
       navigateToSection('home');
@@ -919,6 +1023,16 @@ export function MainView(props: MainViewProps) {
         workspaceOpen={props.workspaceOpen}
         onToggleSidebar={onToggleSidebar}
         onToggleWorkspace={props.onToggleWorkspace}
+        executionTarget={
+          <ServerTargetSelector
+            servers={servers}
+            statuses={statuses}
+            value={executionTarget}
+            onChange={setExecutionTarget}
+            onManageServers={() => onOpenSettings('servers')}
+            onReconnect={(id) => void window.electronAPI.servers.connect(id)}
+          />
+        }
       />
 
       <div className="main-layout">
@@ -927,6 +1041,8 @@ export function MainView(props: MainViewProps) {
             presence={sidebarPresence}
             projects={projects}
             sessions={sessions}
+            servers={servers}
+            serverStatuses={statuses}
             activeId={activeSessionId}
             mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
             activeSection={activeSection}
@@ -1024,9 +1140,28 @@ export function MainView(props: MainViewProps) {
                   本次会话已沉淀 {extractedNotice.count} 条记忆，可在记忆中心查看
                 </div>
               )}
+              {serverOffline && (
+                <div className="no-model-banner server-offline-banner" role="alert">
+                  <span className="server-offline-banner__text">
+                    服务器未连接：{activeServerName ?? '未知服务器'}
+                  </span>
+                  {activeServerId && (
+                    <div className="no-model-banner__actions">
+                      <button
+                        className="no-model-banner__btn server-offline-banner__retry"
+                        onClick={() => void window.electronAPI.servers.connect(activeServerId)}
+                        type="button"
+                      >
+                        重连
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               <InputArea
                 input={input}
                 busy={busy}
+                disabled={serverOffline}
                 approvalMode={approvalMode}
                 slash={slash}
                 hasWorkDir={!!activeWorkDir}
@@ -1045,13 +1180,26 @@ export function MainView(props: MainViewProps) {
                 activeSkill={activeSkill}
                 onActiveSkillClear={() => setActiveSkill(null)}
                 modelControl={
-                  <ModelSwitcher
-                    config={config}
-                    modelList={modelList}
-                    switchingModel={switchingModel}
-                    onSwitchModel={(id) => void handleSwitchModel(id)}
-                    onReconfigure={(returnFocus) => onOpenSettings(undefined, returnFocus)}
-                  />
+                  activeSession?.runtime === 'server' && activeServerId ? (
+                    <ServerSessionControls
+                      serverId={activeServerId}
+                      serverName={activeServerName ?? '服务器'}
+                      sessionModelId={activeSession?.modelId}
+                      value={activeSessionId ? serverSelections[activeSessionId] ?? null : null}
+                      onChange={(selection) => {
+                        if (!activeSessionId) return;
+                        setServerSelections((prev) => ({ ...prev, [activeSessionId]: selection }));
+                      }}
+                    />
+                  ) : (
+                    <ModelSwitcher
+                      config={config}
+                      modelList={modelList}
+                      switchingModel={switchingModel}
+                      onSwitchModel={(id) => void handleSwitchModel(id)}
+                      onReconfigure={(returnFocus) => onOpenSettings(undefined, returnFocus)}
+                    />
+                  )
                 }
               />
             </>
@@ -1084,7 +1232,12 @@ export function MainView(props: MainViewProps) {
               attachments={attachments}
               hasWorkDir={!!activeWorkDir}
               approvalMode={approvalMode}
-              modelMissing={!config}
+              modelMissing={!config && executionTarget.kind !== 'server'}
+              serverTarget={
+                executionTarget.kind === 'server'
+                  ? { name: servers.find((server) => server.id === executionTarget.serverId)?.name ?? '服务器' }
+                  : null
+              }
               onOpenSettings={() => onOpenSettings()}
               onInputChange={setInput}
               onAttachmentsChange={setAttachments}

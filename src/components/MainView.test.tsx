@@ -3,7 +3,10 @@ import { createRoot, Root } from 'react-dom/client';
 import { act, useState } from 'react';
 import { MainView } from './MainView';
 import { captureFocusTarget, restoreFocusTarget } from '../lib/presence-ui';
-import type { AppInfo, AttachmentMeta, ConfiguredModel, Project, SessionSummary } from '../../shared/ipc';
+import type {
+  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerAgentSummary, ServerEntry, ServerProvidersResult,
+  ServerStatusEntry, Session, SessionSummary,
+} from '../../shared/ipc';
 
 const CONFIG: ConfiguredModel = {
   id: 'deepseek-v4-pro', label: 'DeepSeek-v4-Pro', baseUrl: 'https://x', model: 'd', isCustom: false, hasKey: true,
@@ -100,6 +103,15 @@ function fireClick(el: Element | null | undefined) {
   if (!el) throw new Error('Element not found for click');
   act(() => {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+function selectOption(el: Element | null | undefined, value: string) {
+  if (!el) throw new Error('Element not found for select');
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+    setter.call(el as HTMLSelectElement, value);
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   });
 }
 
@@ -2364,5 +2376,531 @@ describe('MainView browser panel', () => {
     expect(querySelector('.browser-tab')).toBeNull();
     stream.push({ type: 'done' });
     await act(async () => {});
+  });
+});
+
+describe('MainView execution target selector', () => {
+  const SERVER_A: ServerEntry = {
+    id: 'srv-1',
+    name: '本地服务器',
+    url: 'http://localhost:4096',
+    hasPassword: false,
+    isDefault: false,
+    createdAt: '2026-09-10T00:00:00Z',
+  };
+  const SERVER_B: ServerEntry = {
+    id: 'srv-2',
+    name: '远程开发机',
+    url: 'http://10.0.0.5:4096',
+    hasPassword: true,
+    isDefault: true,
+    createdAt: '2026-09-10T00:00:00Z',
+  };
+
+  const SERVER_PROVIDERS: ServerProvidersResult = {
+    providers: [
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        models: [
+          { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+          { id: 'claude-opus-4', name: 'Claude Opus 4' },
+        ],
+      },
+    ],
+    default: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+  };
+  const SERVER_AGENTS: ServerAgentSummary[] = [{ name: 'build' }, { name: 'plan' }];
+
+  function installApi(options: {
+    defaultServerId?: string | null;
+    servers?: ServerEntry[];
+    providers?: ServerProvidersResult;
+    agents?: ServerAgentSummary[];
+  } = {}) {
+    let serverList = options.servers ?? [SERVER_A, SERVER_B];
+    let statusCb: ((statusList: ServerStatusEntry[]) => void) | null = null;
+    const servers = {
+      list: vi.fn().mockImplementation(() => Promise.resolve(serverList)),
+      status: vi.fn().mockResolvedValue([
+        { id: 'srv-1', status: 'connected' } as ServerStatusEntry,
+        { id: 'srv-2', status: 'error', error: '连接失败' } as ServerStatusEntry,
+      ]),
+      connect: vi.fn().mockResolvedValue({ id: 'srv-2', status: 'connecting' } as ServerStatusEntry),
+      providers: vi.fn().mockResolvedValue(options.providers ?? SERVER_PROVIDERS),
+      agents: vi.fn().mockResolvedValue(options.agents ?? SERVER_AGENTS),
+      onStatusChanged: vi.fn((cb: (statusList: ServerStatusEntry[]) => void) => {
+        statusCb = cb;
+        return () => {};
+      }),
+    };
+    const sessions = {
+      get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      list: vi.fn().mockResolvedValue([]),
+      saveMessages: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        id: 'srv-new',
+        title: 'New session',
+        modelId: '',
+        createdAt: 0,
+        updatedAt: 0,
+        messageCount: 0,
+        runtime: 'server',
+        serverId: 'srv-1',
+      } as Session),
+    };
+    let settingsCb: (() => void) | null = null;
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions,
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: {
+        onSettingsChanged: vi.fn((cb: () => void) => {
+          settingsCb = cb;
+          return () => {};
+        }),
+        getGitBranch: vi.fn().mockResolvedValue(null),
+      },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+      dialog: {
+        getPathForFile: vi.fn((file: File) => `/tmp/${file.name}`),
+        openAttachmentFiles: vi.fn().mockResolvedValue([]),
+      },
+      attachments: {
+        add: vi.fn().mockResolvedValue({
+          attachments: [
+            { id: 'att-1', name: '需求文档.md', size: 2048, mimeType: 'text/markdown', kind: 'file', relPath: 'a/att-1' },
+          ],
+        }),
+      },
+      servers,
+      settings: { get: vi.fn().mockResolvedValue({ defaultServerId: options.defaultServerId ?? null }) },
+    };
+    return {
+      servers,
+      sessions,
+      setServers: (next: ServerEntry[]) => {
+        serverList = next;
+      },
+      fireSettingsChanged: () => {
+        act(() => settingsCb?.());
+      },
+      fireStatusChanged: (statusList: ServerStatusEntry[]) => {
+        act(() => statusCb?.(statusList));
+      },
+    };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+  });
+
+  it('renders the local execution target by default', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView();
+
+    const trigger = querySelector('.server-target__trigger');
+    expect(trigger?.textContent).toContain('本地');
+    expect(trigger?.getAttribute('data-status')).toBe('connected');
+    unmount();
+  });
+
+  it('selects the server from settings.defaultServerId after mount', async () => {
+    installApi({ defaultServerId: 'srv-2' });
+    const { querySelector, unmount } = await renderMainView();
+    await act(async () => {});
+
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('远程开发机');
+    expect(querySelector('.server-target__trigger')?.getAttribute('data-status')).toBe('error');
+    unmount();
+  });
+
+  it('switches the execution target from the topbar menu', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView();
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('本地服务器');
+    unmount();
+  });
+
+  it('falls back to local when the selected server disappears', async () => {
+    const api = installApi({ defaultServerId: 'srv-2' });
+    const { querySelector, unmount } = await renderMainView();
+    await act(async () => {});
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('远程开发机');
+
+    api.setServers([SERVER_A]);
+    api.fireSettingsChanged();
+    await act(async () => {});
+
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('本地');
+    unmount();
+  });
+
+  it('reconnects an errored server from the menu', async () => {
+    const api = installApi();
+    const { querySelector, unmount } = await renderMainView();
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__row[data-server-id="srv-2"] .server-target__reconnect'));
+
+    expect(api.servers.connect).toHaveBeenCalledWith('srv-2');
+    unmount();
+  });
+
+  it('opens the servers settings tab from 管理服务器…', async () => {
+    installApi();
+    const onOpenSettings = vi.fn();
+    const { querySelector, unmount } = await renderMainView({ onOpenSettings });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__manage'));
+
+    expect(onOpenSettings).toHaveBeenCalledWith('servers');
+    unmount();
+  });
+
+  it('passes servers and statuses to the sidebar so server sessions group under their server', async () => {
+    installApi();
+    const serverSession: SessionSummary = {
+      id: 'srv-session',
+      title: '远程会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 1,
+      runtime: 'server',
+      serverId: 'srv-2',
+    };
+    const { querySelector, unmount } = await renderMainView({ sessions: [...SESSIONS, serverSession] });
+
+    const group = querySelector('.sidebar-server-group[data-server-id="srv-2"]');
+    expect(group?.textContent).toContain('远程开发机');
+    expect(group?.querySelector('[data-session-id="srv-session"]')).toBeTruthy();
+    expect(group?.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
+    expect(group?.textContent).toContain('离线');
+    expect(querySelector('.sidebar-recent [data-session-id="srv-session"]')).toBeNull();
+    unmount();
+  });
+
+  it('creates a server session from 新对话 without a local model config', async () => {
+    const api = installApi();
+    const onSessionCreated = vi.fn();
+    const { querySelector, unmount } = await renderMainView({ config: null, projects: [], onSessionCreated });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+    fireClick(querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).toHaveBeenCalledWith({ runtime: 'server', serverId: 'srv-1' });
+    expect(onSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: 'srv-new', runtime: 'server' }));
+    unmount();
+  });
+
+  it('blocks creating a server session while the target server is offline and surfaces an error', async () => {
+    const api = installApi();
+    const { querySelector, container, unmount } = await renderMainView({ config: null, projects: [] });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="error"]'));
+    fireClick(querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('服务器未连接，请先在顶栏重连');
+    unmount();
+  });
+
+  it('surfaces an error when creating a server session fails', async () => {
+    const api = installApi();
+    api.sessions.create.mockRejectedValue(new Error('远端拒绝'));
+    const { querySelector, container, unmount } = await renderMainView({ config: null, projects: [] });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+    fireClick(querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).toHaveBeenCalledWith({ runtime: 'server', serverId: 'srv-1' });
+    expect(container.textContent).toContain('无法创建服务器会话：远端拒绝');
+    unmount();
+  });
+
+  it('sends to the active server session by its local mapping id without a local model config', async () => {
+    const api = installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const serverSession: SessionSummary = {
+      id: 'a',
+      title: '服务器会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 0,
+      runtime: 'server',
+      serverId: 'srv-1',
+    };
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession],
+      activeSessionId: 'a',
+    });
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '服务器任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+
+    expect(chatStart).toHaveBeenCalledTimes(1);
+    const request = chatStart.mock.calls[0]![0];
+    expect(request.sessionId).toBe('a');
+    expect(request.serverModel).toBeUndefined();
+    expect(request.serverAgent).toBeUndefined();
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('shows the selected server chip on the home composer instead of the project chip', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      activeSessionId: null,
+      projects: [{ id: 'p1', name: '现有项目', updatedAt: 1, sessionCount: 0 }],
+      sessions: [],
+    });
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+
+    expect(querySelector('.home-composer__target')?.textContent).toContain('本地服务器');
+    expect(querySelector('.home-composer__project')).toBeNull();
+    expect(querySelector('.attach-btn')?.hasAttribute('disabled')).toBe(true);
+    expect(querySelector('.home-composer')?.textContent).toContain('服务器会话暂不支持附件');
+    unmount();
+  });
+
+  it('blocks sending attachments to a server session with a clear error', async () => {
+    const api = installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const serverSession: SessionSummary = {
+      id: 'a',
+      title: '服务器会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 0,
+      runtime: 'server',
+      serverId: 'srv-1',
+    };
+    const { querySelector, querySelectorAll, container, unmount } = await renderMainView({
+      config: { ...CONFIG, workDir: 'D:/proj' },
+      sessions: [serverSession],
+      activeSessionId: 'a',
+    });
+
+    const picker = querySelector('.attach-picker')!;
+    const file = new File(['x'], 'design.png');
+    const drop = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file] } });
+    act(() => {
+      picker.dispatchEvent(drop);
+    });
+    await act(async () => {});
+    expect(querySelectorAll('.attach-chip').length).toBe(1);
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '服务器任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+
+    expect(chatStart).not.toHaveBeenCalled();
+    expect(api.sessions.create).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('服务器会话暂不支持附件');
+    unmount();
+  });
+
+  it('hides the no-model banner on home when a server target is selected without a local config', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      activeSessionId: null,
+      projects: [],
+      sessions: [],
+      config: null,
+    });
+    expect(querySelector('.no-model-banner')).not.toBeNull();
+
+    fireClick(querySelector('.server-target__trigger'));
+    fireClick(querySelector('.server-target__item[data-status="connected"]'));
+
+    expect(querySelector('.no-model-banner')).toBeNull();
+    unmount();
+  });
+
+  function serverSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
+    return {
+      id: 'a',
+      title: '服务器会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 0,
+      runtime: 'server',
+      serverId: 'srv-1',
+      ...overrides,
+    };
+  }
+
+  function typeAndSend(querySelector: (sel: string) => Element | null, text: string) {
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+  }
+
+  it('keeps the local model switcher for local sessions', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({ config: CONFIG });
+
+    expect(querySelector('.model-switcher')).not.toBeNull();
+    expect(querySelector('.server-session-controls')).toBeNull();
+    unmount();
+  });
+
+  it('renders server session controls instead of the local model switcher for a server session', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      config: CONFIG,
+      sessions: [serverSession()],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    expect(querySelector('.server-session-controls')).not.toBeNull();
+    expect(querySelector('.model-switcher')).toBeNull();
+    expect((querySelector('.server-session-controls__model') as HTMLSelectElement).value)
+      .toBe('anthropic/claude-sonnet-4');
+    expect((querySelector('.server-session-controls__agent') as HTMLSelectElement).value)
+      .toBe('build');
+    unmount();
+  });
+
+  it('does not show the deleted-model banner for a server session with a stored remote model', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      config: CONFIG,
+      sessions: [serverSession({ modelId: 'anthropic/claude-sonnet-4' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    expect(querySelector('.model-missing-banner')).toBeNull();
+    unmount();
+  });
+
+  it('sends the selected server model and agent with chat.start', async () => {
+    installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ modelId: 'anthropic/claude-sonnet-4' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    selectOption(querySelector('.server-session-controls__model'), 'anthropic/claude-opus-4');
+    selectOption(querySelector('.server-session-controls__agent'), 'plan');
+    typeAndSend(querySelector, '服务器任务');
+    await act(async () => {});
+
+    expect(chatStart).toHaveBeenCalledTimes(1);
+    const request = chatStart.mock.calls[0]![0];
+    expect(request.serverModel).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' });
+    expect(request.serverAgent).toBe('plan');
+    unmount();
+  });
+
+  it('passes the stored session model to chat.start when no explicit selection exists', async () => {
+    installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ modelId: 'anthropic/claude-opus-4' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    typeAndSend(querySelector, '服务器任务');
+    await act(async () => {});
+
+    expect(chatStart).toHaveBeenCalledTimes(1);
+    const request = chatStart.mock.calls[0]![0];
+    expect(request.serverModel).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' });
+    expect(request.serverAgent).toBeUndefined();
+    unmount();
+  });
+
+  it('shows the offline banner, blocks sending, reconnects, and recovers', async () => {
+    const api = installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ serverId: 'srv-2' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    const banner = querySelector('.server-offline-banner');
+    expect(banner).not.toBeNull();
+    expect(banner?.getAttribute('role')).toBe('alert');
+    expect(banner?.textContent).toContain('服务器未连接');
+    expect(banner?.textContent).toContain('远程开发机');
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '离线任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(true);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+    expect(chatStart).not.toHaveBeenCalled();
+
+    fireClick(querySelector('.server-offline-banner__retry'));
+    expect(api.servers.connect).toHaveBeenCalledWith('srv-2');
+
+    api.fireStatusChanged([{ id: 'srv-2', status: 'connected' }]);
+    await act(async () => {});
+    expect(querySelector('.server-offline-banner')).toBeNull();
+    expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(false);
+    unmount();
   });
 });

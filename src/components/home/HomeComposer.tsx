@@ -12,6 +12,7 @@ interface HomeComposerProps {
   attachments: AttachmentMeta[];
   hasWorkDir: boolean;
   projectName?: string;
+  serverTarget?: { name: string } | null;
   branch: string | null;
   approvalMode: ApprovalMode;
   modelControl?: ReactNode;
@@ -28,15 +29,17 @@ export function HomeComposer(props: HomeComposerProps) {
   return (
     <div className="home-composer">
       <div className="home-composer__chips">
-        {props.projectControl ?? (
-          <span className="home-composer__chip home-composer__project">
-            <Icon name="folder" size={13} />
-            {props.projectName ?? '选择项目'}
-          </span>
-        )}
+        {props.serverTarget
+          ? null
+          : props.projectControl ?? (
+            <span className="home-composer__chip home-composer__project">
+              <Icon name="folder" size={13} />
+              {props.projectName ?? '选择项目'}
+            </span>
+          )}
         <span className="home-composer__chip home-composer__target">
           <Icon name="server" size={13} />
-          本地
+          {props.serverTarget?.name ?? '本地'}
         </span>
         {props.branch !== null && (
           <span className="home-composer__chip home-composer__branch">
@@ -66,7 +69,8 @@ export function HomeComposer(props: HomeComposerProps) {
           onAttachmentsChange={props.onAttachmentsChange}
           onPick={props.onPickAttachments}
           onAddPaths={props.onAddPaths}
-          disabled={props.busy || !props.hasWorkDir}
+          disabled={props.busy || !props.hasWorkDir || !!props.serverTarget}
+          disabledHint={props.serverTarget ? '服务器会话暂不支持附件' : undefined}
         />
         <ApprovalModeMenu mode={props.approvalMode} onModeChange={props.onApprovalModeChange} disabled={props.busy} />
         {props.modelControl}

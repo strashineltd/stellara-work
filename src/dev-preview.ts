@@ -187,7 +187,7 @@ export function installDevPreviewApi(): void {
       },
       create: async ({ modelId, workDir, title = 'New session', projectId }) => {
         const projectWorkDir = projects.find((project) => project.id === projectId)?.workDir;
-        const session: Session = { id: `session-${Date.now()}`, title, modelId, workDir: projectWorkDir ?? workDir, projectId, createdAt: Date.now(), updatedAt: Date.now(), messageCount: 0 };
+        const session: Session = { id: `session-${Date.now()}`, title, modelId: modelId ?? previewModel.id, workDir: projectWorkDir ?? workDir, projectId, createdAt: Date.now(), updatedAt: Date.now(), messageCount: 0 };
         sessions = [session, ...sessions];
         return session;
       },
@@ -195,6 +195,36 @@ export function installDevPreviewApi(): void {
       rename: async (id, title) => { sessions = sessions.map((session) => session.id === id ? { ...session, title } : session); },
       saveMessages: async () => {}, appendMessage: async () => {},
       move: async (sessionId, projectId) => { sessions = sessions.map((session) => session.id === sessionId ? { ...session, projectId: projectId ?? undefined } : session); },
+    },
+    servers: {
+      list: async () => [],
+      add: async (input) => ({
+        id: `server-${Date.now()}`,
+        name: input.name ?? input.url,
+        url: input.url,
+        username: input.username,
+        hasPassword: Boolean(input.password),
+        isDefault: false,
+        createdAt: new Date().toISOString(),
+      }),
+      update: async (id, patch) => ({
+        id,
+        name: patch.name ?? id,
+        url: patch.url ?? '',
+        username: patch.username,
+        hasPassword: Boolean(patch.password),
+        isDefault: false,
+        createdAt: new Date().toISOString(),
+      }),
+      remove: async () => {},
+      test: async () => ({ ok: true, status: 'connected' }),
+      setDefault: async () => {},
+      status: async () => [],
+      connect: async (id: string) => ({ id, status: 'connected' as const }),
+      providers: async () => ({ providers: [] }),
+      vcs: async () => ({ branch: null }),
+      agents: async () => [],
+      onStatusChanged: () => () => {},
     },
     fs: {
       listTree: async (cwd): Promise<FsNode> => ({ name: 'Stellara Work', path: cwd, type: 'dir', children: [

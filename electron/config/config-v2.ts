@@ -1,8 +1,8 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { setKey } from './secrets';
 import { getAppDataDir } from './data-dir';
-import type { ThemeName, McpServerConfig, WireApi } from '../../shared/ipc';
+import type { ThemeName, McpServerConfig, WireApi, AppSettings } from '../../shared/ipc';
 
 let _overrideConfigDir: string | null = null;
 
@@ -69,6 +69,15 @@ export interface ModelEntry {
   verifiedAt?: string;
 }
 
+export interface ServerConfigEntry {
+  id: string;
+  name: string;
+  url: string;
+  username?: string;
+  createdAt: string;
+  lastConnectedAt?: string;
+}
+
 export interface AppConfig {
   activeModelId: string | null;
   models: ModelEntry[];
@@ -82,6 +91,8 @@ export interface AppConfig {
       execJsEnabled?: boolean;
       loginAllowlist?: string[];
     };
+    servers?: ServerConfigEntry[];
+    defaultServerId?: string | null;
   };
   mcpServers: McpServerConfig[];
   schemaVersion: 1;
@@ -97,20 +108,55 @@ function defaultConfig(): AppConfig {
   };
 }
 
+const SETTINGS_PATCH_WHITELIST: readonly string[] = ['workDirDefault', 'shortcuts', 'theme', 'workspaceMode', 'browser'];
+
+/**
+ * 过滤 settings:update 的越权字段：仅保留白名单键。
+ * `servers` / `defaultServerId` 只能经 `servers:*` 修改；未知键一并返回 rejected，且不写入。
+ */
+export function sanitizeSettingsPatch(patch: Partial<AppSettings>): { patch: Partial<AppSettings>; rejected: string[] } {
+  const clean: Partial<AppSettings> = {};
+  const rejected: string[] = [];
+  for (const key of Object.keys(patch ?? {})) {
+    if (!SETTINGS_PATCH_WHITELIST.includes(key)) {
+      rejected.push(key);
+      continue;
+    }
+    (clean as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+  }
+  return { patch: clean, rejected };
+}
+
+function parseConfig(text: string): AppConfig {
+  const parsed = JSON.parse(text) as AppConfig;
+  if (parsed.schemaVersion !== 1) return defaultConfig();
+  // 深拷贝 models / app / servers 防止引用共享
+  const app = { ...(parsed.app ?? {}) };
+  if (Array.isArray(app.servers)) {
+    app.servers = app.servers.map((s) => ({ ...s }));
+  }
+  return {
+    ...parsed,
+    models: [...(parsed.models ?? [])],
+    app,
+    // 深拷贝 mcpServers，兼容旧配置无此字段
+    mcpServers: [...(parsed.mcpServers ?? [])],
+  };
+}
+
 export async function loadConfig(): Promise<AppConfig> {
-  const path = configPath();
   try {
-    const text = await fs.readFile(path, 'utf-8');
-    const parsed = JSON.parse(text) as AppConfig;
-    if (parsed.schemaVersion !== 1) return defaultConfig();
-    // 深拷贝 models / app 防止引用共享
-    return {
-      ...parsed,
-      models: [...(parsed.models ?? [])],
-      app: { ...(parsed.app ?? {}) },
-      // 深拷贝 mcpServers，兼容旧配置无此字段
-      mcpServers: [...(parsed.mcpServers ?? [])],
-    };
+    const text = await fs.readFile(configPath(), 'utf-8');
+    return parseConfig(text);
+  } catch {
+    return defaultConfig();
+  }
+}
+
+/** 同步读取 config（供同步 getter 使用，如 getServerEntry）。 */
+function readConfigSync(): AppConfig {
+  try {
+    return parseConfig(readFileSync(configPath(), 'utf-8'));
   } catch {
     return defaultConfig();
   }
@@ -122,6 +168,58 @@ export async function saveConfig(cfg: AppConfig): Promise<void> {
   // 原子写入：先写临时文件，再 rename（防止崩溃损坏）
   await fs.writeFile(tmpPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
   await fs.rename(tmpPath, configPath());
+}
+
+/** 服务器 URL 规范化：仅 http/https、去尾斜杠、保留 origin+pathname；非法返回 null。 */
+export function normalizeServerUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const pathname = url.pathname.replace(/\/+$/, '');
+    return `${url.origin}${pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+export function listServerEntries(): ServerConfigEntry[] {
+  return readConfigSync().app.servers ?? [];
+}
+
+export function getServerEntry(id: string): ServerConfigEntry | undefined {
+  return listServerEntries().find((s) => s.id === id);
+}
+
+export async function addServerEntry(entry: ServerConfigEntry): Promise<AppConfig> {
+  const cfg = await loadConfig();
+  cfg.app.servers = [...(cfg.app.servers ?? []), entry];
+  await saveConfig(cfg);
+  return cfg;
+}
+
+export async function updateServerEntry(id: string, patch: Partial<ServerConfigEntry>): Promise<AppConfig> {
+  const cfg = await loadConfig();
+  cfg.app.servers = (cfg.app.servers ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s));
+  await saveConfig(cfg);
+  return cfg;
+}
+
+export async function removeServerEntry(id: string): Promise<AppConfig> {
+  const cfg = await loadConfig();
+  cfg.app.servers = (cfg.app.servers ?? []).filter((s) => s.id !== id);
+  if (cfg.app.defaultServerId === id) cfg.app.defaultServerId = null;
+  await saveConfig(cfg);
+  return cfg;
+}
+
+export async function setDefaultServerId(id: string | null): Promise<AppConfig> {
+  const cfg = await loadConfig();
+  if (id !== null && !(cfg.app.servers ?? []).some((s) => s.id === id)) {
+    throw new Error(`Server 不存在: ${id}`);
+  }
+  cfg.app.defaultServerId = id;
+  await saveConfig(cfg);
+  return cfg;
 }
 
 export async function addModel(entry: ModelEntry): Promise<AppConfig> {

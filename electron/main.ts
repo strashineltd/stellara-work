@@ -11,6 +11,10 @@ import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { SubagentCoordinator } from './agent/subagent-coordinator';
 import { ContextHub } from './context/context-hub';
 import { resolveSessionModel } from './chat/session-context';
+import { OpencodeClient } from './server/opencode-client';
+import { ServerManager } from './server/server-manager';
+import { SessionBridge, type RemoteSessionUpdate } from './server/session-bridge';
+import { ServerChatBridge } from './server/chat-bridge';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
 import { isSafeExternalUrl } from './security/url-guard';
@@ -34,6 +38,11 @@ import type {
   BrowserConfigView,
   ViewportRect,
   CloudSignUpArgs,
+  CreateSessionArgs,
+  ServerInput,
+  ServerProvidersResult,
+  ServerVcsResult,
+  ServerAgentSummary,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -57,6 +66,19 @@ function unregisterBrowserStream(sessionId: string, streamId: string): void {
   if (browserSessionStreams.get(sessionId) === streamId) browserSessionStreams.delete(sessionId);
 }
 
+// v0.9.3: 远端 OpenCode server 运行时（app.whenReady 后、注册 IPC 前初始化）
+interface ServerRuntime {
+  manager: ServerManager;
+  sessions: SessionBridge;
+  chat: ServerChatBridge;
+}
+let serverRuntime: ServerRuntime | null = null;
+
+function requireServerRuntime(): ServerRuntime {
+  if (!serverRuntime) throw new Error('服务器功能未初始化');
+  return serverRuntime;
+}
+
 async function normalizeWorkDir(workDir: string): Promise<string> {
   const resolved = path.resolve(workDir);
   if (process.platform === 'win32') return resolved.toLowerCase();
@@ -78,6 +100,48 @@ function broadcastSettingsChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now() });
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * 从 session.updated 事件属性提取映射行更新。
+ * 真实形状 `{ sessionID, info: { id, title, time, model } }`；info 缺失时回退 properties。
+ */
+function readRemoteSessionUpdate(properties: Record<string, unknown>): RemoteSessionUpdate | null {
+  const info = isRecord(properties.info) ? properties.info : properties;
+  const id =
+    typeof info.id === 'string'
+      ? info.id
+      : typeof properties.sessionID === 'string'
+        ? properties.sessionID
+        : undefined;
+  if (!id) return null;
+
+  const time = isRecord(info.time) ? info.time : undefined;
+  const model = isRecord(info.model) ? info.model : undefined;
+  return {
+    id,
+    ...(typeof info.title === 'string' ? { title: info.title } : {}),
+    ...(time && typeof time.updated === 'number' ? { time: { updated: time.updated } } : {}),
+    ...(model
+      ? {
+          model: {
+            ...(typeof model.providerID === 'string' ? { providerID: model.providerID } : {}),
+            ...(typeof model.id === 'string' ? { id: model.id } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** 从 session.deleted 事件属性提取远端会话 id（真实形状 `{ sessionID, info }`）。 */
+function readRemoteDeletedId(properties: Record<string, unknown>): string | undefined {
+  if (typeof properties.sessionID === 'string') return properties.sessionID;
+  const info = isRecord(properties.info) ? properties.info : undefined;
+  return info && typeof info.id === 'string' ? info.id : undefined;
 }
 
 function createWindow(): void {
@@ -322,6 +386,26 @@ function registerIpcHandlers(): void {
 
   // Chat
   handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
+    const { getSession, updateSessionMeta } = await import('./store/db');
+    if (getSession(request.sessionId)?.runtime === 'server') {
+      // 远端 server 持有会话历史：只发送最后一条用户文本
+      const lastUser = [...request.messages].reverse().find((message) => message.role === 'user');
+      if (!lastUser) throw new Error('消息历史末尾必须是 user 消息');
+      const started = await requireServerRuntime().chat.start(
+        request.sessionId,
+        lastUser.content,
+        request.serverModel,
+        request.serverAgent,
+      );
+      // prompt 已成功启动：把本次使用的模型持久化到映射行（spec 4.4）
+      if (request.serverModel) {
+        updateSessionMeta(request.sessionId, {
+          modelId: `${request.serverModel.providerID}/${request.serverModel.modelID}`,
+        });
+      }
+      return started;
+    }
+
     const configured = await resolveSessionExecutionContext(request.sessionId);
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     browserSessionStreams.set(request.sessionId, streamId);
@@ -356,18 +440,35 @@ function registerIpcHandlers(): void {
     }
   });
 
-  // P0-2: 取消任务
+  // P0-2: 取消任务（server 桥接优先，其次本地流）
   on('chat:abort', (_e, streamId: string) => {
-    if (chatStreams.abort(streamId)) {
-      log.info(`[chat:abort] stream ${streamId} 已取消`);
-    }
+    void (async () => {
+      try {
+        await serverRuntime?.chat.abort(streamId);
+      } catch (err) {
+        log.warn(`[chat:abort] 远端取消失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (chatStreams.abort(streamId)) {
+        log.info(`[chat:abort] stream ${streamId} 已取消`);
+      }
+    })();
   });
 
-  // P0-1: 审批响应
+  // P0-1: 审批响应（server 桥接优先，其次本地流）
   on('approval:respond', (_e, approvalId: string, approved: boolean) => {
-    if (chatStreams.respond(approvalId, approved)) {
-      log.info(`[approval:respond] ${approvalId} → ${approved ? '同意' : '拒绝'}`);
-    }
+    void (async () => {
+      try {
+        if (serverRuntime && (await serverRuntime.chat.respondApproval(approvalId, approved))) {
+          log.info(`[approval:respond] ${approvalId} → ${approved ? '同意' : '拒绝'}（server）`);
+          return;
+        }
+      } catch (err) {
+        log.warn(`[approval:respond] 远端应答失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (chatStreams.respond(approvalId, approved)) {
+        log.info(`[approval:respond] ${approvalId} → ${approved ? '同意' : '拒绝'}`);
+      }
+    })();
   });
 
   // Tools (仅开发环境，绕过 LLM 直调)
@@ -598,18 +699,9 @@ function registerIpcHandlers(): void {
     renameProject(id.trim(), name.trim().slice(0, 50));
   });
 
-  // Sessions
+  // Sessions（list 经桥接对账远端；get/create/delete/rename 按 runtime 分派）
   handle('sessions:list', async () => {
-    const { listSessions } = await import('./store/db');
-    return listSessions().map((s) => ({
-      id: s.id,
-      title: s.title,
-      modelId: s.modelId,
-      workDir: s.workDir,
-      projectId: s.projectId,
-      messageCount: s.messageCount,
-      updatedAt: s.updatedAt,
-    }));
+    return requireServerRuntime().sessions.list();
   });
 
   handle('sessions:search', async (_e, query: string): Promise<string[]> => {
@@ -622,11 +714,15 @@ function registerIpcHandlers(): void {
     const { getSession, getMessages } = await import('./store/db');
     const session = getSession(id);
     if (!session) throw new Error(`Session 不存在: ${id}`);
+    if (session.runtime === 'server') return requireServerRuntime().sessions.get(id);
     const messages = getMessages(id);
     return { session, messages };
   });
 
-  handle('sessions:create', async (_e, args: { modelId: string; workDir?: string; title?: string; projectId?: string }) => {
+  handle('sessions:create', async (_e, args: CreateSessionArgs & { modelId: string }) => {
+    if (args.runtime === 'server') {
+      return requireServerRuntime().sessions.create(args);
+    }
     const { v4: uuid } = await import('uuid');
     const { createSession, getProject } = await import('./store/db');
     const { getKey } = await import('./config/secrets');
@@ -653,12 +749,20 @@ function registerIpcHandlers(): void {
   });
 
   handle('sessions:delete', async (_e, id: string) => {
-    const { deleteSession } = await import('./store/db');
+    const { deleteSession, getSession } = await import('./store/db');
+    if (getSession(id)?.runtime === 'server') {
+      await requireServerRuntime().sessions.remove(id);
+      return;
+    }
     deleteSession(id);
   });
 
   handle('sessions:rename', async (_e, id: string, title: string) => {
-    const { renameSession } = await import('./store/db');
+    const { renameSession, getSession } = await import('./store/db');
+    if (getSession(id)?.runtime === 'server') {
+      await requireServerRuntime().sessions.rename(id, title);
+      return;
+    }
     renameSession(id, title);
   });
 
@@ -677,6 +781,79 @@ function registerIpcHandlers(): void {
     moveSession(sessionId, projectId);
   });
 
+  // Servers（远端 OpenCode server 配置与状态）
+  handle('servers:list', async () => {
+    return requireServerRuntime().manager.list();
+  });
+
+  handle('servers:add', async (_e, input: ServerInput) => {
+    const entry = await requireServerRuntime().manager.add(input);
+    broadcastSettingsChanged();
+    return entry;
+  });
+
+  handle('servers:update', async (_e, id: string, patch: Partial<ServerInput>) => {
+    const entry = await requireServerRuntime().manager.update(id, patch);
+    broadcastSettingsChanged();
+    return entry;
+  });
+
+  handle('servers:remove', async (_e, id: string) => {
+    await requireServerRuntime().manager.remove(id);
+    broadcastSettingsChanged();
+  });
+
+  handle('servers:test', async (_e, id: string) => {
+    return requireServerRuntime().manager.test(id);
+  });
+
+  handle('servers:setDefault', async (_e, id: string | null) => {
+    await requireServerRuntime().manager.setDefault(id);
+    broadcastSettingsChanged();
+  });
+
+  handle('servers:status', async () => {
+    return requireServerRuntime().manager.statuses();
+  });
+
+  handle('servers:connect', async (_e, id: string) => {
+    const status = await requireServerRuntime().manager.connect(id);
+    broadcastSettingsChanged();
+    return status;
+  });
+
+  handle('servers:providers', async (_e, id: string): Promise<ServerProvidersResult> => {
+    const client = requireServerRuntime().manager.getClient(id);
+    if (!client) throw new Error('服务器未连接');
+    const { providers, default: defaultModel } = await client.listProviders();
+    return {
+      providers: providers.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        models: provider.models.map((model) => ({ id: model.id, name: model.name })),
+      })),
+      ...(defaultModel !== undefined ? { default: defaultModel } : {}),
+    };
+  });
+
+  handle('servers:vcs', async (_e, id: string): Promise<ServerVcsResult> => {
+    const client = requireServerRuntime().manager.getClient(id);
+    if (!client) throw new Error('服务器未连接');
+    const vcs = await client.getVcs();
+    return { branch: typeof vcs.branch === 'string' ? vcs.branch : null };
+  });
+
+  handle('servers:agents', async (_e, id: string): Promise<ServerAgentSummary[]> => {
+    const client = requireServerRuntime().manager.getClient(id);
+    if (!client) throw new Error('服务器未连接');
+    const agents = await client.listAgents();
+    return agents.map((agent) => ({
+      name: agent.name,
+      ...(agent.description !== undefined ? { description: agent.description } : {}),
+      ...(agent.mode !== undefined ? { mode: agent.mode } : {}),
+    }));
+  });
+
   // Settings
   handle('settings:get', async (): Promise<AppSettings> => {
     const { loadConfig } = await import('./config/config-v2');
@@ -685,9 +862,13 @@ function registerIpcHandlers(): void {
   });
 
   handle('settings:update', async (_e, partial: Partial<AppSettings>) => {
-    const { loadConfig, saveConfig } = await import('./config/config-v2');
+    const { loadConfig, saveConfig, sanitizeSettingsPatch } = await import('./config/config-v2');
+    const { patch, rejected } = sanitizeSettingsPatch(partial);
+    if (rejected.length > 0) {
+      log.warn(`settings:update 忽略非白名单字段: ${rejected.join(', ')}`);
+    }
     const cfg = await loadConfig();
-    cfg.app = { ...cfg.app, ...partial };
+    cfg.app = { ...cfg.app, ...patch };
     await saveConfig(cfg);
     broadcastSettingsChanged();
   });
@@ -1918,6 +2099,71 @@ app.whenReady().then(async () => {
     }
   })();
 
+  // v0.9.3: 远端 OpenCode server 接线（db 已就绪；凭据经 secrets 读写）
+  try {
+    const [config, secrets, db, { v4: uuid }] = await Promise.all([
+      import('./config/config-v2'),
+      import('./config/secrets'),
+      import('./store/db'),
+      import('uuid'),
+    ]);
+    const manager = new ServerManager({
+      loadEntries: async () => config.listServerEntries(),
+      addEntry: async (entry) => {
+        await config.addServerEntry(entry);
+      },
+      updateEntry: async (id, patch) => {
+        await config.updateServerEntry(id, patch);
+      },
+      removeEntry: async (id) => {
+        await config.removeServerEntry(id);
+      },
+      getPassword: (id) => secrets.getServerPassword(id),
+      setPassword: (id, password) => secrets.setServerPassword(id, password),
+      deletePassword: (id) => secrets.deleteServerPassword(id),
+      createClient: (entry, password) =>
+        new OpencodeClient({ baseUrl: entry.url, username: entry.username, password: password ?? undefined }),
+      getDefaultServerId: async () => (await config.loadConfig()).app.defaultServerId ?? null,
+      setDefaultServerId: async (id) => {
+        await config.setDefaultServerId(id);
+      },
+    });
+    const sessions = new SessionBridge({ manager, db, uuid });
+    const chat = new ServerChatBridge({
+      getSession: (id) => db.getSession(id) ?? undefined,
+      getClient: (id) => manager.getClient(id),
+      emit: (streamId, event) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('chat-stream', { streamId, event });
+        }
+      },
+      newStreamId: () => `server-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+    manager.onEvent((serverId, event) => chat.handleEvent(serverId, event));
+    // session.updated / session.deleted 不在聊天流适配范围内：同步映射行并让渲染层重载
+    manager.onEvent((serverId, event) => {
+      if (event.type !== 'session.updated' && event.type !== 'session.deleted') return;
+      const properties = isRecord(event.properties) ? event.properties : {};
+      if (event.type === 'session.updated') {
+        const remote = readRemoteSessionUpdate(properties);
+        if (remote) sessions.applyRemoteUpdate(serverId, remote);
+      } else {
+        const remoteId = readRemoteDeletedId(properties);
+        if (remoteId) sessions.removeByRemote(serverId, remoteId);
+      }
+      broadcastSettingsChanged();
+    });
+    manager.onStatusChanged((statuses) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('servers:status-changed', statuses);
+      }
+      broadcastSettingsChanged();
+    });
+    serverRuntime = { manager, sessions, chat };
+  } catch (err) {
+    log.error('服务器模块初始化失败', err);
+  }
+
   registerIpcHandlers();
   createWindow();
   installAppMenu(() => mainWindow);
@@ -1960,6 +2206,9 @@ app.whenReady().then(async () => {
   browserService.setMainContentView(() => {
     return mainWindow && !mainWindow.isDestroyed() ? mainWindow.contentView : undefined;
   });
+
+  // 启动即连接已配置服务器（不阻塞窗口显示）
+  void serverRuntime?.manager.connectAll();
 });
 
 let browserQuitCleanupDone = false;
@@ -1967,6 +2216,7 @@ app.on('before-quit', (e) => {
   if (browserQuitCleanupDone) return;
   e.preventDefault();
   browserQuitCleanupDone = true;
+  serverRuntime?.manager.disconnectAll();
   void (async () => {
     try {
       const { loadConfig } = await import('./config/config-v2');

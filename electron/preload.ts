@@ -25,6 +25,12 @@ import type {
   CloudResult,
   CloudPendingSignUp,
   CloudSignUpArgs,
+  ServerEntry,
+  ServerInput,
+  ServerStatusEntry,
+  ServerTestResult,
+  ServerProvidersResult,
+  ServerVcsResult,
 } from '../shared/ipc';
 
 /**
@@ -184,6 +190,24 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('sessions:appendMessage', id, message),
     move: (sessionId: string, projectId: string | null) =>
       ipcRenderer.invoke('sessions:move', sessionId, projectId),
+  },
+  servers: {
+    list: (): Promise<ServerEntry[]> => ipcRenderer.invoke('servers:list'),
+    add: (input: ServerInput) => ipcRenderer.invoke('servers:add', input),
+    update: (id: string, patch: Partial<ServerInput>) => ipcRenderer.invoke('servers:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('servers:remove', id),
+    test: (id: string): Promise<ServerTestResult> => ipcRenderer.invoke('servers:test', id),
+    setDefault: (id: string | null) => ipcRenderer.invoke('servers:setDefault', id),
+    status: (): Promise<ServerStatusEntry[]> => ipcRenderer.invoke('servers:status'),
+    connect: (id: string): Promise<ServerStatusEntry> => ipcRenderer.invoke('servers:connect', id),
+    providers: (id: string): Promise<ServerProvidersResult> => ipcRenderer.invoke('servers:providers', id),
+    vcs: (id: string): Promise<ServerVcsResult> => ipcRenderer.invoke('servers:vcs', id),
+    agents: (id: string) => ipcRenderer.invoke('servers:agents', id),
+    onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => {
+      const handler = (_e: unknown, statuses: ServerStatusEntry[]) => callback(statuses);
+      ipcRenderer.on('servers:status-changed', handler);
+      return () => { ipcRenderer.removeListener('servers:status-changed', handler); };
+    },
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),

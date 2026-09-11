@@ -110,6 +110,10 @@ export interface ChatRequest {
   attachments?: AttachmentMeta[];
   /** /skill 精确调用：技能名称（或文件名）。主进程在 workDir/skills 中查找并注入正文。 */
   activeSkillName?: string;
+  /** 远端 server 会话的模型覆盖（由 Plan 2B 传入；本地路径忽略） */
+  serverModel?: { providerID: string; modelID: string };
+  /** 远端 server 会话的 agent 覆盖（由 Plan 2B 传入；本地路径忽略） */
+  serverAgent?: string;
 }
 
 export interface ApprovalRequest {
@@ -512,6 +516,14 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  /** 运行端：local（本机）或 server（远端 OpenCode server）。缺省视为 local。 */
+  runtime?: 'local' | 'server';
+  /** 所属服务器（runtime='server' 时） */
+  serverId?: string;
+  /** 远端服务器的 session id（runtime='server' 时） */
+  remoteSessionId?: string;
+  /** 远端服务器离线时由主进程标注 */
+  offline?: boolean;
 }
 
 export interface SessionSummary {
@@ -522,6 +534,14 @@ export interface SessionSummary {
   workDir?: string;
   messageCount: number;
   updatedAt: number;
+  /** 运行端：local（本机）或 server（远端 OpenCode server）。缺省视为 local。 */
+  runtime?: 'local' | 'server';
+  /** 所属服务器（runtime='server' 时） */
+  serverId?: string;
+  /** 远端服务器的 session id（runtime='server' 时） */
+  remoteSessionId?: string;
+  /** 远端服务器离线时由主进程标注 */
+  offline?: boolean;
 }
 
 export interface MessageRow {
@@ -646,6 +666,8 @@ export interface AppSettings {
   theme?: ThemeName;
   /** 工作区模式：sidebar（紧凑 sidebar）或 tabs（Tab 栏） */
   workspaceMode?: 'sidebar' | 'tabs';
+  /** 默认服务器 id（只读：仅能经 servers:setDefault 修改） */
+  defaultServerId?: string | null;
   // 预留：language
 }
 
@@ -771,10 +793,80 @@ export interface McpTestResult {
 }
 
 export interface CreateSessionArgs {
-  modelId: string;
+  modelId?: string;
   workDir?: string;
   title?: string;
   projectId?: string;
+  /** 运行端：local（默认）或 server */
+  runtime?: 'local' | 'server';
+  /** runtime='server' 时的目标服务器 id */
+  serverId?: string;
+  /** runtime='server' 时的模型映射，落库为 'providerID/modelID'（Plan 2B 传入） */
+  serverModel?: { providerID: string; modelID: string };
+}
+
+// ============================================
+// 服务器（远端 OpenCode server）
+// ============================================
+
+export type ServerRuntimeStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+/**
+ * 渲染进程可见的服务器视图。
+ * 刻意不含 password 字段 —— 凭据只存在主进程（SecretStore）。
+ */
+export interface ServerEntry {
+  id: string;
+  name: string;
+  url: string;
+  username?: string;
+  hasPassword: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  lastConnectedAt?: string;
+}
+
+export interface ServerInput {
+  url: string;
+  name?: string;
+  username?: string;
+  password?: string;
+}
+
+export interface ServerStatusEntry {
+  id: string;
+  status: ServerRuntimeStatus;
+  error?: string;
+  version?: string;
+}
+
+export interface ServerTestResult {
+  ok: boolean;
+  status: ServerRuntimeStatus;
+  error?: string;
+  version?: string;
+}
+
+export interface ServerProviderSummary {
+  id: string;
+  name: string;
+  models: Array<{ id: string; name: string }>;
+}
+
+export interface ServerProvidersResult {
+  providers: ServerProviderSummary[];
+  /** 服务器默认模型（无法解析时缺省） */
+  default?: { providerID: string; modelID: string };
+}
+
+export interface ServerVcsResult {
+  branch: string | null;
+}
+
+export interface ServerAgentSummary {
+  name: string;
+  description?: string;
+  mode?: string;
 }
 
 // ============================================
@@ -1056,6 +1148,21 @@ export interface ElectronAPI {
     saveMessages: (id: string, messages: MessageRow[]) => Promise<void>;
     appendMessage: (id: string, message: MessageRow) => Promise<void>;
     move: (sessionId: string, projectId: string | null) => Promise<void>;
+  };
+  servers: {
+    list: () => Promise<ServerEntry[]>;
+    add: (input: ServerInput) => Promise<ServerEntry>;
+    update: (id: string, patch: Partial<ServerInput>) => Promise<ServerEntry>;
+    remove: (id: string) => Promise<void>;
+    test: (id: string) => Promise<ServerTestResult>;
+    setDefault: (id: string | null) => Promise<void>;
+    status: () => Promise<ServerStatusEntry[]>;
+    /** 手动连接/重连（幂等）：初始健康检查失败后的恢复入口 */
+    connect: (id: string) => Promise<ServerStatusEntry>;
+    providers: (id: string) => Promise<ServerProvidersResult>;
+    vcs: (id: string) => Promise<ServerVcsResult>;
+    agents: (id: string) => Promise<ServerAgentSummary[]>;
+    onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => () => void;
   };
   fs: {
     listTree: (cwd: string, maxDepth?: number) => Promise<FsNode>;
