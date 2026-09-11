@@ -29,6 +29,7 @@ const BASE_PROPS = {
   onPickAttachments: vi.fn(),
   onSend: vi.fn(),
   onSelectProject: vi.fn(),
+  onCreateProject: vi.fn(),
   onApprovalModeChange: vi.fn(),
   onSwitchModel: vi.fn(),
   onReconfigure: vi.fn(),
@@ -143,6 +144,61 @@ describe('HomeView', () => {
     const send = container.querySelector<HTMLButtonElement>('[aria-label="发送"]');
     fireClick(send);
     expect(onSend).toHaveBeenCalled();
+    unmount();
+  });
+
+  it('opens the project menu listing every project and marking the active one', () => {
+    const projects: ProjectSummary[] = [
+      ...PROJECTS,
+      { id: 'p2', name: '第二个项目', updatedAt: 2, sessionCount: 0 },
+    ];
+    const { container, unmount } = render(<HomeView {...BASE_PROPS} projects={projects} />);
+    fireClick(container.querySelector('.home-composer__project'));
+    const items = Array.from(container.querySelectorAll('.home-composer__project-item'));
+    expect(items.map((el) => el.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Stellara Work'), expect.stringContaining('第二个项目')]),
+    );
+    expect(container.querySelector('.home-composer__project-item.active')?.textContent).toContain('Stellara Work');
+    expect(container.textContent).toContain('新建项目…');
+    unmount();
+  });
+
+  it('selects a project from the menu', () => {
+    const onSelectProject = vi.fn();
+    const { container, unmount } = render(
+      <HomeView
+        {...BASE_PROPS}
+        projects={[{ id: 'p2', name: '第二个项目', updatedAt: 2, sessionCount: 0 }]}
+        onSelectProject={onSelectProject}
+      />,
+    );
+    fireClick(container.querySelector('.home-composer__project'));
+    const item = Array.from(container.querySelectorAll('.home-composer__project-item'))
+      .find((el) => el.textContent?.includes('第二个项目')) ?? null;
+    fireClick(item);
+    expect(onSelectProject).toHaveBeenCalledWith('p2');
+    unmount();
+  });
+
+  it('opens project creation from the menu with the chip as return focus', () => {
+    const onCreateProject = vi.fn();
+    const { container, unmount } = render(<HomeView {...BASE_PROPS} onCreateProject={onCreateProject} />);
+    const chip = container.querySelector('.home-composer__project');
+    fireClick(chip);
+    const item = Array.from(container.querySelectorAll('.home-composer__project-item'))
+      .find((el) => el.textContent?.includes('新建项目')) ?? null;
+    fireClick(item);
+    expect(onCreateProject).toHaveBeenCalledWith(chip);
+    unmount();
+  });
+
+  it('shows only the create action when there are no projects', () => {
+    const { container, unmount } = render(<HomeView {...BASE_PROPS} projects={[]} activeProjectId={undefined} />);
+    fireClick(container.querySelector('.home-composer__project'));
+    const items = container.querySelectorAll('.home-composer__project-item');
+    expect(items.length).toBe(1);
+    expect(items[0]?.textContent).toContain('新建项目…');
+    expect(container.querySelector('.home-composer__project-separator')).toBeNull();
     unmount();
   });
 });

@@ -4,7 +4,7 @@ import { act, useState } from 'react';
 import { MainView } from './MainView';
 import { captureFocusTarget, restoreFocusTarget } from '../lib/presence-ui';
 import type {
-  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerAgentSummary, ServerEntry, ServerProvidersResult,
+  AppInfo, AttachmentMeta, ConfiguredModel, Project, ProjectSummary, ServerAgentSummary, ServerEntry, ServerProvidersResult,
   ServerStatusEntry, Session, SessionSummary,
 } from '../../shared/ipc';
 
@@ -2905,5 +2905,164 @@ describe('MainView execution target selector', () => {
     expect(querySelector('.server-offline-banner')).toBeNull();
     expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(false);
     unmount();
+  });
+});
+
+describe('MainView home project picker', () => {
+  const PROJECT: ProjectSummary = {
+    id: 'p1',
+    name: '项目一',
+    workDir: 'D:/proj-one',
+    updatedAt: 1,
+    sessionCount: 0,
+  };
+
+  const CREATED_PROJECT: ProjectSummary = {
+    id: 'p-new',
+    name: '新项目',
+    workDir: 'D:/proj-new',
+    entryFile: 'D:/proj-new/README.md',
+    updatedAt: 0,
+    sessionCount: 0,
+  };
+
+  function installApi() {
+    const sessions = {
+      get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+      delete: vi.fn().mockResolvedValue(undefined),
+      list: vi.fn().mockResolvedValue([]),
+      saveMessages: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        id: 'new-1', title: 'New session', modelId: CONFIG.id, projectId: 'p1',
+        createdAt: 0, updatedAt: 0, messageCount: 0,
+      } as Session),
+    };
+    const projects = {
+      create: vi.fn().mockResolvedValue(CREATED_PROJECT as unknown as Project),
+    };
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions,
+      projects,
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+      dialog: {
+        getPathForFile: vi.fn((file: File) => `/tmp/${file.name}`),
+        openAttachmentFiles: vi.fn().mockResolvedValue([]),
+        selectProjectDir: vi.fn().mockResolvedValue({ workDir: 'D:/proj-new', entryFile: 'D:/proj-new/README.md' }),
+      },
+      attachments: { add: vi.fn().mockResolvedValue({ attachments: [] }) },
+    };
+    return { sessions, projects };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+  });
+
+  async function pickProject(view: Awaited<ReturnType<typeof renderMainView>>, name: string) {
+    fireClick(view.querySelector('.home-composer__project'));
+    const item = Array.from(view.querySelectorAll('.home-composer__project-item'))
+      .find((el) => el.textContent?.includes(name)) ?? null;
+    fireClick(item);
+  }
+
+  it('selects a home project, updates the chip and enables the attachment picker', async () => {
+    installApi();
+    const view = await renderMainView(
+      { activeSessionId: null, sessions: [], projects: [PROJECT] },
+      undefined,
+      { navigateToTasks: false },
+    );
+
+    expect(view.querySelector('.home-composer__project')?.textContent).toContain('选择项目');
+    expect((view.querySelector('.attach-btn') as HTMLButtonElement).disabled).toBe(true);
+
+    await pickProject(view, '项目一');
+
+    expect(view.querySelector('.home-composer__project')?.textContent).toContain('项目一');
+    expect((view.querySelector('.attach-btn') as HTMLButtonElement).disabled).toBe(false);
+    view.unmount();
+  });
+
+  it('falls back to no selection when the selected home project disappears', async () => {
+    installApi();
+    const view = await renderMainView(
+      { activeSessionId: null, sessions: [], projects: [PROJECT] },
+      undefined,
+      { navigateToTasks: false },
+    );
+
+    await pickProject(view, '项目一');
+    expect(view.querySelector('.home-composer__project')?.textContent).toContain('项目一');
+
+    await view.rerender({ projects: [] });
+    expect(view.querySelector('.home-composer__project')?.textContent).toContain('选择项目');
+    expect((view.querySelector('.attach-btn') as HTMLButtonElement).disabled).toBe(true);
+    view.unmount();
+  });
+
+  it('creates the next session in the selected home project', async () => {
+    const api = installApi();
+    const onSessionCreated = vi.fn();
+    const view = await renderMainView(
+      { activeSessionId: null, sessions: [], projects: [PROJECT], onSessionCreated },
+      undefined,
+      { navigateToTasks: false },
+    );
+
+    await pickProject(view, '项目一');
+    fireClick(view.querySelector('.sidebar-primary-item'));
+    await act(async () => {});
+
+    expect(api.sessions.create).toHaveBeenCalledWith({ modelId: CONFIG.id, projectId: 'p1' });
+    expect(onSessionCreated).toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('selects a project right after creating it from the home picker', async () => {
+    const api = installApi();
+    const onProjectCreated = vi.fn();
+    const view = await renderMainView(
+      { activeSessionId: null, sessions: [], projects: [], onProjectCreated },
+      undefined,
+      { navigateToTasks: false },
+    );
+
+    fireClick(view.querySelector('.home-composer__project'));
+    const createItem = Array.from(view.querySelectorAll('.home-composer__project-item'))
+      .find((el) => el.textContent?.includes('新建项目')) ?? null;
+    fireClick(createItem);
+    await act(async () => {});
+
+    const name = document.querySelector<HTMLInputElement>('#project-dialog-name');
+    expect(name).not.toBeNull();
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(name, '新项目');
+      name!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    fireClick(document.querySelector('.project-file-action__main'));
+    await act(async () => {});
+    const createButton = Array.from(document.querySelectorAll('.project-dialog-footer button'))
+      .find((el) => el.textContent?.includes('创建项目')) ?? null;
+    fireClick(createButton);
+    await act(async () => {});
+
+    expect(api.projects.create).toHaveBeenCalledWith({
+      name: '新项目',
+      workDir: 'D:/proj-new',
+      entryFile: 'D:/proj-new/README.md',
+    });
+    expect(onProjectCreated).toHaveBeenCalledWith(CREATED_PROJECT);
+
+    await view.rerender({ projects: [CREATED_PROJECT] });
+    expect(view.querySelector('.home-composer__project')?.textContent).toContain('新项目');
+    view.unmount();
   });
 });

@@ -20,6 +20,8 @@ interface HomeViewProps {
   projectControl?: ReactNode;
   serverTarget?: { name: string } | null;
   onOpenSettings?: () => void;
+  onSelectProject: (id: string) => void;
+  onCreateProject: (returnFocus?: HTMLElement | null) => void;
   onInputChange: (value: string) => void;
   onAttachmentsChange: (next: AttachmentMeta[]) => void;
   onAddPaths: (paths: string[]) => void;
@@ -59,12 +61,16 @@ export function HomeView(props: HomeViewProps) {
         busy={props.busy}
         attachments={props.attachments}
         hasWorkDir={props.hasWorkDir}
+        projects={props.projects}
+        activeProjectId={props.activeProjectId}
         projectName={activeProject?.name}
         serverTarget={props.serverTarget}
         branch={props.branch}
         approvalMode={props.approvalMode}
         modelControl={props.modelControl}
         projectControl={props.projectControl}
+        onSelectProject={props.onSelectProject}
+        onCreateProject={props.onCreateProject}
         onInputChange={props.onInputChange}
         onAttachmentsChange={props.onAttachmentsChange}
         onAddPaths={props.onAddPaths}

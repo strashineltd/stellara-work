@@ -118,6 +118,8 @@ export function MainView(props: MainViewProps) {
     workDir: null,
   });
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [homeProjectId, setHomeProjectId] = useState<string | null>(null);
+  const homeProject = projects.find((project) => project.id === homeProjectId);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
   // 仅当本地会话引用的模型已从配置中删除时才提示（服务器会话的 modelId 是远端 provider/model，不走本地列表）
   const sessionModelMissing = !!activeSession && activeSession.runtime !== 'server'
@@ -954,7 +956,8 @@ export function MainView(props: MainViewProps) {
       return;
     }
     if (!config) return;
-    const targetProjectId = projectId ?? activeSession?.projectId;
+    // homeProject?.id：选中的首页项目被删除时自动回退，避免用已删除的项目建会话
+    const targetProjectId = projectId ?? homeProject?.id ?? activeSession?.projectId;
     if (!targetProjectId) {
       navigateToSection('home');
       if (projects.length === 0 && !createProjectOpen) {
@@ -982,6 +985,7 @@ export function MainView(props: MainViewProps) {
       createProjectReturnFocusRef.current,
     );
     onProjectCreated(project);
+    setHomeProjectId(project.id);
     createProjectReturnFocusRef.current = null;
     setCreateProjectOpen(false);
   }
@@ -1225,12 +1229,12 @@ export function MainView(props: MainViewProps) {
             <HomeView
               config={config}
               projects={projects}
-              activeProjectId={activeProject?.id}
+              activeProjectId={homeProject?.id}
               branch={branch}
               input={input}
               busy={busy}
               attachments={attachments}
-              hasWorkDir={!!activeWorkDir}
+              hasWorkDir={!!(homeProject?.workDir ?? activeWorkDir)}
               approvalMode={approvalMode}
               modelMissing={!config && executionTarget.kind !== 'server'}
               serverTarget={
@@ -1239,6 +1243,8 @@ export function MainView(props: MainViewProps) {
                   : null
               }
               onOpenSettings={() => onOpenSettings()}
+              onSelectProject={(id) => setHomeProjectId(id)}
+              onCreateProject={(returnFocus) => openCreateProject(returnFocus)}
               onInputChange={setInput}
               onAttachmentsChange={setAttachments}
               onAddPaths={(paths) => void handleAddAttachmentPaths(paths)}

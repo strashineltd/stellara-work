@@ -1741,8 +1741,95 @@ html[data-platform='darwin'] .app-topbar {
   white-space: nowrap;
 }
 
-.home-composer__project {
+.home-composer__project-menu {
+  position: relative;
+  display: inline-flex;
   max-width: 46%;
+  min-width: 0;
+}
+
+.home-composer__project {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.home-composer__project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-composer__project-list {
+  position: absolute;
+  top: calc(100% + var(--space-1-5));
+  left: 0;
+  z-index: var(--z-popover);
+  display: grid;
+  gap: 2px;
+  min-width: 232px;
+  max-width: 320px;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-out);
+}
+
+.home-composer__project-list[data-motion-state='entering'],
+.home-composer__project-list[data-motion-state='closing'] {
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--motion-distance-sm)));
+}
+
+.home-composer__project-list[data-motion-state='closing'] {
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-in);
+}
+
+.home-composer__project-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.home-composer__project-item:hover {
+  background: var(--color-hover-overlay);
+}
+
+.home-composer__project-item.active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.home-composer__project-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-composer__project-item--new {
+  color: var(--color-text-soft);
+}
+
+.home-composer__project-separator {
+  height: 1px;
+  margin: 2px var(--space-1);
+  background: var(--color-border);
 }
 
 .home-composer__branch {
