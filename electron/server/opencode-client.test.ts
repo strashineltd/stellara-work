@@ -45,6 +45,55 @@ describe('OpencodeClient', () => {
     expect(body).toEqual({ parts: [{ type: 'text', text: 'hello' }], model: { providerID: 'anthropic', modelID: 'claude' }, agent: 'build' });
   });
 
+  it('normalizes the real /provider object-map shape into a provider list', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('http://localhost:4096/provider');
+      return jsonResponse({
+        all: [
+          {
+            id: 'anthropic',
+            name: 'Anthropic',
+            models: {
+              'anthropic/claude-sonnet-4-5': {
+                id: 'anthropic/claude-sonnet-4-5',
+                providerID: 'anthropic',
+                name: 'Claude Sonnet 4.5',
+              },
+              'anthropic/claude-haiku': { providerID: 'anthropic' },
+            },
+          },
+        ],
+        default: { anthropic: 'anthropic/claude-sonnet-4-5' },
+        connected: ['anthropic'],
+      });
+    });
+    const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
+    await expect(client.listProviders()).resolves.toEqual([
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        models: [
+          { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+          { id: 'anthropic/claude-haiku', name: 'anthropic/claude-haiku' },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps the plain array /provider shape', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse([
+        { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5', name: 'GPT-5' }] },
+        { id: 'local', models: [{ id: 'local-model' }] },
+      ]),
+    );
+    const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
+    await expect(client.listProviders()).resolves.toEqual([
+      { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5', name: 'GPT-5' }] },
+      { id: 'local', name: 'local', models: [{ id: 'local-model', name: 'local-model' }] },
+    ]);
+  });
+
   it('rejects non-2xx with readable error and waits for health timeout', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ error: 'unauthorized' }, 401));
     const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });

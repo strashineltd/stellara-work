@@ -14,6 +14,9 @@ import type {
   RemoteMessage,
   RemotePath,
   RemoteProvider,
+  RemoteProviderInput,
+  RemoteProviderInputModel,
+  RemoteProviderListResponse,
   RemoteSession,
   RemoteVcs,
 } from './types';
@@ -63,6 +66,27 @@ function authHeader(username: string | undefined, password: string | undefined):
   if (!password) return {};
   const token = Buffer.from(`${username ?? 'opencode'}:${password}`).toString('base64');
   return { Authorization: `Basic ${token}` };
+}
+
+function normalizeModel(model: RemoteProviderInputModel, key?: string): RemoteProvider['models'][number] | null {
+  const id = (typeof model.id === 'string' && model.id !== '' ? model.id : undefined) ?? key;
+  if (id === undefined || id === '') return null;
+  return { id, name: typeof model.name === 'string' && model.name !== '' ? model.name : id };
+}
+
+function normalizeProvider(input: RemoteProviderInput): RemoteProvider {
+  const rawModels = input.models;
+  let models: RemoteProvider['models'];
+  if (Array.isArray(rawModels)) {
+    models = rawModels.map((model) => normalizeModel(model)).filter((model) => model !== null);
+  } else if (rawModels !== undefined && typeof rawModels === 'object' && rawModels !== null) {
+    models = Object.entries(rawModels)
+      .map(([key, model]) => normalizeModel(model, key))
+      .filter((model) => model !== null);
+  } else {
+    models = [];
+  }
+  return { id: input.id, name: input.name ?? input.id, models };
 }
 
 interface RequestOptions {
@@ -157,11 +181,9 @@ export class OpencodeClient {
   }
 
   async listProviders(): Promise<RemoteProvider[]> {
-    const data = await this.request<
-      RemoteProvider[] | { all?: RemoteProvider[]; providers?: RemoteProvider[] }
-    >('GET', '/provider');
-    if (Array.isArray(data)) return data;
-    return data.all ?? data.providers ?? [];
+    const data = await this.request<RemoteProviderInput[] | RemoteProviderListResponse>('GET', '/provider');
+    const providers = Array.isArray(data) ? data : data.all ?? data.providers ?? [];
+    return providers.map(normalizeProvider);
   }
 
   listAgents(): Promise<RemoteAgent[]> {

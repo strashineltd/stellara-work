@@ -2,7 +2,9 @@
  * 远端 SSE 事件 → ChatStreamEvent 适配。
  *
  * 纯逻辑实现：不依赖 Electron / 网络 / 计时器 / 日志，便于单测。
- * - 文本与推理按 `${sessionID}:${partID}` 跟踪全文：增长时输出差量，回退/重写时输出全文。
+ * - 文本与推理按 `${sessionID}:${partID}` 跟踪全文：
+ *   message.part.delta（真实 1.18 主通道）输出增量；
+ *   message.part.updated 全文快照去重后只输出未见后缀（增量已驱动过的部分回退时仅重置基线）。
  * - 工具状态：pending → tool_call（每个 call 仅一次）、running → 无事件、
  *   completed/error → tool_result（每个 call 首个终态输出一次，重复/后续终态快照跳过；
  *   未见过的历史 call 也输出，保证容错）。
@@ -49,6 +51,7 @@ function readErrorMessage(raw: unknown): string | undefined {
 
 export class EventAdapter {
   private readonly partText = new Map<string, string>();
+  private readonly deltaDrivenParts = new Set<string>();
   private readonly emittedTools = new Set<string>();
   private readonly emittedResults = new Set<string>();
 
@@ -62,7 +65,10 @@ export class EventAdapter {
     switch (event.type) {
       case 'message.part.updated':
         return { sessionID, events: this.handlePart(part, sessionID) };
+      case 'message.part.delta':
+        return { sessionID, events: this.handlePartDelta(properties, sessionID) };
       case 'permission.updated':
+      case 'permission.asked':
         return { sessionID, events: this.handlePermission(properties) };
       case 'session.idle':
         return { sessionID, events: [{ type: 'done' }] };
@@ -98,11 +104,35 @@ export class EventAdapter {
     if (text.startsWith(previous)) {
       delta = text.slice(previous.length);
       if (delta === '') return [];
+    } else if (this.deltaDrivenParts.has(key)) {
+      // 增量流驱动的部分：快照回退/重写时仅重置基线，避免与已输出的增量重复
+      this.partText.set(key, text);
+      return [];
     } else {
       delta = text;
     }
     this.partText.set(key, text);
     return [{ type: type === 'text' ? 'content' : 'reasoning', content: delta }];
+  }
+
+  private handlePartDelta(
+    properties: Record<string, unknown> | undefined,
+    sessionID: string | undefined,
+  ): ChatStreamEvent[] {
+    const partID = readString(properties?.partID);
+    const field = readString(properties?.field);
+    const delta = readString(properties?.delta);
+    if (partID === undefined || delta === undefined || delta === '') return [];
+    const type = field === 'text' ? 'content' : field === 'reasoning' ? 'reasoning' : undefined;
+    if (type === undefined) return [];
+
+    const key = `${sessionID ?? ''}:${partID}`;
+    this.deltaDrivenParts.add(key);
+    const previous = this.partText.get(key) ?? '';
+    // 快照已包含该尾部增量（重放）：跳过，避免重复输出
+    if (previous.endsWith(delta)) return [];
+    this.partText.set(key, previous + delta);
+    return [{ type, content: delta }];
   }
 
   private handleToolPart(part: Record<string, unknown>, sessionID: string | undefined): ChatStreamEvent[] {

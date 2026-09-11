@@ -90,16 +90,48 @@ export interface RemoteEvent {
   [key: string]: unknown;
 }
 
+/** 归一化后的 provider：models 统一为数组，name 保证存在。 */
 export interface RemoteProviderModel {
-  id?: string;
-  name?: string;
+  id: string;
+  name: string;
   [key: string]: unknown;
 }
 
 export interface RemoteProvider {
   id: string;
+  name: string;
+  models: RemoteProviderModel[];
+  [key: string]: unknown;
+}
+
+/** `/provider` 原始响应中的 model 条目（宽容：字段可能缺失）。 */
+export interface RemoteProviderInputModel {
+  id?: string;
   name?: string;
-  models?: Record<string, RemoteProviderModel>;
+  [key: string]: unknown;
+}
+
+/** `/provider` 原始响应中的 provider；models 可能是对象映射（真实 1.18）或数组。 */
+export interface RemoteProviderInput {
+  id: string;
+  name?: string;
+  models?: Record<string, RemoteProviderInputModel> | RemoteProviderInputModel[];
+  [key: string]: unknown;
+}
+
+export interface RemoteProviderListResponse {
+  all?: RemoteProviderInput[];
+  providers?: RemoteProviderInput[];
+  [key: string]: unknown;
+}
+
+/** `message.part.delta`（真实 1.18 流式文本/推理增量）的属性形状。 */
+export interface RemotePartDelta {
+  sessionID?: string;
+  messageID?: string;
+  partID?: string;
+  field?: string;
+  delta?: string;
   [key: string]: unknown;
 }
 

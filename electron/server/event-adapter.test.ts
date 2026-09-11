@@ -42,6 +42,78 @@ describe('EventAdapter', () => {
     ]);
   });
 
+  it('treats permission.asked as an alias of permission.updated and ignores permission.replied', () => {
+    const adapter = new EventAdapter();
+    const asked = adapter.handle({
+      type: 'permission.asked',
+      properties: { id: 'perm_9', sessionID: 'ses_1', title: 'Edit 文件', metadata: { path: 'a.ts' } },
+    } as never);
+    expect(asked).toEqual({
+      sessionID: 'ses_1',
+      events: [
+        {
+          type: 'approval_required',
+          approval: { id: 'perm_9', toolName: 'Edit 文件', args: '{"path":"a.ts"}', toolCallId: 'perm_9' },
+        },
+      ],
+    });
+    expect(adapter.handle({ type: 'permission.replied', properties: { id: 'perm_9', sessionID: 'ses_1' } } as never).events).toEqual([]);
+  });
+
+  it('emits content and reasoning deltas from message.part.delta events', () => {
+    const adapter = new EventAdapter();
+    const delta = (field: string, value: string) => ({
+      type: 'message.part.delta',
+      properties: { sessionID: 'ses_1', messageID: 'm1', partID: 'p1', field, delta: value },
+    });
+    expect(adapter.handle(delta('text', '你') as never)).toEqual({
+      sessionID: 'ses_1',
+      events: [{ type: 'content', content: '你' }],
+    });
+    expect(adapter.handle(delta('text', '好') as never).events).toEqual([{ type: 'content', content: '好' }]);
+    expect(adapter.handle(delta('reasoning', '思') as never).events).toEqual([{ type: 'reasoning', content: '思' }]);
+    expect(adapter.handle(delta('reasoning', '考') as never).events).toEqual([{ type: 'reasoning', content: '考' }]);
+    // 未知 field 忽略
+    expect(adapter.handle(delta('tool', '{}') as never).events).toEqual([]);
+  });
+
+  it('dedupes deltas already covered by a full snapshot', () => {
+    const adapter = new EventAdapter();
+    const snapshot = (text: string) =>
+      ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
+    const delta = (value: string) =>
+      ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
+    expect(adapter.handle(snapshot('你好')).events).toEqual([{ type: 'content', content: '你好' }]);
+    // 同一内容的 delta 与快照尾部重合：跳过
+    expect(adapter.handle(delta('你好')).events).toEqual([]);
+    expect(adapter.handle(delta('世界')).events).toEqual([{ type: 'content', content: '世界' }]);
+  });
+
+  it('emits only the unseen suffix when snapshots arrive after deltas', () => {
+    const adapter = new EventAdapter();
+    const snapshot = (text: string) =>
+      ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
+    const delta = (value: string) =>
+      ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
+    expect(adapter.handle(delta('你')).events).toEqual([{ type: 'content', content: '你' }]);
+    expect(adapter.handle(delta('好')).events).toEqual([{ type: 'content', content: '好' }]);
+    expect(adapter.handle(snapshot('你好')).events).toEqual([]);
+    expect(adapter.handle(snapshot('你好世界')).events).toEqual([{ type: 'content', content: '世界' }]);
+    // 快照已包含的增量尾部重放：跳过
+    expect(adapter.handle(delta('世界')).events).toEqual([]);
+  });
+
+  it('resets the baseline without duplicate output when a snapshot regresses after deltas', () => {
+    const adapter = new EventAdapter();
+    const snapshot = (text: string) =>
+      ({ type: 'message.part.updated', properties: { part: { type: 'text', id: 'p1', sessionID: 'ses_1', text } } }) as never;
+    const delta = (value: string) =>
+      ({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: value } }) as never;
+    expect(adapter.handle(delta('abc')).events).toEqual([{ type: 'content', content: 'abc' }]);
+    expect(adapter.handle(snapshot('ab')).events).toEqual([]);
+    expect(adapter.handle(snapshot('abcd')).events).toEqual([{ type: 'content', content: 'cd' }]);
+  });
+
   it('maps session lifecycle and ignores unknown events', () => {
     const adapter = new EventAdapter();
     expect(adapter.handle({ type: 'session.idle', properties: { sessionID: 'ses_1' } } as never).events).toEqual([{ type: 'done' }]);
@@ -147,6 +219,10 @@ describe('EventAdapter', () => {
     expect(adapter.handle({ type: 'message.part.updated', properties: {} } as never).events).toEqual([]);
     expect(
       adapter.handle({ type: 'message.part.updated', properties: { part: { type: 'file', id: 'f1', sessionID: 'ses_1' } } } as never).events,
+    ).toEqual([]);
+    expect(adapter.handle({ type: 'message.part.delta', properties: { sessionID: 'ses_1' } } as never).events).toEqual([]);
+    expect(
+      adapter.handle({ type: 'message.part.delta', properties: { sessionID: 'ses_1', partID: 'p1', field: 'text', delta: '' } } as never).events,
     ).toEqual([]);
     expect(adapter.handle({ type: 'permission.updated', properties: { id: 'perm_2' } } as never).events).toEqual([
       { type: 'approval_required', approval: { id: 'perm_2', toolName: '', args: '{}', toolCallId: 'perm_2' } },

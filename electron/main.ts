@@ -771,11 +771,8 @@ function registerIpcHandlers(): void {
     const providers = await client.listProviders();
     return providers.map((provider) => ({
       id: provider.id,
-      name: provider.name ?? provider.id,
-      models: Object.entries(provider.models ?? {}).map(([modelId, model]) => ({
-        id: model.id ?? modelId,
-        name: model.name ?? model.id ?? modelId,
-      })),
+      name: provider.name,
+      models: provider.models.map((model) => ({ id: model.id, name: model.name })),
     }));
   });
 
