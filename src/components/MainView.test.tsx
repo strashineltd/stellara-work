@@ -4,7 +4,8 @@ import { act, useState } from 'react';
 import { MainView } from './MainView';
 import { captureFocusTarget, restoreFocusTarget } from '../lib/presence-ui';
 import type {
-  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerEntry, ServerStatusEntry, Session, SessionSummary,
+  AppInfo, AttachmentMeta, ConfiguredModel, Project, ServerAgentSummary, ServerEntry, ServerProvidersResult,
+  ServerStatusEntry, Session, SessionSummary,
 } from '../../shared/ipc';
 
 const CONFIG: ConfiguredModel = {
@@ -102,6 +103,15 @@ function fireClick(el: Element | null | undefined) {
   if (!el) throw new Error('Element not found for click');
   act(() => {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
+function selectOption(el: Element | null | undefined, value: string) {
+  if (!el) throw new Error('Element not found for select');
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+    setter.call(el as HTMLSelectElement, value);
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   });
 }
 
@@ -2387,8 +2397,29 @@ describe('MainView execution target selector', () => {
     createdAt: '2026-09-10T00:00:00Z',
   };
 
-  function installApi(options: { defaultServerId?: string | null; servers?: ServerEntry[] } = {}) {
+  const SERVER_PROVIDERS: ServerProvidersResult = {
+    providers: [
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        models: [
+          { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+          { id: 'claude-opus-4', name: 'Claude Opus 4' },
+        ],
+      },
+    ],
+    default: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+  };
+  const SERVER_AGENTS: ServerAgentSummary[] = [{ name: 'build' }, { name: 'plan' }];
+
+  function installApi(options: {
+    defaultServerId?: string | null;
+    servers?: ServerEntry[];
+    providers?: ServerProvidersResult;
+    agents?: ServerAgentSummary[];
+  } = {}) {
     let serverList = options.servers ?? [SERVER_A, SERVER_B];
+    let statusCb: ((statusList: ServerStatusEntry[]) => void) | null = null;
     const servers = {
       list: vi.fn().mockImplementation(() => Promise.resolve(serverList)),
       status: vi.fn().mockResolvedValue([
@@ -2396,7 +2427,12 @@ describe('MainView execution target selector', () => {
         { id: 'srv-2', status: 'error', error: '连接失败' } as ServerStatusEntry,
       ]),
       connect: vi.fn().mockResolvedValue({ id: 'srv-2', status: 'connecting' } as ServerStatusEntry),
-      onStatusChanged: vi.fn().mockReturnValue(() => {}),
+      providers: vi.fn().mockResolvedValue(options.providers ?? SERVER_PROVIDERS),
+      agents: vi.fn().mockResolvedValue(options.agents ?? SERVER_AGENTS),
+      onStatusChanged: vi.fn((cb: (statusList: ServerStatusEntry[]) => void) => {
+        statusCb = cb;
+        return () => {};
+      }),
     };
     const sessions = {
       get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
@@ -2451,6 +2487,9 @@ describe('MainView execution target selector', () => {
       },
       fireSettingsChanged: () => {
         act(() => settingsCb?.());
+      },
+      fireStatusChanged: (statusList: ServerStatusEntry[]) => {
+        act(() => statusCb?.(statusList));
       },
     };
   }
@@ -2683,6 +2722,156 @@ describe('MainView execution target selector', () => {
     fireClick(querySelector('.server-target__item[data-status="connected"]'));
 
     expect(querySelector('.no-model-banner')).toBeNull();
+    unmount();
+  });
+
+  function serverSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
+    return {
+      id: 'a',
+      title: '服务器会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 0,
+      runtime: 'server',
+      serverId: 'srv-1',
+      ...overrides,
+    };
+  }
+
+  function typeAndSend(querySelector: (sel: string) => Element | null, text: string) {
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+  }
+
+  it('keeps the local model switcher for local sessions', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({ config: CONFIG });
+
+    expect(querySelector('.model-switcher')).not.toBeNull();
+    expect(querySelector('.server-session-controls')).toBeNull();
+    unmount();
+  });
+
+  it('renders server session controls instead of the local model switcher for a server session', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      config: CONFIG,
+      sessions: [serverSession()],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    expect(querySelector('.server-session-controls')).not.toBeNull();
+    expect(querySelector('.model-switcher')).toBeNull();
+    expect((querySelector('.server-session-controls__model') as HTMLSelectElement).value)
+      .toBe('anthropic/claude-sonnet-4');
+    expect((querySelector('.server-session-controls__agent') as HTMLSelectElement).value)
+      .toBe('build');
+    unmount();
+  });
+
+  it('does not show the deleted-model banner for a server session with a stored remote model', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      config: CONFIG,
+      sessions: [serverSession({ modelId: 'anthropic/claude-sonnet-4' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    expect(querySelector('.model-missing-banner')).toBeNull();
+    unmount();
+  });
+
+  it('sends the selected server model and agent with chat.start', async () => {
+    installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ modelId: 'anthropic/claude-sonnet-4' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    selectOption(querySelector('.server-session-controls__model'), 'anthropic/claude-opus-4');
+    selectOption(querySelector('.server-session-controls__agent'), 'plan');
+    typeAndSend(querySelector, '服务器任务');
+    await act(async () => {});
+
+    expect(chatStart).toHaveBeenCalledTimes(1);
+    const request = chatStart.mock.calls[0]![0];
+    expect(request.serverModel).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' });
+    expect(request.serverAgent).toBe('plan');
+    unmount();
+  });
+
+  it('passes the stored session model to chat.start when no explicit selection exists', async () => {
+    installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ modelId: 'anthropic/claude-opus-4' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    typeAndSend(querySelector, '服务器任务');
+    await act(async () => {});
+
+    expect(chatStart).toHaveBeenCalledTimes(1);
+    const request = chatStart.mock.calls[0]![0];
+    expect(request.serverModel).toEqual({ providerID: 'anthropic', modelID: 'claude-opus-4' });
+    expect(request.serverAgent).toBeUndefined();
+    unmount();
+  });
+
+  it('shows the offline banner, blocks sending, reconnects, and recovers', async () => {
+    const api = installApi();
+    const chatStart = vi.fn().mockResolvedValue({ streamId: 'st1', events: (async function* () {})() });
+    (window as any).electronAPI.chat.start = chatStart;
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ serverId: 'srv-2' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    const banner = querySelector('.server-offline-banner');
+    expect(banner).not.toBeNull();
+    expect(banner?.getAttribute('role')).toBe('alert');
+    expect(banner?.textContent).toContain('服务器未连接');
+    expect(banner?.textContent).toContain('远程开发机');
+
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '离线任务');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(true);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+    expect(chatStart).not.toHaveBeenCalled();
+
+    fireClick(querySelector('.server-offline-banner__retry'));
+    expect(api.servers.connect).toHaveBeenCalledWith('srv-2');
+
+    api.fireStatusChanged([{ id: 'srv-2', status: 'connected' }]);
+    await act(async () => {});
+    expect(querySelector('.server-offline-banner')).toBeNull();
+    expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(false);
     unmount();
   });
 });

@@ -17,6 +17,8 @@ export interface SlashState {
 interface InputAreaProps {
   input: string;
   busy: boolean;
+  /** 服务器离线等外部阻塞：发送按钮禁用（输入仍可编辑） */
+  disabled?: boolean;
   approvalMode: ApprovalMode;
   slash: SlashState;
   hasWorkDir: boolean;
@@ -183,7 +185,7 @@ export function InputArea(props: InputAreaProps) {
         <button
           className="btn btn-primary"
           onClick={() => props.onSend()}
-          disabled={props.busy || !props.input.trim()}
+          disabled={props.busy || props.disabled || !props.input.trim()}
           type="button"
         >
           {props.busy ? '执行中…' : '开始执行'}

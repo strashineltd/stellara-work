@@ -19,6 +19,7 @@ import { WorkspacePanel, type Goal, type Deliverable, type MemoryContextItem, ty
 import { ChatStream } from './chat/ChatStream';
 import { InputArea, type SlashState } from './chat/InputArea';
 import { ModelSwitcher } from './chat/ModelSwitcher';
+import { ServerSessionControls } from './chat/ServerSessionControls';
 import { TabBar, type TabBarTab } from './chat/TabBar';
 import { HomeView } from './home/HomeView';
 import { ProjectDialog } from './ProjectDialog';
@@ -62,6 +63,14 @@ interface MainViewProps {
   onSessionsChanged: (sessions: SessionSummary[]) => void;
   onModelChanged: (config: ConfiguredModel) => void;
   onThemeChange?: (theme: import('../../shared/ipc').ThemeName) => void;
+}
+
+/** 服务器会话持久化的 modelId 形如 `providerID/modelID`；无法解析时返回 null（主进程回退服务器默认）。 */
+function parseServerModelId(modelId: string | undefined): { providerID: string; modelID: string } | null {
+  if (!modelId) return null;
+  const slash = modelId.indexOf('/');
+  if (slash <= 0 || slash === modelId.length - 1) return null;
+  return { providerID: modelId.slice(0, slash), modelID: modelId.slice(slash + 1) };
 }
 
 export function MainView(props: MainViewProps) {
@@ -110,8 +119,9 @@ export function MainView(props: MainViewProps) {
   });
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [modelList, setModelList] = useState<ModelListItem[]>([]);
-  // 仅当会话引用的模型已从配置中删除时才提示（切换活跃模型不算）
-  const sessionModelMissing = !!activeSession && !modelList.some((m) => m.id === activeSession.modelId);
+  // 仅当本地会话引用的模型已从配置中删除时才提示（服务器会话的 modelId 是远端 provider/model，不走本地列表）
+  const sessionModelMissing = !!activeSession && activeSession.runtime !== 'server'
+    && !modelList.some((m) => m.id === activeSession.modelId);
   const [switchingModel, setSwitchingModel] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [pendingPlanApproval, setPendingPlanApproval] = useState<import('../../shared/ipc').PlanApprovalRequest | null>(null);
@@ -126,8 +136,15 @@ export function MainView(props: MainViewProps) {
   const activeSection: AppSection = nav.current.section;
   const { servers, statuses, refresh: refreshServers } = useServers();
   const [executionTarget, setExecutionTarget] = useState<ExecutionTarget>({ kind: 'local' });
-  // 每会话服务器模型/Agent 选择由 Task 6 接入；当前映射恒为空，发送时透传 undefined 给主进程
-  const [serverSelections] = useState<Record<string, { providerID: string; modelID: string; agent?: string }>>({});
+  // 每会话服务器模型/Agent 选择（未显式选择时 handleSend 回退到会话已存 modelId / 服务器默认）
+  const [serverSelections, setServerSelections] = useState<Record<string, { providerID: string; modelID: string; agent?: string }>>({});
+  const activeServerId = activeSession?.runtime === 'server' ? activeSession.serverId : undefined;
+  const activeServerName = activeServerId
+    ? servers.find((server) => server.id === activeServerId)?.name
+    : undefined;
+  const activeServerConnected = activeServerId !== undefined
+    && statuses.some((entry) => entry.id === activeServerId && entry.status === 'connected');
+  const serverOffline = activeSession?.runtime === 'server' && !activeServerConnected;
   const [slash, setSlash] = useState<SlashState>({
     slashOpen: false, slashItems: [], slashIdx: 0, skillsLoaded: false,
   });
@@ -524,6 +541,8 @@ export function MainView(props: MainViewProps) {
 
   async function handleSend(returnFocus?: HTMLElement | null) {
     if (!input.trim() || busy) return;
+    // 服务器离线：发送按钮已禁用，这里再拦截快捷键/程序化调用
+    if (serverOffline) return;
     const activeServerSession = activeSession?.runtime === 'server';
     // 服务器会话（或服务器目标下尚无会话）不要求本地模型配置
     const serverMode = activeServerSession || (!activeSession && executionTarget.kind === 'server');
@@ -562,10 +581,11 @@ export function MainView(props: MainViewProps) {
     const history = [...buildHistory(entries), { role: 'user' as const, content: userContent, attachments: sentAttachments }];
     const usePlanMode = planMode;
     setLastUserForRetry(null);
-    // 服务器会话：Task 6 写入每会话选择；当前为空映射，主进程用服务器默认模型
+    // 服务器会话：显式选择优先，其次回退到会话已存 modelId（`providerID/modelID`）
     const serverOverrides: Pick<ChatRequest, 'serverModel' | 'serverAgent'> = {};
     if (activeServerSession && activeSessionId) {
-      const selection = serverSelections[activeSessionId];
+      const selection = serverSelections[activeSessionId]
+        ?? parseServerModelId(activeSession?.modelId);
       if (selection) {
         serverOverrides.serverModel = { providerID: selection.providerID, modelID: selection.modelID };
         if (selection.agent) serverOverrides.serverAgent = selection.agent;
@@ -1113,9 +1133,28 @@ export function MainView(props: MainViewProps) {
                   本次会话已沉淀 {extractedNotice.count} 条记忆，可在记忆中心查看
                 </div>
               )}
+              {serverOffline && (
+                <div className="no-model-banner server-offline-banner" role="alert">
+                  <span className="server-offline-banner__text">
+                    服务器未连接：{activeServerName ?? '未知服务器'}
+                  </span>
+                  {activeServerId && (
+                    <div className="no-model-banner__actions">
+                      <button
+                        className="no-model-banner__btn server-offline-banner__retry"
+                        onClick={() => void window.electronAPI.servers.connect(activeServerId)}
+                        type="button"
+                      >
+                        重连
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               <InputArea
                 input={input}
                 busy={busy}
+                disabled={serverOffline}
                 approvalMode={approvalMode}
                 slash={slash}
                 hasWorkDir={!!activeWorkDir}
@@ -1134,13 +1173,26 @@ export function MainView(props: MainViewProps) {
                 activeSkill={activeSkill}
                 onActiveSkillClear={() => setActiveSkill(null)}
                 modelControl={
-                  <ModelSwitcher
-                    config={config}
-                    modelList={modelList}
-                    switchingModel={switchingModel}
-                    onSwitchModel={(id) => void handleSwitchModel(id)}
-                    onReconfigure={(returnFocus) => onOpenSettings(undefined, returnFocus)}
-                  />
+                  activeSession?.runtime === 'server' && activeServerId ? (
+                    <ServerSessionControls
+                      serverId={activeServerId}
+                      serverName={activeServerName ?? '服务器'}
+                      sessionModelId={activeSession?.modelId}
+                      value={activeSessionId ? serverSelections[activeSessionId] ?? null : null}
+                      onChange={(selection) => {
+                        if (!activeSessionId) return;
+                        setServerSelections((prev) => ({ ...prev, [activeSessionId]: selection }));
+                      }}
+                    />
+                  ) : (
+                    <ModelSwitcher
+                      config={config}
+                      modelList={modelList}
+                      switchingModel={switchingModel}
+                      onSwitchModel={(id) => void handleSwitchModel(id)}
+                      onReconfigure={(returnFocus) => onOpenSettings(undefined, returnFocus)}
+                    />
+                  )
                 }
               />
             </>
