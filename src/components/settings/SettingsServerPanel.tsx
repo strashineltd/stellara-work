@@ -56,6 +56,39 @@ export function SettingsServerPanel({ onChanged, refreshKey = 0 }: SettingsServe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
+  // 主进程状态广播：点状态实时更新，无需重开设置
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.servers.onStatusChanged((statusList) => {
+      setStatuses((prev) => {
+        const next = { ...prev };
+        for (const status of statusList) next[status.id] = status.status;
+        return next;
+      });
+    });
+    return unsubscribe;
+  }, []);
+
+  // 点外部 / Escape 关闭行内 `…` 菜单（触发按钮自身不重复处理，交给 click 切换）
+  useEffect(() => {
+    if (menuFor === null) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target;
+      if (target instanceof Element && target.closest('.settings-server-row__menu, .settings-server-row__menu-btn')) {
+        return;
+      }
+      setMenuFor(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuFor(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuFor]);
+
   async function handleTest(entry: ServerEntry) {
     setMenuFor(null);
     try {

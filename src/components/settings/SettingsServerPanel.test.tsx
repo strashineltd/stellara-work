@@ -47,6 +47,7 @@ function installApi(servers: ServerEntry[] = SERVERS, statuses: ServerStatusEntr
     test: vi.fn().mockResolvedValue({ ok: true, status: 'connected' } as ServerTestResult),
     setDefault: vi.fn().mockResolvedValue(undefined),
     status: vi.fn().mockResolvedValue(statuses),
+    onStatusChanged: vi.fn().mockReturnValue(() => {}),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: { servers: mocks } as unknown as ElectronAPI,
@@ -86,6 +87,18 @@ function fireChange(input: HTMLInputElement, value: string) {
   act(() => {
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function firePointerDown(element: Element | Document) {
+  act(() => {
+    element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  });
+}
+
+function fireEscape() {
+  act(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   });
 }
 
@@ -204,6 +217,50 @@ describe('SettingsServerPanel', () => {
 
     expect(byText(row(container, 'srv-1'), '鉴权失败，请检查用户名或密码')).toBeTruthy();
     expect(row(container, 'srv-1').querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
+  });
+
+  it('closes the row menu on outside pointerdown and Escape, and still toggles from the trigger', async () => {
+    const { container } = await render(<SettingsServerPanel onChanged={vi.fn()} />);
+
+    await openMenu(container, 'srv-1');
+    expect(row(container, 'srv-1').querySelector('.settings-server-row__menu')).toBeTruthy();
+    firePointerDown(document.body);
+    expect(row(container, 'srv-1').querySelector('.settings-server-row__menu')).toBeNull();
+
+    await openMenu(container, 'srv-1');
+    expect(row(container, 'srv-1').querySelector('.settings-server-row__menu')).toBeTruthy();
+    fireEscape();
+    expect(row(container, 'srv-1').querySelector('.settings-server-row__menu')).toBeNull();
+
+    const trigger = row(container, 'srv-1').querySelector('.settings-server-row__menu-btn')!;
+    firePointerDown(trigger);
+    await fireClick(trigger);
+    expect(row(container, 'srv-1').querySelector('.settings-server-row__menu')).toBeTruthy();
+    firePointerDown(trigger);
+    await fireClick(trigger);
+    expect(row(container, 'srv-1').querySelector('.settings-server-row__menu')).toBeNull();
+  });
+
+  it('subscribes to onStatusChanged and merges broadcasts into row dots', async () => {
+    const unsubscribe = vi.fn();
+    mocks.onStatusChanged.mockReturnValue(unsubscribe);
+    const { container, unmount } = await render(<SettingsServerPanel onChanged={vi.fn()} />);
+
+    expect(mocks.onStatusChanged).toHaveBeenCalledTimes(1);
+    const emit = mocks.onStatusChanged.mock.calls[0]![0] as (statuses: ServerStatusEntry[]) => void;
+
+    await act(async () => {
+      emit([
+        { id: 'srv-1', status: 'connecting' },
+        { id: 'srv-2', status: 'error', error: '连接失败' },
+      ]);
+    });
+
+    expect(row(container, 'srv-1').querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('connecting');
+    expect(row(container, 'srv-2').querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
+
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('sets a default server and deletes one only after confirmation', async () => {

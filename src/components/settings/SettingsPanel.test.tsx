@@ -27,6 +27,7 @@ function installApi() {
     getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
     serversList: vi.fn().mockResolvedValue([]),
     serversStatus: vi.fn().mockResolvedValue([]),
+    serversOnStatusChanged: vi.fn().mockReturnValue(() => {}),
   };
   Object.defineProperty(window, 'electronAPI', {
     value: {
@@ -40,6 +41,7 @@ function installApi() {
       servers: {
         list: mocks.serversList,
         status: mocks.serversStatus,
+        onStatusChanged: mocks.serversOnStatusChanged,
       },
       models: {
         getAll: mocks.getAll,
@@ -128,6 +130,7 @@ describe('SettingsPanel', () => {
     expect(container.querySelector('.settings-panel-head h2')?.textContent).toBe('服务器');
     expect(mocks.serversList).toHaveBeenCalledTimes(1);
     expect(mocks.serversStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.serversOnStatusChanged).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to models tab for an invalid initialTab', async () => {
