@@ -1040,6 +1040,17 @@ html[data-platform='darwin'] .app-topbar {
   transform: translateX(-50%);
 }
 
+/* 输入卡位于窗口底部：菜单向上展开并右对齐，避免超出窗口 */
+.main-input .model-switcher-menu,
+.home-composer .model-switcher-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: auto;
+  right: 0;
+  width: min(300px, calc(100vw - 32px));
+  transform: none;
+}
+
 .model-switcher-item {
   justify-content: space-between;
   gap: var(--space-3);
