@@ -80,6 +80,31 @@ describe('ServerManager', () => {
     expect(received).toEqual(['srv-1:session.idle']);
   });
 
+  it('notifies every event listener; unsubscribing one keeps the other', async () => {
+    const listeners: Array<(e: unknown) => void> = [];
+    const { manager } = makeManager({
+      createClient: () => ({
+        health: async () => ({ healthy: true }),
+        subscribeEvents: (cb: (e: unknown) => void) => { listeners.push(cb); return () => {}; },
+        listSessions: async () => [],
+      }) as never,
+    });
+    const first: string[] = [];
+    const second: string[] = [];
+    const offFirst = manager.onEvent((id, event) => first.push(`${id}:${(event as { type: string }).type}`));
+    manager.onEvent((id, event) => second.push(`${id}:${(event as { type: string }).type}`));
+    await manager.connectAll();
+
+    listeners[0]!({ type: 'session.updated', properties: { sessionID: 's1' } });
+    expect(first).toEqual(['srv-1:session.updated']);
+    expect(second).toEqual(['srv-1:session.updated']);
+
+    offFirst();
+    listeners[0]!({ type: 'session.deleted', properties: { sessionID: 's1' } });
+    expect(first).toEqual(['srv-1:session.updated']);
+    expect(second).toEqual(['srv-1:session.updated', 'srv-1:session.deleted']);
+  });
+
   it('reports stored password presence and default flag in list()', async () => {
     const { manager } = makeManager({
       getPassword: (id) => (id === 'srv-1' ? 'stored-secret' : null),

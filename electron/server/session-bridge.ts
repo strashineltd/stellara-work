@@ -46,6 +46,14 @@ export interface SessionBridgeDeps {
   uuid: () => string;
 }
 
+/** session.updated 里与本地映射行相关的字段（远端字段宽容处理）。 */
+export interface RemoteSessionUpdate {
+  id: string;
+  title?: string;
+  time?: { updated?: number };
+  model?: { providerID?: string; id?: string };
+}
+
 const REMOTE_FALLBACK_TITLE = '远端会话';
 const SERVER_NOT_CONNECTED = '服务器未连接';
 
@@ -159,6 +167,27 @@ export class SessionBridge {
     }
 
     this.db.renameSession(id, title);
+  }
+
+  /** 处理 session.updated：把远端的标题 / 更新时间 / 模型同步到映射行。 */
+  applyRemoteUpdate(serverId: string, remote: RemoteSessionUpdate): void {
+    const existing = this.db.findSessionByRemote(serverId, remote.id);
+    if (!existing) return;
+
+    const patch: { title?: string; updatedAt?: number; modelId?: string } = {};
+    if (typeof remote.title === 'string') patch.title = remote.title;
+    if (typeof remote.time?.updated === 'number') patch.updatedAt = remote.time.updated;
+    const providerID = remote.model?.providerID;
+    const modelID = remote.model?.id;
+    if (typeof providerID === 'string' && providerID !== '' && typeof modelID === 'string' && modelID !== '') {
+      patch.modelId = `${providerID}/${modelID}`;
+    }
+    this.db.updateSessionMeta(existing.id, patch);
+  }
+
+  /** 处理 session.deleted：删除本地映射行。 */
+  removeByRemote(serverId: string, remoteSessionId: string): void {
+    this.db.deleteSessionByRemote(serverId, remoteSessionId);
   }
 
   private requireClient(serverId: string | undefined): OpencodeClient {

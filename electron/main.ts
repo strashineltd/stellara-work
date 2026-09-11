@@ -13,7 +13,7 @@ import { ContextHub } from './context/context-hub';
 import { resolveSessionModel } from './chat/session-context';
 import { OpencodeClient } from './server/opencode-client';
 import { ServerManager } from './server/server-manager';
-import { SessionBridge } from './server/session-bridge';
+import { SessionBridge, type RemoteSessionUpdate } from './server/session-bridge';
 import { ServerChatBridge } from './server/chat-bridge';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
@@ -98,6 +98,48 @@ function broadcastSettingsChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now() });
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * 从 session.updated 事件属性提取映射行更新。
+ * 真实形状 `{ sessionID, info: { id, title, time, model } }`；info 缺失时回退 properties。
+ */
+function readRemoteSessionUpdate(properties: Record<string, unknown>): RemoteSessionUpdate | null {
+  const info = isRecord(properties.info) ? properties.info : properties;
+  const id =
+    typeof info.id === 'string'
+      ? info.id
+      : typeof properties.sessionID === 'string'
+        ? properties.sessionID
+        : undefined;
+  if (!id) return null;
+
+  const time = isRecord(info.time) ? info.time : undefined;
+  const model = isRecord(info.model) ? info.model : undefined;
+  return {
+    id,
+    ...(typeof info.title === 'string' ? { title: info.title } : {}),
+    ...(time && typeof time.updated === 'number' ? { time: { updated: time.updated } } : {}),
+    ...(model
+      ? {
+          model: {
+            ...(typeof model.providerID === 'string' ? { providerID: model.providerID } : {}),
+            ...(typeof model.id === 'string' ? { id: model.id } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** 从 session.deleted 事件属性提取远端会话 id（真实形状 `{ sessionID, info }`）。 */
+function readRemoteDeletedId(properties: Record<string, unknown>): string | undefined {
+  if (typeof properties.sessionID === 'string') return properties.sessionID;
+  const info = isRecord(properties.info) ? properties.info : undefined;
+  return info && typeof info.id === 'string' ? info.id : undefined;
 }
 
 function createWindow(): void {
@@ -2002,6 +2044,19 @@ app.whenReady().then(async () => {
       newStreamId: () => `server-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
     manager.onEvent((serverId, event) => chat.handleEvent(serverId, event));
+    // session.updated / session.deleted 不在聊天流适配范围内：同步映射行并让渲染层重载
+    manager.onEvent((serverId, event) => {
+      if (event.type !== 'session.updated' && event.type !== 'session.deleted') return;
+      const properties = isRecord(event.properties) ? event.properties : {};
+      if (event.type === 'session.updated') {
+        const remote = readRemoteSessionUpdate(properties);
+        if (remote) sessions.applyRemoteUpdate(serverId, remote);
+      } else {
+        const remoteId = readRemoteDeletedId(properties);
+        if (remoteId) sessions.removeByRemote(serverId, remoteId);
+      }
+      broadcastSettingsChanged();
+    });
     manager.onStatusChanged((statuses) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('servers:status-changed', statuses);

@@ -192,4 +192,39 @@ describe('SessionBridge', () => {
     await bridge.rename('l1', '新');
     expect(db.rows.get('l1')).toMatchObject({ title: '新' });
   });
+
+  it('applies session.updated fields to the mapped row', () => {
+    const db = makeDb();
+    db.createSession({ id: 'map', title: '旧', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    bridge.applyRemoteUpdate('srv-1', {
+      id: 'ses_1',
+      title: '新',
+      time: { updated: 500 },
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+    });
+    expect(db.rows.get('map')).toMatchObject({
+      title: '新', updatedAt: 500, modelId: 'anthropic/claude-sonnet-4',
+    });
+  });
+
+  it('ignores unmapped remote updates and partial model info', () => {
+    const db = makeDb();
+    db.createSession({ id: 'map', title: '旧', modelId: 'old/model', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    bridge.applyRemoteUpdate('srv-1', { id: 'ses_unknown', title: 'x' });
+    bridge.applyRemoteUpdate('srv-1', { id: 'ses_1', model: { providerID: 'anthropic' } });
+    expect(db.rows.size).toBe(1);
+    expect(db.rows.get('map')).toMatchObject({ title: '旧', modelId: 'old/model' });
+  });
+
+  it('removes the mapping row by remote session id', () => {
+    const db = makeDb();
+    db.createSession({ id: 'map', title: 'X', modelId: '', runtime: 'server', serverId: 'srv-1', remoteSessionId: 'ses_1' });
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'u1' });
+    bridge.removeByRemote('srv-1', 'ses_1');
+    expect(db.rows.has('map')).toBe(false);
+    bridge.removeByRemote('srv-1', 'ses_missing');
+    expect(db.rows.size).toBe(0);
+  });
 });
