@@ -373,6 +373,12 @@ export function MainView(props: MainViewProps) {
       if (cancelled) return;
       entriesSessionRef.current = null;
       setAttachments([]);
+      if (serverOffline) {
+        setEntries([]);
+        setLastUserForRetry(null);
+        setPendingPlanApproval(null);
+        return;
+      }
       void window.electronAPI.sessions.get(activeSessionId).then(({ messages }) => {
         if (cancelled) return;
         setEntries(messagesToEntries(messages));
@@ -406,7 +412,7 @@ export function MainView(props: MainViewProps) {
         .catch(() => { /* 旧数据或尚未初始化 Context DB 时保持空态 */ });
     })();
     return () => { cancelled = true; };
-  }, [activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSessionId, serverOffline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-save: debounce 300ms
   useEffect(() => {
