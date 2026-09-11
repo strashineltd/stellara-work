@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import type { SessionSummary, Project, ProjectFileSelection, ProjectSummary } from '../../shared/ipc';
+import type { SessionSummary, Project, ProjectFileSelection, ProjectSummary, ServerEntry, ServerRuntimeStatus, ServerStatusEntry } from '../../shared/ipc';
 import { Icon } from './Icon';
 import { ProjectDialog } from './ProjectDialog';
 import { formatRelativeTime } from '../lib/chat-utils';
@@ -29,6 +29,10 @@ interface SidebarProps extends PresenceMotionProps {
   activeSection?: AppSection;
   onNavigate: (section: AppSection) => void;
   onOpenSettings?: () => void;
+  /** 已配置服务器（服务器会话分组头显示名称与状态） */
+  servers?: ServerEntry[];
+  /** 服务器运行时状态（优先于 session.offline 判定离线） */
+  serverStatuses?: ServerStatusEntry[];
 }
 
 type ProjectFeedback = {
@@ -59,6 +63,35 @@ type ProjectMenuState = {
   project: ProjectSummary;
 };
 
+const UNKNOWN_SERVER_NAME = '未知服务器';
+
+type ServerGroup = {
+  serverId: string | null;
+  name: string;
+  status: ServerRuntimeStatus | 'unknown';
+  offline: boolean;
+  sessions: SessionSummary[];
+};
+
+/**
+ * 构建一个服务器会话分组：会话按 updatedAt 倒序；
+ * 离线判定优先取实时状态，缺失时回退到 session.offline。
+ */
+function buildServerGroup(
+  sessionsInGroup: SessionSummary[],
+  meta: { serverId: string | null; name: string; status?: ServerRuntimeStatus },
+): ServerGroup {
+  const groupSessions = [...sessionsInGroup].sort((a, b) => b.updatedAt - a.updatedAt);
+  const offline = meta.status ? meta.status !== 'connected' : groupSessions.some((s) => s.offline === true);
+  return {
+    serverId: meta.serverId,
+    name: meta.name,
+    status: meta.status ?? (offline ? 'disconnected' : 'unknown'),
+    offline,
+    sessions: groupSessions,
+  };
+}
+
 /** Truncate title to maxLen chars, appending ellipsis if needed. */
 function truncateTitle(title: string, maxLen = 28): string {
   if (title.length <= maxLen) return title;
@@ -78,6 +111,7 @@ export function Sidebar({
   onSelect, onNew, onDelete, onRename, onExport,
   onProjectCreate, onProjectDelete, onProjectRename, onProjectFileUpdate, onNewSessionInProject,
   activeSection, onNavigate, onOpenSettings, presence,
+  servers, serverStatuses,
 }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -135,8 +169,8 @@ export function Sidebar({
     return () => clearTimeout(timer);
   }, [search]);
 
-  // 按项目分组会话（支持内容搜索与项目筛选）
-  const { projectGroups, unassigned } = useMemo(() => {
+  // 按项目分组会话（支持内容搜索与项目筛选）；服务器会话按 serverId 单独分组
+  const { projectGroups, serverGroups, unassigned } = useMemo(() => {
     const query = search.trim().toLowerCase();
     const matchIds = new Set(contentMatchIds);
     const filtered = sessions.filter((s) => {
@@ -149,9 +183,17 @@ export function Sidebar({
     const knownProjectIds = new Set(projects.map((project) => project.id));
 
     const groupMap = new Map<string, SessionSummary[]>();
+    const serverMap = new Map<string, SessionSummary[]>();
     const unassignedList: SessionSummary[] = [];
 
     for (const s of filtered) {
+      if (s.runtime === 'server') {
+        const key = s.serverId ?? '';
+        const arr = serverMap.get(key) || [];
+        arr.push(s);
+        serverMap.set(key, arr);
+        continue;
+      }
       if (s.projectId && knownProjectIds.has(s.projectId)) {
         const arr = groupMap.get(s.projectId) || [];
         arr.push(s);
@@ -161,11 +203,34 @@ export function Sidebar({
       }
     }
 
+    const serverList = servers ?? [];
+    const statusById = new Map((serverStatuses ?? []).map((entry) => [entry.id, entry.status]));
+    const knownServerIds = new Set(serverList.map((server) => server.id));
+    const nextServerGroups: ServerGroup[] = [];
+    for (const server of serverList) {
+      const groupSessions = serverMap.get(server.id);
+      if (!groupSessions) continue;
+      nextServerGroups.push(buildServerGroup(groupSessions, {
+        serverId: server.id,
+        name: server.name,
+        status: statusById.get(server.id),
+      }));
+    }
+    const orphanedSessions: SessionSummary[] = [];
+    for (const [serverId, groupSessions] of serverMap) {
+      if (serverId && knownServerIds.has(serverId)) continue;
+      orphanedSessions.push(...groupSessions);
+    }
+    if (orphanedSessions.length > 0) {
+      nextServerGroups.push(buildServerGroup(orphanedSessions, { serverId: null, name: UNKNOWN_SERVER_NAME }));
+    }
+
     return {
       projectGroups: groupMap,
+      serverGroups: nextServerGroups,
       unassigned: unassignedList.sort((a, b) => b.updatedAt - a.updatedAt),
     };
-  }, [projects, sessions, search, contentMatchIds, projectFilter]);
+  }, [projects, sessions, search, contentMatchIds, projectFilter, servers, serverStatuses]);
 
   // 搜索时展开包含匹配项的分组，避免在 render/useMemo 中更新 state。
   useEffect(() => {
@@ -776,6 +841,25 @@ export function Sidebar({
           </li>
         )}
       </ul>
+
+      {/* 服务器会话分组（项目树之后、「最近」之前） */}
+      {serverGroups.map((group) => (
+        <section
+          key={group.serverId ?? '__unknown__'}
+          className="sidebar-server-group"
+          data-server-id={group.serverId ?? undefined}
+          aria-label={group.name}
+        >
+          <h2 className="sidebar-section-title">
+            <span className="server-status-dot" data-status={group.status} aria-hidden="true" />
+            <span className="sidebar-server-name">{group.name}</span>
+            {group.offline && <span className="server-offline-badge">离线</span>}
+          </h2>
+          <ul className="session-list">
+            {group.sessions.map(renderSession)}
+          </ul>
+        </section>
+      ))}
 
       {unassigned.length > 0 && (
         <section className="sidebar-recent" aria-label="最近">

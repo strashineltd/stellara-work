@@ -1014,6 +1014,8 @@ export function MainView(props: MainViewProps) {
             presence={sidebarPresence}
             projects={projects}
             sessions={sessions}
+            servers={servers}
+            serverStatuses={statuses}
             activeId={activeSessionId}
             mode={workspaceMode === 'tabs' ? 'compact' : 'full'}
             activeSection={activeSection}

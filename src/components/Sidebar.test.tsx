@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import { Sidebar } from './Sidebar';
-import type { SessionSummary } from '../../shared/ipc';
+import type { ServerEntry, ServerStatusEntry, SessionSummary } from '../../shared/ipc';
 
 const SESSIONS: SessionSummary[] = [
   { id: 'a', title: '给 main.tsx 加日志', modelId: 'deepseek', messageCount: 3, updatedAt: Date.now() - 60_000 },
@@ -16,6 +16,16 @@ const PROJECTS = [
 const TWO_PROJECTS = [
   ...PROJECTS,
   { id: 'p2', name: 'Beta', updatedAt: Date.now(), sessionCount: 0 },
+];
+
+const SERVERS: ServerEntry[] = [
+  { id: 'srv-1', name: '本地服务器', url: 'http://localhost:4096', hasPassword: false, isDefault: false, createdAt: '2026-09-10T00:00:00Z' },
+  { id: 'srv-2', name: '远程开发机', url: 'http://10.0.0.5:4096', hasPassword: true, isDefault: true, createdAt: '2026-09-10T00:00:00Z' },
+];
+
+const SERVER_STATUSES: ServerStatusEntry[] = [
+  { id: 'srv-1', status: 'connected' },
+  { id: 'srv-2', status: 'error', error: '连接失败' },
 ];
 
 const PROJECT_PROPS = {
@@ -328,6 +338,119 @@ describe('Sidebar', () => {
     fireInput(view.querySelector('.sidebar-search-input') as HTMLInputElement, '保留');
     const recentIds = Array.from(view.querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'));
     expect(recentIds).toEqual(['keep']);
+  });
+
+  it('groups server sessions under their server between projects and 最近', () => {
+    const sessions: SessionSummary[] = [
+      { id: 'srv-1-a', title: '服务器会话一', modelId: 'deepseek', messageCount: 1, updatedAt: 100, runtime: 'server', serverId: 'srv-1' },
+      { id: 'srv-2-a', title: '服务器会话二', modelId: 'deepseek', messageCount: 1, updatedAt: 200, runtime: 'server', serverId: 'srv-2' },
+      { id: 'pinned', title: '项目会话', modelId: 'deepseek', messageCount: 1, updatedAt: 300, projectId: 'p1' },
+      { id: 'loose', title: '本地杂项', modelId: 'deepseek', messageCount: 1, updatedAt: 400 },
+    ];
+    const onSelect = vi.fn();
+    const view = render(
+      <Sidebar
+        sessions={sessions}
+        activeId={null}
+        onSelect={onSelect}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+        projects={PROJECTS}
+        servers={SERVERS}
+        serverStatuses={SERVER_STATUSES}
+      />,
+    );
+
+    // 本地会话仍走项目分组与「最近」，服务器会话被排除且全局只渲染一次
+    expect(view.querySelector('.project-children [data-session-id="pinned"]')).toBeTruthy();
+    expect(Array.from(view.querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'))).toEqual(['loose']);
+    for (const id of ['srv-1-a', 'srv-2-a', 'pinned', 'loose']) {
+      expect(view.querySelectorAll(`[data-session-id="${id}"]`).length).toBe(1);
+    }
+
+    // 每个服务器一个分组头：名称 + 状态点 +（非 connected）离线徽标
+    const groups = view.querySelectorAll('.sidebar-server-group');
+    expect(groups.length).toBe(2);
+    const group1 = view.querySelector('.sidebar-server-group[data-server-id="srv-1"]')!;
+    const group2 = view.querySelector('.sidebar-server-group[data-server-id="srv-2"]')!;
+    expect(group1.textContent).toContain('本地服务器');
+    expect(group2.textContent).toContain('远程开发机');
+    expect(group1.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('connected');
+    expect(group2.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
+    expect(group1.textContent).not.toContain('离线');
+    expect(group2.textContent).toContain('离线');
+
+    // 位置：项目树之后、「最近」之前
+    const projectTree = view.querySelector('.session-list')!;
+    const recent = view.querySelector('.sidebar-recent')!;
+    expect(projectTree.compareDocumentPosition(group1) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(group1.compareDocumentPosition(recent) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    // 服务器行复用会话行交互
+    fireClick(group1.querySelector('.session-row'));
+    expect(onSelect).toHaveBeenCalledWith('srv-1-a');
+  });
+
+  it('groups sessions of deleted or unknown servers into 未知服务器', () => {
+    const sessions: SessionSummary[] = [
+      { id: 'ghost', title: '已删除服务器的会话', modelId: 'deepseek', messageCount: 1, updatedAt: 10, runtime: 'server', serverId: 'srv-deleted' },
+      { id: 'no-server', title: '缺失服务器字段的会话', modelId: 'deepseek', messageCount: 1, updatedAt: 20, runtime: 'server' },
+      { id: 'local', title: '本地会话', modelId: 'deepseek', messageCount: 1, updatedAt: 30 },
+    ];
+    const view = render(
+      <Sidebar
+        sessions={sessions}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+        servers={[SERVERS[0]!]}
+        serverStatuses={[{ id: 'srv-1', status: 'connected' }]}
+      />,
+    );
+
+    const unknown = view.getByText('未知服务器')?.closest('.sidebar-server-group');
+    expect(unknown).toBeTruthy();
+    expect(unknown?.querySelector('[data-session-id="ghost"]')).toBeTruthy();
+    expect(unknown?.querySelector('[data-session-id="no-server"]')).toBeTruthy();
+    expect(view.querySelectorAll('[data-session-id="ghost"]').length).toBe(1);
+    expect(view.querySelectorAll('[data-session-id="no-server"]').length).toBe(1);
+    expect(view.querySelector('.sidebar-recent [data-session-id="ghost"]')).toBeNull();
+    expect(Array.from(view.querySelectorAll('.sidebar-recent .session-row')).map((el) => el.getAttribute('data-session-id'))).toEqual(['local']);
+  });
+
+  it('prefers live status over session.offline and falls back to it when status is missing', () => {
+    const sessions: SessionSummary[] = [
+      { id: 'live', title: '状态优先', modelId: 'deepseek', messageCount: 1, updatedAt: 10, runtime: 'server', serverId: 'srv-1', offline: true },
+      { id: 'stale', title: '兜底离线', modelId: 'deepseek', messageCount: 1, updatedAt: 20, runtime: 'server', serverId: 'srv-2', offline: true },
+    ];
+    const view = render(
+      <Sidebar
+        sessions={sessions}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+        servers={SERVERS}
+        serverStatuses={[{ id: 'srv-1', status: 'connected' }]}
+      />,
+    );
+
+    const live = view.querySelector('.sidebar-server-group[data-server-id="srv-1"]')!;
+    const stale = view.querySelector('.sidebar-server-group[data-server-id="srv-2"]')!;
+    expect(live.textContent).not.toContain('离线');
+    expect(live.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('connected');
+    expect(stale.textContent).toContain('离线');
+    expect(stale.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('disconnected');
   });
 
   it('opens a session from the keyboard', () => {

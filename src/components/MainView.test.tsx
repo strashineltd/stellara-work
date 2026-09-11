@@ -2529,6 +2529,28 @@ describe('MainView execution target selector', () => {
     unmount();
   });
 
+  it('passes servers and statuses to the sidebar so server sessions group under their server', async () => {
+    installApi();
+    const serverSession: SessionSummary = {
+      id: 'srv-session',
+      title: '远程会话',
+      modelId: '',
+      messageCount: 0,
+      updatedAt: 1,
+      runtime: 'server',
+      serverId: 'srv-2',
+    };
+    const { querySelector, unmount } = await renderMainView({ sessions: [...SESSIONS, serverSession] });
+
+    const group = querySelector('.sidebar-server-group[data-server-id="srv-2"]');
+    expect(group?.textContent).toContain('远程开发机');
+    expect(group?.querySelector('[data-session-id="srv-session"]')).toBeTruthy();
+    expect(group?.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
+    expect(group?.textContent).toContain('离线');
+    expect(querySelector('.sidebar-recent [data-session-id="srv-session"]')).toBeNull();
+    unmount();
+  });
+
   it('creates a server session from 新对话 without a local model config', async () => {
     const api = installApi();
     const onSessionCreated = vi.fn();
