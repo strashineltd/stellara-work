@@ -17,6 +17,7 @@ import type {
   RemoteProviderInput,
   RemoteProviderInputModel,
   RemoteProviderListResponse,
+  RemoteProviderResult,
   RemoteSession,
   RemoteVcs,
 } from './types';
@@ -87,6 +88,18 @@ function normalizeProvider(input: RemoteProviderInput): RemoteProvider {
     models = [];
   }
   return { id: input.id, name: input.name ?? input.id, models };
+}
+
+/** 解析 `/provider` 的 default：支持 `{ providerID, modelID }` 与 `{ [providerID]: modelID }`；否则 undefined。 */
+function normalizeProviderDefault(input: unknown): { providerID: string; modelID: string } | undefined {
+  if (typeof input !== 'object' || input === null) return undefined;
+  const record = input as Record<string, unknown>;
+  if (typeof record.providerID === 'string' && record.providerID !== '' && typeof record.modelID === 'string' && record.modelID !== '') {
+    return { providerID: record.providerID, modelID: record.modelID };
+  }
+  const entry = Object.entries(record).find(([, value]) => typeof value === 'string' && value !== '');
+  if (!entry) return undefined;
+  return { providerID: entry[0]!, modelID: entry[1] as string };
 }
 
 interface RequestOptions {
@@ -180,10 +193,14 @@ export class OpencodeClient {
     );
   }
 
-  async listProviders(): Promise<RemoteProvider[]> {
+  async listProviders(): Promise<RemoteProviderResult> {
     const data = await this.request<RemoteProviderInput[] | RemoteProviderListResponse>('GET', '/provider');
-    const providers = Array.isArray(data) ? data : data.all ?? data.providers ?? [];
-    return providers.map(normalizeProvider);
+    if (Array.isArray(data)) {
+      return { providers: data.map(normalizeProvider) };
+    }
+    const providers = (data.all ?? data.providers ?? []).map(normalizeProvider);
+    const def = normalizeProviderDefault(data.default);
+    return def === undefined ? { providers } : { providers, default: def };
   }
 
   listAgents(): Promise<RemoteAgent[]> {

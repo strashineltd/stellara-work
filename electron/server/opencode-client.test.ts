@@ -68,16 +68,19 @@ describe('OpencodeClient', () => {
       });
     });
     const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
-    await expect(client.listProviders()).resolves.toEqual([
-      {
-        id: 'anthropic',
-        name: 'Anthropic',
-        models: [
-          { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-          { id: 'anthropic/claude-haiku', name: 'anthropic/claude-haiku' },
-        ],
-      },
-    ]);
+    await expect(client.listProviders()).resolves.toEqual({
+      providers: [
+        {
+          id: 'anthropic',
+          name: 'Anthropic',
+          models: [
+            { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+            { id: 'anthropic/claude-haiku', name: 'anthropic/claude-haiku' },
+          ],
+        },
+      ],
+      default: { providerID: 'anthropic', modelID: 'anthropic/claude-sonnet-4-5' },
+    });
   });
 
   it('keeps the plain array /provider shape', async () => {
@@ -88,10 +91,50 @@ describe('OpencodeClient', () => {
       ]),
     );
     const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
-    await expect(client.listProviders()).resolves.toEqual([
-      { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5', name: 'GPT-5' }] },
-      { id: 'local', name: 'local', models: [{ id: 'local-model', name: 'local-model' }] },
-    ]);
+    await expect(client.listProviders()).resolves.toEqual({
+      providers: [
+        { id: 'openai', name: 'OpenAI', models: [{ id: 'gpt-5', name: 'GPT-5' }] },
+        { id: 'local', name: 'local', models: [{ id: 'local-model', name: 'local-model' }] },
+      ],
+    });
+  });
+
+  it('normalizes provider default model from /provider', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      all: [{ id: 'deepseek', name: 'DeepSeek', models: { 'deepseek/deepseek-v4-pro': { id: 'deepseek/deepseek-v4-pro', providerID: 'deepseek', name: 'V4 Pro' } } }],
+      default: { deepseek: 'deepseek/deepseek-v4-pro' },
+    }), { status: 200 }));
+    const client = new OpencodeClient({ baseUrl: 'http://x', fetchImpl: fetchImpl as never });
+    const result = await client.listProviders();
+    expect(result.providers).toEqual([{ id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek/deepseek-v4-pro', name: 'V4 Pro' }] }]);
+    expect(result.default).toEqual({ providerID: 'deepseek', modelID: 'deepseek/deepseek-v4-pro' });
+  });
+
+  it('accepts an explicit { providerID, modelID } default shape', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        providers: [{ id: 'openai', models: [{ id: 'gpt-5' }] }],
+        default: { providerID: 'openai', modelID: 'gpt-5' },
+      }),
+    );
+    const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await client.listProviders();
+    expect(result.default).toEqual({ providerID: 'openai', modelID: 'gpt-5' });
+  });
+
+  it('drops an unparsable provider default', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ all: [{ id: 'openai', models: [] }], default: { openai: 42 } }),
+    );
+    const client = new OpencodeClient({ baseUrl: 'http://localhost:4096', fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await client.listProviders();
+    expect(result.default).toBeUndefined();
+  });
+
+  it('maps vcs branch', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ branch: 'main' }), { status: 200 }));
+    const client = new OpencodeClient({ baseUrl: 'http://x', fetchImpl: fetchImpl as never });
+    await expect(client.getVcs()).resolves.toMatchObject({ branch: 'main' });
   });
 
   it('rejects non-2xx with readable error and waits for health timeout', async () => {

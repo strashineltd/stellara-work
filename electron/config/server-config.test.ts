@@ -59,6 +59,25 @@ describe('server config', () => {
     expect(second.app.servers?.[0]?.name).toBe('C');
   });
 
+  it('sanitizes settings patches to the whitelist', () => {
+    const result = config.sanitizeSettingsPatch({ theme: 'dark', servers: [{ id: 'x' }] as never, defaultServerId: 'x', unknown: 1 } as never);
+    expect(result.patch).toEqual({ theme: 'dark' });
+    expect(result.rejected.sort()).toEqual(['defaultServerId', 'servers', 'unknown']);
+  });
+
+  it('keeps every whitelisted settings key', () => {
+    const patch = {
+      workDirDefault: '/tmp/work',
+      shortcuts: { 'session.new': 'Mod+N' },
+      theme: 'light' as const,
+      workspaceMode: 'tabs' as const,
+      browser: { execJsEnabled: true },
+    };
+    const result = config.sanitizeSettingsPatch(patch as never);
+    expect(result.rejected).toEqual([]);
+    expect(result.patch).toEqual(patch);
+  });
+
   it('stores the password encrypted and readable only by main', async () => {
     secrets._setCipher({ encrypt: (p) => `enc(${p})`, decrypt: (b) => b.slice(4, -1) });
     await secrets.setServerPassword('srv-1', 'secret');

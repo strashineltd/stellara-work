@@ -595,6 +595,8 @@ export interface AppSettings {
   theme?: ThemeName;
   /** 工作区模式：sidebar（紧凑 sidebar）或 tabs（Tab 栏） */
   workspaceMode?: 'sidebar' | 'tabs';
+  /** 默认服务器 id（只读：仅能经 servers:setDefault 修改） */
+  defaultServerId?: string | null;
   // 预留：language
 }
 
@@ -778,6 +780,16 @@ export interface ServerProviderSummary {
   id: string;
   name: string;
   models: Array<{ id: string; name: string }>;
+}
+
+export interface ServerProvidersResult {
+  providers: ServerProviderSummary[];
+  /** 服务器默认模型（无法解析时缺省） */
+  default?: { providerID: string; modelID: string };
+}
+
+export interface ServerVcsResult {
+  branch: string | null;
 }
 
 export interface ServerAgentSummary {
@@ -1076,7 +1088,8 @@ export interface ElectronAPI {
     status: () => Promise<ServerStatusEntry[]>;
     /** 手动连接/重连（幂等）：初始健康检查失败后的恢复入口 */
     connect: (id: string) => Promise<ServerStatusEntry>;
-    providers: (id: string) => Promise<ServerProviderSummary[]>;
+    providers: (id: string) => Promise<ServerProvidersResult>;
+    vcs: (id: string) => Promise<ServerVcsResult>;
     agents: (id: string) => Promise<ServerAgentSummary[]>;
     onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => () => void;
   };

@@ -39,7 +39,8 @@ import type {
   ViewportRect,
   CreateSessionArgs,
   ServerInput,
-  ServerProviderSummary,
+  ServerProvidersResult,
+  ServerVcsResult,
   ServerAgentSummary,
 } from '../shared/ipc';
 
@@ -820,15 +821,25 @@ function registerIpcHandlers(): void {
     return status;
   });
 
-  handle('servers:providers', async (_e, id: string): Promise<ServerProviderSummary[]> => {
+  handle('servers:providers', async (_e, id: string): Promise<ServerProvidersResult> => {
     const client = requireServerRuntime().manager.getClient(id);
     if (!client) throw new Error('服务器未连接');
-    const providers = await client.listProviders();
-    return providers.map((provider) => ({
-      id: provider.id,
-      name: provider.name,
-      models: provider.models.map((model) => ({ id: model.id, name: model.name })),
-    }));
+    const { providers, default: defaultModel } = await client.listProviders();
+    return {
+      providers: providers.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        models: provider.models.map((model) => ({ id: model.id, name: model.name })),
+      })),
+      ...(defaultModel !== undefined ? { default: defaultModel } : {}),
+    };
+  });
+
+  handle('servers:vcs', async (_e, id: string): Promise<ServerVcsResult> => {
+    const client = requireServerRuntime().manager.getClient(id);
+    if (!client) throw new Error('服务器未连接');
+    const vcs = await client.getVcs();
+    return { branch: typeof vcs.branch === 'string' ? vcs.branch : null };
   });
 
   handle('servers:agents', async (_e, id: string): Promise<ServerAgentSummary[]> => {
@@ -850,9 +861,13 @@ function registerIpcHandlers(): void {
   });
 
   handle('settings:update', async (_e, partial: Partial<AppSettings>) => {
-    const { loadConfig, saveConfig } = await import('./config/config-v2');
+    const { loadConfig, saveConfig, sanitizeSettingsPatch } = await import('./config/config-v2');
+    const { patch, rejected } = sanitizeSettingsPatch(partial);
+    if (rejected.length > 0) {
+      log.warn(`settings:update 忽略非白名单字段: ${rejected.join(', ')}`);
+    }
     const cfg = await loadConfig();
-    cfg.app = { ...cfg.app, ...partial };
+    cfg.app = { ...cfg.app, ...patch };
     await saveConfig(cfg);
     broadcastSettingsChanged();
   });

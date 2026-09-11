@@ -24,6 +24,8 @@ import type {
   ServerInput,
   ServerStatusEntry,
   ServerTestResult,
+  ServerProvidersResult,
+  ServerVcsResult,
 } from '../shared/ipc';
 
 /**
@@ -193,7 +195,8 @@ const api: ElectronAPI = {
     setDefault: (id: string | null) => ipcRenderer.invoke('servers:setDefault', id),
     status: (): Promise<ServerStatusEntry[]> => ipcRenderer.invoke('servers:status'),
     connect: (id: string): Promise<ServerStatusEntry> => ipcRenderer.invoke('servers:connect', id),
-    providers: (id: string) => ipcRenderer.invoke('servers:providers', id),
+    providers: (id: string): Promise<ServerProvidersResult> => ipcRenderer.invoke('servers:providers', id),
+    vcs: (id: string): Promise<ServerVcsResult> => ipcRenderer.invoke('servers:vcs', id),
     agents: (id: string) => ipcRenderer.invoke('servers:agents', id),
     onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => {
       const handler = (_e: unknown, statuses: ServerStatusEntry[]) => callback(statuses);

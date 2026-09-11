@@ -119,10 +119,24 @@ export interface RemoteProviderInput {
   [key: string]: unknown;
 }
 
+/** `/provider` 原始响应中的默认模型：`{ providerID, modelID }` 或 `{ [providerID]: modelID }`。 */
+export interface RemoteProviderDefault {
+  providerID: string;
+  modelID: string;
+  [key: string]: unknown;
+}
+
 export interface RemoteProviderListResponse {
   all?: RemoteProviderInput[];
   providers?: RemoteProviderInput[];
+  default?: RemoteProviderDefault | Record<string, unknown>;
   [key: string]: unknown;
+}
+
+/** `listProviders` 归一化结果：providers 数组 + 可解析出的默认模型。 */
+export interface RemoteProviderResult {
+  providers: RemoteProvider[];
+  default?: { providerID: string; modelID: string };
 }
 
 /** `message.part.delta`（真实 1.18 流式文本/推理增量）的属性形状。 */

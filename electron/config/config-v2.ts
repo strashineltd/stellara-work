@@ -2,7 +2,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { setKey } from './secrets';
 import { getAppDataDir } from './data-dir';
-import type { ThemeName, McpServerConfig, WireApi } from '../../shared/ipc';
+import type { ThemeName, McpServerConfig, WireApi, AppSettings } from '../../shared/ipc';
 
 let _overrideConfigDir: string | null = null;
 
@@ -106,6 +106,25 @@ function defaultConfig(): AppConfig {
     mcpServers: [],
     schemaVersion: 1,
   };
+}
+
+const SETTINGS_PATCH_WHITELIST: readonly string[] = ['workDirDefault', 'shortcuts', 'theme', 'workspaceMode', 'browser'];
+
+/**
+ * 过滤 settings:update 的越权字段：仅保留白名单键。
+ * `servers` / `defaultServerId` 只能经 `servers:*` 修改；未知键一并返回 rejected，且不写入。
+ */
+export function sanitizeSettingsPatch(patch: Partial<AppSettings>): { patch: Partial<AppSettings>; rejected: string[] } {
+  const clean: Partial<AppSettings> = {};
+  const rejected: string[] = [];
+  for (const key of Object.keys(patch ?? {})) {
+    if (!SETTINGS_PATCH_WHITELIST.includes(key)) {
+      rejected.push(key);
+      continue;
+    }
+    (clean as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+  }
+  return { patch: clean, rejected };
 }
 
 function parseConfig(text: string): AppConfig {
