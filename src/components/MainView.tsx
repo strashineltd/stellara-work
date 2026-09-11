@@ -144,6 +144,8 @@ export function MainView(props: MainViewProps) {
   const activeServerName = activeServerId
     ? servers.find((server) => server.id === activeServerId)?.name
     : undefined;
+  const activeServerMissing = activeServerId !== undefined
+    && !servers.some((server) => server.id === activeServerId);
   const activeServerConnected = activeServerId !== undefined
     && statuses.some((entry) => entry.id === activeServerId && entry.status === 'connected');
   const serverOffline = activeSession?.runtime === 'server' && !activeServerConnected;
@@ -1147,9 +1149,11 @@ export function MainView(props: MainViewProps) {
               {serverOffline && (
                 <div className="no-model-banner server-offline-banner" role="alert">
                   <span className="server-offline-banner__text">
-                    服务器未连接：{activeServerName ?? '未知服务器'}
+                    {activeServerMissing
+                      ? '服务器已删除：该会话仅可查看'
+                      : `服务器未连接：${activeServerName ?? '未知服务器'}`}
                   </span>
-                  {activeServerId && (
+                  {activeServerId && !activeServerMissing && (
                     <div className="no-model-banner__actions">
                       <button
                         className="no-model-banner__btn server-offline-banner__retry"
