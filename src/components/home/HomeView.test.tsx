@@ -130,6 +130,13 @@ describe('HomeView', () => {
     unmount();
   });
 
+  it('explains why the attachment picker is disabled without a work dir', () => {
+    const { container, unmount } = render(<HomeView {...BASE_PROPS} hasWorkDir={false} serverTarget={null} />);
+    expect(container.querySelector<HTMLButtonElement>('.attach-btn')?.disabled).toBe(true);
+    expect(container.textContent).toContain('请先选择或创建项目后再添加附件');
+    unmount();
+  });
+
   it('sends from the composer', () => {
     const onSend = vi.fn();
     const { container, unmount } = render(<HomeView {...BASE_PROPS} input="完成任务" onSend={onSend} />);
