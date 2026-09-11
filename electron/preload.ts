@@ -20,6 +20,11 @@ import type {
   MenuAction,
   McpServerConfig,
   ViewportRect,
+  LocalUser,
+  CloudAuthState,
+  CloudResult,
+  CloudPendingSignUp,
+  CloudSignUpArgs,
 } from '../shared/ipc';
 
 /**
@@ -259,6 +264,30 @@ const api: ElectronAPI = {
       return () => {
         ipcRenderer.removeListener('menu:action', handler);
       };
+    },
+  },
+  auth: {
+    local: {
+      getCurrent: (): Promise<LocalUser> => ipcRenderer.invoke('auth:local:getCurrent'),
+      list: (): Promise<LocalUser[]> => ipcRenderer.invoke('auth:local:list'),
+      create: (displayName?: string): Promise<LocalUser> =>
+        ipcRenderer.invoke('auth:local:create', displayName),
+      update: (patch: { displayName?: string; avatarPath?: string | null }): Promise<LocalUser> =>
+        ipcRenderer.invoke('auth:local:update', patch),
+      switch: (id: string): Promise<LocalUser> => ipcRenderer.invoke('auth:local:switch', id),
+    },
+    cloud: {
+      getState: (): Promise<CloudAuthState> => ipcRenderer.invoke('auth:cloud:getState'),
+      sendSignUpCode: (args: CloudSignUpArgs): Promise<CloudResult<CloudPendingSignUp>> =>
+        ipcRenderer.invoke('auth:cloud:sendSignUpCode', args),
+      verifySignUp: (args: { pendingId: string; code: string }): Promise<CloudResult<CloudAuthState>> =>
+        ipcRenderer.invoke('auth:cloud:verifySignUp', args),
+      signInWithPassword: (args: { identifier: string; password: string }): Promise<CloudResult<CloudAuthState>> =>
+        ipcRenderer.invoke('auth:cloud:signInWithPassword', args),
+      signOut: (): Promise<CloudResult<CloudAuthState>> => ipcRenderer.invoke('auth:cloud:signOut'),
+      unlink: (): Promise<CloudResult<CloudAuthState>> => ipcRenderer.invoke('auth:cloud:unlink'),
+      isUsernameRegistered: (username: string): Promise<CloudResult<boolean>> =>
+        ipcRenderer.invoke('auth:cloud:isUsernameRegistered', username),
     },
   },
 };

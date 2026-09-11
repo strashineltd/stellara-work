@@ -7,6 +7,7 @@ import { SettingsAppPanel } from './settings/SettingsAppPanel';
 import { SettingsBrowserPanel } from './settings/SettingsBrowserPanel';
 import { SettingsSkillsPanel } from './settings/SettingsSkillsPanel';
 import { SettingsShortcutsPanel } from './settings/SettingsShortcutsPanel';
+import { SettingsAccountPanel } from './settings/SettingsAccountPanel';
 import { resolveTheme } from '../lib/theme';
 import { presenceRootProps, type PresenceMotionProps } from '../lib/presence-ui';
 
@@ -17,6 +18,7 @@ export const SETTINGS_TABS = [
   { id: 'browser', label: 'AI 浏览器' },
   { id: 'skills', label: '技能与 MCP' },
   { id: 'shortcuts', label: '快捷键' },
+  { id: 'account', label: '账号' },
 ] as const;
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number]['id'];
@@ -35,6 +37,7 @@ const TAB_ICONS: Record<SettingsTab, IconName> = {
   browser: 'search',
   skills: 'tool',
   shortcuts: 'more',
+  account: 'user',
 };
 
 /**
@@ -183,6 +186,9 @@ export function SettingsPanel({ initialTab = 'models', focusRequest = 0, onClose
             )}
             {tab === 'shortcuts' && (
               <SettingsShortcutsPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
+            )}
+            {tab === 'account' && (
+              <SettingsAccountPanel refreshKey={refreshKey} onChanged={() => setRefreshKey((k) => k + 1)} />
             )}
           </div>
         </main>

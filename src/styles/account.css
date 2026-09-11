@@ -1,0 +1,191 @@
+/* Stellara Work · 账号与本地身份样式（Phase 1）
+ *
+ * 只包含 SettingsAccountPanel / AccountBadge 两个新增组件的样式。
+ * 其余（settings-section / settings-item / btn / error-banner）复用 workbench.css 既有类。
+ * 颜色、间距、圆角、动效全部走 design tokens，不写裸值。
+ */
+
+/* ---------- 首字母头像 ---------- */
+.account-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  line-height: 1;
+  user-select: none;
+}
+
+.account-avatar--sm {
+  width: 22px;
+  height: 22px;
+  font-size: var(--fs-xxs);
+}
+
+/* ---------- 状态标签 ---------- */
+.account-tag {
+  flex: 0 0 auto;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.account-tag--muted {
+  background: var(--color-bg-soft);
+  color: var(--color-text-faint);
+}
+
+/* ---------- 输入框与代码 ---------- */
+.account-input {
+  flex: 0 1 200px;
+  min-width: 120px;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+}
+
+.account-input:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -1px;
+}
+
+.account-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-text-soft);
+  word-break: break-all;
+}
+
+/* ---------- 侧边栏本地身份入口 ---------- */
+.account-badge {
+  position: relative;
+  padding: var(--space-2) var(--space-2) 0;
+}
+
+.account-badge__trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-soft);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 560;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.account-badge__trigger:hover {
+  color: var(--color-text);
+  background: var(--color-hover-overlay);
+}
+
+.account-badge__trigger .app-icon {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.account-badge__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-badge__menu {
+  position: absolute;
+  top: calc(100% - var(--space-1));
+  left: var(--space-2);
+  right: var(--space-2);
+  z-index: 40;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+
+.account-badge__menu-title {
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.account-badge__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-soft);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.account-badge__item:hover {
+  color: var(--color-text);
+  background: var(--color-hover-overlay);
+}
+
+.account-badge__item.is-active {
+  color: var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+.account-badge__item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-badge__item .app-icon {
+  flex: 0 0 auto;
+}
+
+.account-badge__divider {
+  height: 1px;
+  margin: var(--space-1) var(--space-2);
+  background: var(--color-border);
+}
+
+.account-badge__hint {
+  margin: 0;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xxs);
+  line-height: 1.5;
+}

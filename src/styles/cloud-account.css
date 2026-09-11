@@ -1,0 +1,92 @@
+/* Stellara Work · 云账号区块样式（Phase 3）
+ *
+ * 只服务 SettingsCloudAccountSection。settings-section / settings-group /
+ * settings-item / btn / error-banner / account-* 全部复用既有类。
+ * 颜色、间距、圆角、动效一律走 design tokens。
+ */
+
+/* ---------- 登录 / 注册切换 ---------- */
+.cloud-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.cloud-tab {
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-faint);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.cloud-tab:hover {
+  color: var(--color-text);
+  background: var(--color-hover-overlay);
+}
+
+.cloud-tab.is-active {
+  color: var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+/* ---------- 表单字段（标签在上、输入在下） ---------- */
+.cloud-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: stretch;
+  padding: var(--space-2) var(--space-3);
+}
+
+.cloud-field + .cloud-field {
+  border-top: 1px solid var(--color-border);
+}
+
+.cloud-field__label {
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+  font-weight: 560;
+}
+
+/* 覆盖 .account-input 的 flex 基线，让输入框铺满整行。
+ * ⚠️ 高度必须用 --control-height-sm(30px)：早先误写成 --space-input-h，
+ *    那是「内边距」token（10px），会把输入框压成 10px 高。 */
+.cloud-field__input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height-sm, 30px);
+}
+
+/* ---------- 提示条 ---------- */
+.cloud-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-success-bg);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.cloud-note .app-icon {
+  flex: 0 0 auto;
+}
+
+.cloud-error-hint {
+  margin-top: var(--space-1);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+}

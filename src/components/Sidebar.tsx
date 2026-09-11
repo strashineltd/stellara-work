@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { SessionSummary, Project, ProjectFileSelection, ProjectSummary } from '../../shared/ipc';
 import { Icon } from './Icon';
 import { ProjectDialog } from './ProjectDialog';
+import { AccountBadge } from './AccountBadge';
 import { formatRelativeTime } from '../lib/chat-utils';
 import type { AppSection } from '../lib/navigation';
 import { usePresence } from '../hooks/usePresence';
@@ -683,6 +684,8 @@ export function Sidebar({
           <span>已安排</span>
         </button>
       </nav>
+
+      <AccountBadge />
 
       <div className="sidebar-library-heading">
         <span>项目与会话</span>

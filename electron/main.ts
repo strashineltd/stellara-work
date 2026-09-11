@@ -33,6 +33,7 @@ import type {
   ContextStateView,
   BrowserConfigView,
   ViewportRect,
+  CloudSignUpArgs,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -895,6 +896,69 @@ function registerIpcHandlers(): void {
   handle('mcp:test', async (_e, cfg: McpServerConfig) => {
     const { mcpManager } = await import('./mcp/mcp-manager');
     return mcpManager.testConnection(cfg);
+  });
+
+  // 本地用户体系（Phase 1）
+  handle('auth:local:getCurrent', async () => {
+    const { localAuth } = await import('./auth/local-auth-manager');
+    return localAuth.getCurrent();
+  });
+
+  handle('auth:local:list', async () => {
+    const { localAuth } = await import('./auth/local-auth-manager');
+    return localAuth.list();
+  });
+
+  handle('auth:local:create', async (_e, displayName?: string) => {
+    const { localAuth } = await import('./auth/local-auth-manager');
+    return localAuth.create(displayName);
+  });
+
+  handle('auth:local:update', async (_e, patch: { displayName?: string; avatarPath?: string | null }) => {
+    const { localAuth } = await import('./auth/local-auth-manager');
+    return localAuth.update(patch);
+  });
+
+  handle('auth:local:switch', async (_e, id: string) => {
+    const { localAuth } = await import('./auth/local-auth-manager');
+    return localAuth.switch(id);
+  });
+
+  // 云账号体系（Phase 3 · 腾讯云 CloudBase）
+  // 注意：token 只在主进程内流转，以下 handler 一律只回传账号元数据与状态。
+  handle('auth:cloud:getState', async () => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.getState();
+  });
+
+  handle('auth:cloud:sendSignUpCode', async (_e, args: CloudSignUpArgs) => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.sendSignUpCode(args);
+  });
+
+  handle('auth:cloud:verifySignUp', async (_e, args: { pendingId: string; code: string }) => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.verifySignUp(args);
+  });
+
+  handle('auth:cloud:signInWithPassword', async (_e, args: { identifier: string; password: string }) => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.signInWithPassword(args);
+  });
+
+  handle('auth:cloud:signOut', async () => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.signOut();
+  });
+
+  handle('auth:cloud:unlink', async () => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.unlink();
+  });
+
+  handle('auth:cloud:isUsernameRegistered', async (_e, username: string) => {
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    return cloudAuth.isUsernameRegistered(username);
   });
 
   // Memory OS
@@ -1830,12 +1894,29 @@ app.whenReady().then(async () => {
     // Context Hub 表（response_items / context_events / checkpoints）：
     // 未初始化会导致 chat:start 在 ContextHub 构造时崩溃且无事件回传
     initContextTables();
+    // 本地用户表（Phase 1 账号体系）：首次启动自动创建默认本地身份
+    const { initLocalUsers } = await import('./store/local-users');
+    initLocalUsers();
+    // 云账号绑定表（Phase 3）：必须在 initLocalUsers 之后（引用 local_users.id）
+    const { initCloudLinks } = await import('./store/cloud-links');
+    initCloudLinks();
     // Memory OS: 初始化记忆存储
     const { setMemoryDb } = await import('./memory/memory-store');
     setMemoryDb(getDb);
   } catch (err) {
     log.error('db 初始化失败', err);
   }
+
+  // 云账号会话恢复（Phase 3）：本地有 token 就恢复一次。
+  // 刻意不 await —— 涉及网络，失败也要静默降级，绝不阻塞应用启动。
+  void (async () => {
+    try {
+      const { cloudAuth } = await import('./auth/cloud-auth-manager');
+      await cloudAuth.restoreSession();
+    } catch (err) {
+      log.warn('云账号会话恢复异常', err);
+    }
+  })();
 
   registerIpcHandlers();
   createWindow();

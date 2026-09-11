@@ -565,7 +565,78 @@ export interface MemoryStats {
   recentCount: number;
 }
 
+// ============================================
+// 本地用户（Phase 1）
+// ============================================
+
+/** 本机使用者身份（不依赖云账号） */
+export interface LocalUser {
+  id: string;
+  displayName: string;
+  /** 头像文件路径（预留，Phase 1 UI 用显示名首字母） */
+  avatarPath?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type ThemeName = 'light' | 'dark' | 'system';
+
+// ============================================
+// 云账号（Phase 3 · 腾讯云 CloudBase）
+// ============================================
+//
+// 数据边界：只同步「账号元数据」（uid / 邮箱 / 用户名 / 昵称）。
+// 工作区、会话、记忆一律留在本机 —— local-first 承诺不变。
+// token 永远不进入渲染进程，只在主进程内保存（secrets.ts 加密落盘）。
+
+/** 云账号元数据（渲染层可见范围，绝不含 token） */
+export interface CloudAccount {
+  uid: string;
+  email?: string;
+  username?: string;
+  /** 云端昵称 */
+  displayName?: string;
+  phone?: string;
+}
+
+/** 云账号整体状态 */
+export interface CloudAuthState {
+  /** 是否已配置 Publishable Key（开发者侧前置条件，未配置时其余操作都会失败） */
+  configured: boolean;
+  /** 是否存在有效的云会话（登出后为 false，但绑定关系仍保留） */
+  signedIn: boolean;
+  /** 当前本地身份**绑定**的云账号；未绑定为 null（登出不会清除绑定） */
+  account: CloudAccount | null;
+}
+
+/** 可序列化的失败信息（IPC 友好，带中文说明与下一步建议） */
+export interface CloudFailure {
+  code: string;
+  message: string;
+  hint: string;
+}
+
+/** IPC 统一返回：成功带数据，失败带可展示错误 */
+export type CloudResult<T> = { ok: true; data: T } | { ok: false; error: CloudFailure };
+
+/**
+ * 注册第一步的返回。
+ * `verifyOtp` 是 SDK 返回的**函数**，无法跨 IPC，故由主进程暂存并以 pendingId 引用。
+ */
+export interface CloudPendingSignUp {
+  pendingId: string;
+  email: string;
+}
+
+/** 邮箱注册入参（CloudBase v2：注册必须走邮箱/手机验证码） */
+export interface CloudSignUpArgs {
+  email: string;
+  password: string;
+  /** 可选登录用户名（5-24 位，字母/数字开头，支持 -_.:+@ ） */
+  username?: string;
+  /** 可选昵称 */
+  displayName?: string;
+}
 
 export interface AppSettings {
   workDirDefault?: string;
@@ -1055,6 +1126,36 @@ export interface ElectronAPI {
   menu: {
     /** 监听原生菜单触发的 action（macOS）。返回取消监听函数。 */
     onAction: (callback: (action: MenuAction) => void) => () => void;
+  };
+  auth: {
+    local: {
+      /** 当前激活的本地身份 */
+      getCurrent: () => Promise<LocalUser>;
+      /** 全部本地身份（按创建时间升序） */
+      list: () => Promise<LocalUser[]>;
+      /** 新建本地身份（不自动切换） */
+      create: (displayName?: string) => Promise<LocalUser>;
+      /** 更新当前身份（只能改自己） */
+      update: (patch: { displayName?: string; avatarPath?: string | null }) => Promise<LocalUser>;
+      /** 切换当前身份 */
+      switch: (id: string) => Promise<LocalUser>;
+    };
+    cloud: {
+      /** 云账号状态（是否配置 / 是否登录 / 绑定的账号） */
+      getState: () => Promise<CloudAuthState>;
+      /** 注册第一步：向邮箱发送验证码 */
+      sendSignUpCode: (args: CloudSignUpArgs) => Promise<CloudResult<CloudPendingSignUp>>;
+      /** 注册第二步：校验验证码完成注册（SDK 成功后自动登录并绑定当前本地身份） */
+      verifySignUp: (args: { pendingId: string; code: string }) => Promise<CloudResult<CloudAuthState>>;
+      /** 邮箱或用户名 + 密码登录 */
+      signInWithPassword: (args: { identifier: string; password: string }) => Promise<CloudResult<CloudAuthState>>;
+      /** 登出云账号（本地身份保留） */
+      signOut: () => Promise<CloudResult<CloudAuthState>>;
+      /** 解绑当前本地身份与云账号 */
+      unlink: () => Promise<CloudResult<CloudAuthState>>;
+      /** 用户名是否已被占用（注册前预检） */
+      isUsernameRegistered: (username: string) => Promise<CloudResult<boolean>>;
+    };
   };
 }
 

@@ -122,6 +122,57 @@ export async function deleteKey(modelId: string): Promise<void> {
   await writeEnv(map);
 }
 
+// ============================================
+// 通用密钥位（云会话凭证等非模型密钥用）
+// ============================================
+
+/**
+ * 与 STELLARA_KEY_ 分开的命名空间，避免与模型密钥的列举逻辑互相污染
+ * （listKeys 只扫 STELLARA_KEY_ 前缀，不会读到这里的值）。
+ *
+ * 云会话 token 一律经此写入，因此天然走同一个 cipher（safeStorage / DPAPI），
+ * 且不存在需要迁移的历史明文。
+ */
+const CLOUD_PREFIX = 'STELLARA_CLOUD_';
+
+function cloudKeyName(name: string): string {
+  return CLOUD_PREFIX + name;
+}
+
+/** 同步读取一个密钥位（与 getKey 同模式：只读，不做写入） */
+export function getCloudSecret(name: string): string | null {
+  try {
+    const content = require('node:fs').readFileSync(secretsPath(), 'utf-8') as string;
+    const target = cloudKeyName(name) + '=';
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith(target)) continue;
+      const eq = trimmed.indexOf('=');
+      let value = trimmed.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      return decodeStored(value);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export async function setCloudSecret(name: string, value: string): Promise<void> {
+  const map = await readEnv();
+  map.set(cloudKeyName(name), encodeStored(value));
+  await writeEnv(map);
+}
+
+export async function deleteCloudSecret(name: string): Promise<void> {
+  const map = await readEnv();
+  map.delete(cloudKeyName(name));
+  await writeEnv(map);
+}
+
 /** ⚠️ 返回 **裸 API key**（modelId → 真实密钥）—— 仅供主进程内部使用。绝不要通过 IPC 传给 renderer。调用方请只用 `!!keys[id]` boolean check。 */
 export async function listKeys(): Promise<Record<string, string>> {
   const map = await readEnv();

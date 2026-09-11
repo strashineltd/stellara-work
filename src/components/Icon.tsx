@@ -34,6 +34,7 @@ export type IconName =
   | 'sun'
   | 'terminal'
   | 'tool'
+  | 'user'
   | 'x';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'children'> {
@@ -150,6 +151,8 @@ export function Icon({ name, size = 16, className, ...props }: IconProps) {
       return <svg {...common}><rect x="1.8" y="2.5" width="12.4" height="11" rx="2" /><path d="m4.5 6 2 2-2 2M8.5 10h3" /></svg>;
     case 'tool':
       return <svg {...common}><path d="M9.7 3.1a3.1 3.1 0 0 0-3.8 3.8l-3.7 3.7a1.6 1.6 0 1 0 2.2 2.2l3.7-3.7a3.1 3.1 0 0 0 3.8-3.8l-1.8 1.1-1.5-1.5 1.1-1.8Z" /></svg>;
+    case 'user':
+      return <svg {...common}><circle cx="8" cy="5.6" r="2.6" /><path d="M3.2 13.2c0-2.6 2.2-4.2 4.8-4.2s4.8 1.6 4.8 4.2" /></svg>;
     case 'x':
       return <svg {...common}><path d="m4 4 8 8M12 4l-8 8" /></svg>;
     case 'database':

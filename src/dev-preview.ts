@@ -12,6 +12,9 @@ import type {
   SessionSummary,
   ContextStateView,
   AppSettings,
+  LocalUser,
+  CloudAccount,
+  CloudAuthState,
 } from '../shared/ipc';
 
 const now = Date.now();
@@ -43,6 +46,24 @@ let sessions: SessionSummary[] = [
 ];
 let previewSettings: AppSettings = { theme: 'light', workspaceMode: 'sidebar' };
 const settingsListeners = new Set<() => void>();
+
+// UI 预览用本地身份（Phase 1）：侧边栏 AccountBadge 与设置「账号」面板可交互
+const previewLocalUsers: LocalUser[] = [
+  { id: 'preview-local-1', displayName: 'Local User', createdAt: now - 86_400_000, updatedAt: now - 86_400_000 },
+];
+let previewActiveLocalUserId = previewLocalUsers[0]!.id;
+
+// UI 预览用云账号（Phase 3）：设置「账号」面板可走通登录/登出/解绑流程
+let previewCloudAccount: CloudAccount | null = null;
+let previewCloudSignedIn = false;
+
+function previewCloudState(): CloudAuthState {
+  return {
+    configured: true,
+    signedIn: previewCloudSignedIn,
+    account: previewCloudAccount,
+  };
+}
 
 const previewRows: MessageRow[] = [
   {
@@ -272,6 +293,72 @@ export function installDevPreviewApi(): void {
     },
     menu: {
       onAction: () => () => {},
+    },
+    auth: {
+      local: {
+        getCurrent: async () => ({ ...(previewLocalUsers.find((u) => u.id === previewActiveLocalUserId) ?? previewLocalUsers[0]!) }),
+        list: async () => previewLocalUsers.map((u) => ({ ...u })),
+        create: async (displayName?: string) => {
+          const created: LocalUser = {
+            id: `preview-local-${previewLocalUsers.length + 1}`,
+            displayName: displayName?.trim() || 'Local User',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          previewLocalUsers.push(created);
+          return { ...created };
+        },
+        update: async (patch: { displayName?: string; avatarPath?: string | null }) => {
+          const target = previewLocalUsers.find((u) => u.id === previewActiveLocalUserId) ?? previewLocalUsers[0]!;
+          if (patch.displayName !== undefined) target.displayName = patch.displayName;
+          if (patch.avatarPath !== undefined) target.avatarPath = patch.avatarPath ?? undefined;
+          target.updatedAt = Date.now();
+          return { ...target };
+        },
+        switch: async (id: string) => {
+          const target = previewLocalUsers.find((u) => u.id === id) ?? previewLocalUsers[0]!;
+          previewActiveLocalUserId = target.id;
+          return { ...target };
+        },
+      },
+      cloud: {
+        getState: async () => previewCloudState(),
+        sendSignUpCode: async (args: { email: string }) => ({
+          ok: true as const,
+          data: { pendingId: 'preview-pending-1', email: args.email },
+        }),
+        verifySignUp: async () => {
+          previewCloudAccount = {
+            uid: 'preview-cloud-uid-1',
+            email: 'preview@example.com',
+            username: 'preview_user',
+            displayName: '预览用户',
+          };
+          previewCloudSignedIn = true;
+          return { ok: true as const, data: previewCloudState() };
+        },
+        signInWithPassword: async (args: { identifier: string }) => {
+          const isEmail = args.identifier.includes('@');
+          previewCloudAccount = {
+            uid: 'preview-cloud-uid-1',
+            email: isEmail ? args.identifier : 'preview@example.com',
+            username: isEmail ? 'preview_user' : args.identifier,
+            displayName: '预览用户',
+          };
+          previewCloudSignedIn = true;
+          return { ok: true as const, data: previewCloudState() };
+        },
+        signOut: async () => {
+          previewCloudSignedIn = false;
+          return { ok: true as const, data: previewCloudState() };
+        },
+        unlink: async () => {
+          previewCloudSignedIn = false;
+          previewCloudAccount = null;
+          return { ok: true as const, data: previewCloudState() };
+        },
+        isUsernameRegistered: async () => ({ ok: true as const, data: false }),
+      },
     },
   };
 

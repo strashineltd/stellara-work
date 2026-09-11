@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import './styles/grounded-tokens.css';
 import './styles/workbench.css';
+import './styles/account.css';
+import './styles/cloud-account.css';
 
 async function bootstrap() {
   // 浏览器视觉回归专用。仅 Vite 开发环境 + 显式参数生效，生产包不会进入此分支。
