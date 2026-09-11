@@ -222,4 +222,67 @@ describe('ServerManager', () => {
     statusCallback!('connected');
     expect(manager.statuses()[0]).toMatchObject({ status: 'connected' });
   });
+
+  it('reconnects a server that failed its initial health check', async () => {
+    let attempt = 0;
+    const { manager } = makeManager({
+      createClient: () => {
+        attempt += 1;
+        const fail = attempt === 1;
+        return {
+          health: async () => {
+            if (fail) throw new Error('HTTP 500: down');
+            return { healthy: true, version: '2.0.0' };
+          },
+          subscribeEvents: () => () => {},
+          listSessions: async () => [],
+        } as never;
+      },
+    });
+    await manager.connectAll();
+    expect(manager.statuses()[0]).toMatchObject({ id: 'srv-1', status: 'error' });
+
+    const status = await manager.connect('srv-1');
+    expect(status).toMatchObject({ id: 'srv-1', status: 'connected', version: '2.0.0' });
+    expect(manager.getClient('srv-1')).not.toBeNull();
+  });
+
+  it('treats connect as a no-op while the server is already connected', async () => {
+    const health = vi.fn(async () => ({ healthy: true, version: '1.0.0' }));
+    const subscribeEvents = vi.fn(() => () => {});
+    const { manager } = makeManager({
+      createClient: () => ({ health, subscribeEvents, listSessions: async () => [] }) as never,
+    });
+    await manager.connectAll();
+    await manager.connect('srv-1');
+    await manager.connect('srv-1');
+    expect(health).toHaveBeenCalledTimes(1);
+    expect(subscribeEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects connect for unknown server ids', async () => {
+    const { manager } = makeManager();
+    await expect(manager.connect('ghost')).rejects.toThrow(/不存在/);
+  });
+
+  it('aborts an in-flight connect when the server is removed mid-health-check', async () => {
+    let resolveHealth: ((value: { healthy: boolean }) => void) | undefined;
+    const health = vi.fn(
+      () => new Promise<{ healthy: boolean }>((resolve) => { resolveHealth = resolve; }),
+    );
+    const subscribeEvents = vi.fn(() => () => {});
+    const { manager } = makeManager({
+      createClient: () => ({ health, subscribeEvents, listSessions: async () => [] }) as never,
+    });
+
+    const pending = manager.connect('srv-1');
+    await vi.waitFor(() => expect(health).toHaveBeenCalled());
+    await manager.remove('srv-1');
+    resolveHealth!({ healthy: true });
+    await pending;
+
+    expect(manager.getClient('srv-1')).toBeNull();
+    expect(manager.statuses().some((status) => status.id === 'srv-1')).toBe(false);
+    expect(subscribeEvents).not.toHaveBeenCalled();
+  });
 });

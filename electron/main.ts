@@ -765,6 +765,12 @@ function registerIpcHandlers(): void {
     return requireServerRuntime().manager.statuses();
   });
 
+  handle('servers:connect', async (_e, id: string) => {
+    const status = await requireServerRuntime().manager.connect(id);
+    broadcastSettingsChanged();
+    return status;
+  });
+
   handle('servers:providers', async (_e, id: string): Promise<ServerProviderSummary[]> => {
     const client = requireServerRuntime().manager.getClient(id);
     if (!client) throw new Error('服务器未连接');

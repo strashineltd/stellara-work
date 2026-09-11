@@ -199,6 +199,7 @@ export function installDevPreviewApi(): void {
       test: async () => ({ ok: true, status: 'connected' }),
       setDefault: async () => {},
       status: async () => [],
+      connect: async (id: string) => ({ id, status: 'connected' as const }),
       providers: async () => [],
       agents: async () => [],
       onStatusChanged: () => () => {},

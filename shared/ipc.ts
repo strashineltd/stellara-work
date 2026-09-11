@@ -1072,6 +1072,8 @@ export interface ElectronAPI {
     test: (id: string) => Promise<ServerTestResult>;
     setDefault: (id: string | null) => Promise<void>;
     status: () => Promise<ServerStatusEntry[]>;
+    /** 手动连接/重连（幂等）：初始健康检查失败后的恢复入口 */
+    connect: (id: string) => Promise<ServerStatusEntry>;
     providers: (id: string) => Promise<ServerProviderSummary[]>;
     agents: (id: string) => Promise<ServerAgentSummary[]>;
     onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => () => void;

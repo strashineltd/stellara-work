@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { ServerEntry, ServerInput, ServerRuntimeStatus, ServerTestResult } from '@shared/ipc';
+import type { ServerEntry, ServerInput, ServerRuntimeStatus, ServerStatusEntry, ServerTestResult } from '@shared/ipc';
 import { normalizeServerUrl, type ServerConfigEntry } from '../config/config-v2';
 import type { HealthInfo, OpencodeClient } from './opencode-client';
 import type { RemoteEvent } from './types';
@@ -145,12 +145,22 @@ export class ServerManager {
   }
 
   statuses(): ServerStatus[] {
-    return [...this.runtime.entries()].map(([id, state]) => ({
-      id,
-      status: state.status,
-      ...(state.error !== undefined ? { error: state.error } : {}),
-      ...(state.version !== undefined ? { version: state.version } : {}),
-    }));
+    return [...this.runtime.entries()].map(([id, state]) => this.toStatusEntry(id, state));
+  }
+
+  /**
+   * 手动连接入口（幂等）：connected/connecting 时原样返回；disconnected/error
+   * 时执行健康检查并订阅事件；未知 id 抛错。用于初始健康检查失败后的恢复。
+   */
+  async connect(id: string): Promise<ServerStatusEntry> {
+    const state = this.runtime.get(id);
+    if (state && (state.status === 'connected' || state.status === 'connecting')) {
+      return this.toStatusEntry(id, state);
+    }
+    const entry = await this.requireEntry(id);
+    await this.connectEntry(entry);
+    const current = this.runtime.get(id);
+    return current ? this.toStatusEntry(id, current) : { id, status: 'disconnected' };
   }
 
   async test(id: string): Promise<ServerTestResult> {
@@ -175,7 +185,7 @@ export class ServerManager {
 
   async connectAll(): Promise<void> {
     const entries = await this.syncEntries();
-    for (const entry of entries) await this.connect(entry.id);
+    for (const entry of entries) await this.connectEntry(entry);
   }
 
   disconnectAll(): void {
@@ -200,11 +210,10 @@ export class ServerManager {
     };
   }
 
-  private async connect(id: string): Promise<void> {
+  private async connectEntry(entry: ServerConfigEntry): Promise<void> {
+    const id = entry.id;
     const state = this.ensureRuntime(id);
     if (state.status === 'connected' || state.status === 'connecting') return;
-    const entry = await this.findEntry(id);
-    if (!entry) return;
 
     this.setRuntime(id, { status: 'connecting', error: undefined, version: undefined });
     const client = this.deps.createClient(entry, this.deps.getPassword(id));
@@ -213,17 +222,31 @@ export class ServerManager {
       info = await client.health();
       if (info.healthy === false) throw new Error('健康检查未通过');
     } catch (error) {
-      this.setRuntime(id, { status: 'error', error: describeConnectError(error), version: undefined });
+      // 健康检查期间条目可能已被移除：回写 error 会复活该 id
+      if (this.isCurrent(id)) {
+        this.setRuntime(id, { status: 'error', error: describeConnectError(error), version: undefined });
+      }
+      return;
+    }
+
+    // 健康检查通过后条目仍可能被 remove()/syncEntries() 删除：
+    // 不得提交 client / 订阅 / 状态，否则会复活已删除的服务器并泄漏订阅
+    if (!this.isCurrent(id)) return;
+
+    const unsubscribe = client.subscribeEvents(
+      (event) => this.dispatchEvent(id, event),
+      (status) => {
+        if (!this.isCurrent(id)) return;
+        this.setRuntime(id, { status: status === 'reconnecting' ? 'connecting' : 'connected' });
+      },
+    );
+    if (!this.isCurrent(id)) {
+      unsubscribe();
       return;
     }
 
     state.client = client;
-    state.unsubscribe = client.subscribeEvents(
-      (event) => this.dispatchEvent(id, event),
-      (status) => {
-        this.setRuntime(id, { status: status === 'reconnecting' ? 'connecting' : 'connected' });
-      },
-    );
+    state.unsubscribe = unsubscribe;
     this.setRuntime(id, {
       status: 'connected',
       error: undefined,
@@ -252,6 +275,20 @@ export class ServerManager {
     if (cached) return cached;
     await this.syncEntries();
     return this.entries.get(id);
+  }
+
+  /** 条目是否仍在当前配置中（await 之后提交状态前必须复查）。 */
+  private isCurrent(id: string): boolean {
+    return this.entries.has(id);
+  }
+
+  private toStatusEntry(id: string, state: RuntimeState): ServerStatusEntry {
+    return {
+      id,
+      status: state.status,
+      ...(state.error !== undefined ? { error: state.error } : {}),
+      ...(state.version !== undefined ? { version: state.version } : {}),
+    };
   }
 
   private async requireEntry(id: string): Promise<ServerConfigEntry> {

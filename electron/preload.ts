@@ -192,6 +192,7 @@ const api: ElectronAPI = {
     test: (id: string): Promise<ServerTestResult> => ipcRenderer.invoke('servers:test', id),
     setDefault: (id: string | null) => ipcRenderer.invoke('servers:setDefault', id),
     status: (): Promise<ServerStatusEntry[]> => ipcRenderer.invoke('servers:status'),
+    connect: (id: string): Promise<ServerStatusEntry> => ipcRenderer.invoke('servers:connect', id),
     providers: (id: string) => ipcRenderer.invoke('servers:providers', id),
     agents: (id: string) => ipcRenderer.invoke('servers:agents', id),
     onStatusChanged: (callback: (statuses: ServerStatusEntry[]) => void) => {
