@@ -327,7 +327,18 @@ export function installDevPreviewApi(): void {
           ok: true as const,
           data: { pendingId: 'preview-pending-1', email: args.email },
         }),
-        verifySignUp: async () => {
+        // 固定验证码 123456，其余走「验证码不正确」分支，便于在预览里验证错误分层
+        verifySignUp: async (args: { pendingId: string; code: string }) => {
+          if (args.code !== '123456') {
+            return {
+              ok: false as const,
+              error: {
+                code: 'verification_failed',
+                message: '验证码不正确或已过期',
+                hint: '请重新获取验证码后再试',
+              },
+            };
+          }
           previewCloudAccount = {
             uid: 'preview-cloud-uid-1',
             email: 'preview@example.com',
@@ -337,7 +348,18 @@ export function installDevPreviewApi(): void {
           previewCloudSignedIn = true;
           return { ok: true as const, data: previewCloudState() };
         },
-        signInWithPassword: async (args: { identifier: string }) => {
+        signInWithPassword: async (args: { identifier: string; password: string }) => {
+          // 密码固定 preview123，其余走「账号或密码不正确」分支
+          if (args.password !== 'preview123') {
+            return {
+              ok: false as const,
+              error: {
+                code: 'invalid_credentials',
+                message: '邮箱/用户名或密码不正确',
+                hint: '请检查后重试',
+              },
+            };
+          }
           const isEmail = args.identifier.includes('@');
           previewCloudAccount = {
             uid: 'preview-cloud-uid-1',
@@ -357,7 +379,8 @@ export function installDevPreviewApi(): void {
           previewCloudAccount = null;
           return { ok: true as const, data: previewCloudState() };
         },
-        isUsernameRegistered: async () => ({ ok: true as const, data: false }),
+        // 固定把 taken_user 当作已占用，便于在预览里看到「用户名已被占用」
+        isUsernameRegistered: async (name: string) => ({ ok: true as const, data: name === 'taken_user' }),
       },
     },
   };

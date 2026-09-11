@@ -2,20 +2,24 @@
  *
  * 只服务 SettingsCloudAccountSection。settings-section / settings-group /
  * settings-item / btn / error-banner / account-* 全部复用既有类。
- * 颜色、间距、圆角、动效一律走 design tokens。
+ * 颜色、间距、圆角、动效一律走 design tokens，禁止裸值。
  */
 
-/* ---------- 登录 / 注册切换 ---------- */
-.cloud-tabs {
+/* ---------- 登录 / 注册切换（分段控件） ---------- */
+.cloud-segmented {
   display: flex;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3) 0;
+  margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-soft);
 }
 
-.cloud-tab {
-  padding: var(--space-1) var(--space-3);
+.cloud-segmented__item {
+  flex: 1 1 0;
+  padding: var(--space-1) var(--space-2);
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--color-text-faint);
   font-family: inherit;
@@ -27,14 +31,78 @@
     background-color var(--motion-fast) var(--ease-standard);
 }
 
-.cloud-tab:hover {
+.cloud-segmented__item:hover {
   color: var(--color-text);
-  background: var(--color-hover-overlay);
 }
 
-.cloud-tab.is-active {
+.cloud-segmented__item.is-active {
   color: var(--color-accent);
   background: var(--color-accent-tint);
+}
+
+/* ---------- 注册步骤条（① 账号信息 → ② 邮箱验证） ---------- */
+.cloud-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-1);
+}
+
+.cloud-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  flex: 0 0 auto;
+}
+
+.cloud-step__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-faint);
+  font-size: var(--fs-xxs);
+  font-weight: 600;
+}
+
+.cloud-step__label {
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+}
+
+.cloud-step__line {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.cloud-step__line.is-done {
+  background: var(--color-accent);
+}
+
+.cloud-step.is-active .cloud-step__index {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.cloud-step.is-active .cloud-step__label {
+  color: var(--color-accent);
+  font-weight: 560;
+}
+
+.cloud-step.is-done .cloud-step__index {
+  border-color: var(--color-success-bg);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.cloud-step.is-done .cloud-step__label {
+  color: var(--color-text-faint);
+  text-decoration: line-through;
 }
 
 /* ---------- 表单字段（标签在上、输入在下） ---------- */
@@ -51,9 +119,43 @@
 }
 
 .cloud-field__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--color-text-soft);
   font-size: var(--fs-xs);
   font-weight: 560;
+}
+
+.cloud-field__optional {
+  color: var(--color-text-faint);
+  font-weight: 400;
+}
+
+/* 标签行（左侧标签、右侧倒计时之类的行内信息） */
+.cloud-field__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cloud-field__row--end {
+  justify-content: flex-end;
+}
+
+.cloud-field__counter {
+  margin-left: auto;
+  color: var(--color-text-faint);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+/* 输入行包装：输入框 + 右侧「显示 / 可用」等后缀 */
+.cloud-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 /* 覆盖 .account-input 的 flex 基线，让输入框铺满整行。
@@ -64,6 +166,167 @@
   width: 100%;
   min-width: 0;
   height: var(--control-height-sm, 30px);
+}
+
+/* 校验态（红框 / 绿框），优先级高于 .account-input 的默认边框 */
+.cloud-field__input.is-invalid {
+  border-color: var(--color-danger);
+}
+
+.cloud-field__input.is-valid {
+  border-color: var(--color-success);
+}
+
+/* ---------- 字段级消息（错误挂在字段下面，不进顶部横幅） ---------- */
+.cloud-field__msg {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cloud-field__msg--hint {
+  color: var(--color-text-faint);
+}
+
+.cloud-field__msg--error {
+  color: var(--color-danger);
+}
+
+.cloud-field__msg--ok {
+  color: var(--color-success);
+}
+
+.cloud-field__badge {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+}
+
+.cloud-field__badge--ok {
+  color: var(--color-success);
+}
+
+/* ---------- 文字按钮（显示密码 / 重新发送 / 修改） ---------- */
+.cloud-link {
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.cloud-link:hover:not(:disabled) {
+  color: var(--color-accent-hover);
+}
+
+.cloud-link:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+}
+
+/* ---------- 密码强度 ---------- */
+.cloud-strength {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cloud-strength__bar {
+  flex: 1 1 0;
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+}
+
+.cloud-strength__bar.is-on.cloud-strength__bar--1 {
+  background: var(--color-danger);
+}
+
+.cloud-strength__bar.is-on.cloud-strength__bar--2 {
+  background: var(--color-warning);
+}
+
+.cloud-strength__bar.is-on.cloud-strength__bar--3 {
+  background: var(--color-success);
+}
+
+.cloud-strength__label {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+}
+
+.cloud-strength__label--1 {
+  color: var(--color-danger);
+}
+
+.cloud-strength__label--2 {
+  color: var(--color-warning);
+}
+
+.cloud-strength__label--3 {
+  color: var(--color-success);
+}
+
+/* ---------- 邮箱验证码（6 格分格） ---------- */
+.cloud-otp {
+  display: flex;
+  gap: var(--space-1-5);
+}
+
+.cloud-otp__cell {
+  flex: 1 1 0;
+  min-width: 0;
+  height: calc(var(--control-height) + var(--space-1-5));
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  text-align: center;
+}
+
+.cloud-otp__cell:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -1px;
+}
+
+.cloud-otp__cell.is-invalid {
+  border-color: var(--color-danger);
+}
+
+.cloud-otp__cell:disabled {
+  background: var(--color-bg-soft);
+}
+
+/* ---------- 验证码回显摘要 ---------- */
+.cloud-recap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-soft);
+}
+
+.cloud-recap__grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cloud-recap__label {
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+}
+
+.cloud-recap__value {
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
 }
 
 /* ---------- 提示条 ---------- */
