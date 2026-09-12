@@ -136,6 +136,7 @@ describe('Sidebar', () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    delete (window as any).electronAPI;
     vi.restoreAllMocks();
     document.body.replaceChildren();
   });
@@ -266,6 +267,41 @@ describe('Sidebar', () => {
     expect(onNavigate).toHaveBeenCalledWith('files');
     fireClick(tools[2]!);
     expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it('renders the account badge below the bottom tools', async () => {
+    const user = { id: 'u1', displayName: 'Leo', createdAt: 1, updatedAt: 1 };
+    (window as any).electronAPI = {
+      auth: {
+        local: {
+          getCurrent: vi.fn().mockResolvedValue(user),
+          list: vi.fn().mockResolvedValue([user]),
+          switch: vi.fn(),
+          create: vi.fn(),
+        },
+      },
+    };
+    const { querySelector } = render(
+      <Sidebar
+        sessions={SESSIONS}
+        activeId={null}
+        onSelect={vi.fn()}
+        onNew={vi.fn()}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onExport={vi.fn()}
+        {...PROJECT_PROPS}
+      />,
+    );
+    await act(async () => {});
+
+    const tools = querySelector('.sidebar-tools');
+    const badge = querySelector('.account-badge');
+    expect(badge).not.toBeNull();
+    expect(tools).not.toBeNull();
+    expect(
+      tools!.compareDocumentPosition(badge!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('renders every unassigned session once in 最近, ordered by updatedAt desc', () => {

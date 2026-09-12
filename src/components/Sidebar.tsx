@@ -806,8 +806,6 @@ export function Sidebar({
         </button>
       </nav>
 
-      <AccountBadge />
-
       <div className="sidebar-library-heading">
         <span>项目与会话</span>
         <span>{sessions.length}</span>
@@ -946,6 +944,7 @@ export function Sidebar({
           <span>设置</span>
         </button>
       </div>
+      <AccountBadge />
       </aside>
 
       {projectDialogPresence.mounted && openProject && createPortal(

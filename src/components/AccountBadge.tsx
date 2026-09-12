@@ -94,13 +94,13 @@ export function AccountBadge() {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
+        aria-label={`本地身份：${user.displayName}`}
         title={user.displayName}
       >
         <span className="account-avatar" aria-hidden="true">
           {initialOf(user.displayName)}
         </span>
         <span className="account-badge__name">{user.displayName}</span>
-        <Icon name="chevron-down" size={13} />
       </button>
 
       {open && (

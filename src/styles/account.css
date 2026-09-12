@@ -70,10 +70,10 @@
   word-break: break-all;
 }
 
-/* ---------- 侧边栏本地身份入口 ---------- */
+/* ---------- 侧边栏底部本地身份入口（头像 + 名称） ---------- */
 .account-badge {
   position: relative;
-  padding: var(--space-2) var(--space-2) 0;
+  padding: 0 var(--space-2) var(--space-2);
 }
 
 .account-badge__trigger {
@@ -81,7 +81,7 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  min-height: 36px;
+  min-height: 34px;
   padding: 0 var(--space-2);
   border: none;
   border-radius: var(--radius-sm);
@@ -102,11 +102,6 @@
   background: var(--color-hover-overlay);
 }
 
-.account-badge__trigger .app-icon {
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
 .account-badge__name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -115,7 +110,7 @@
 
 .account-badge__menu {
   position: absolute;
-  top: calc(100% - var(--space-1));
+  bottom: calc(100% - var(--space-1));
   left: var(--space-2);
   right: var(--space-2);
   z-index: 40;
