@@ -8,7 +8,7 @@ All notable changes to Stellara Work are documented here. Versions follow [Seman
 
 - 修复 macOS 安装后提示「已损坏，无法打开」、无法启动的问题
 
-## [Unreleased]
+## [0.9.3] - 2026-09-12
 
 ### Added · 新增
 
@@ -21,6 +21,21 @@ All notable changes to Stellara Work are documented here. Versions follow [Seman
 - 内置 AI 浏览器 B 组：设置面板（JS 执行开关 + 搜索服务/Key 配置）、清空数据时清理浏览器分区、act 限频（1 秒 1 次）、导航后 SPA 稳定等待、plan 模式支持 web_search
 - 内置 AI 浏览器二期：真多 Tab（每 Tab 独立窗口）、观察窗接入聊天区并自动展开、同 Tab 快照实时刷新、Markdown 链接协议硬化
 - 内置 AI 浏览器 P0/P1: web_search + browser_* Agent 工具（自动化控制，强审批），观察窗只读
+
+### Changed · 变更
+
+- 顶栏执行端选择器改为「图标 + 名称」简洁样式；全屏时导航箭头平移贴左（带过渡动画）
+- 侧边栏账号入口移到「设置」下方，显示头像 + 名称
+- 全应用静态文字不再显示文本输入光标（可编辑控件保留）
+- 新应用图标：macOS 白色圆角 + 投影，Windows 仅 logo 透明底
+
+### Fixed · 修复
+
+- 离线/已删除服务器的会话回退本地缓存只读展示，不再打开空白；提示区分有无缓存
+- 删除服务器时一并清理其本地会话映射与缓存，不再残留「未知服务器」分组
+- 修复会话切换卡顿：只读会话不再反复重写缓存，Markdown 渲染 memo 化
+- 修复 macOS 全屏后顶栏箭头未左移的问题
+- 修复「本地」chip 悬停显示文本输入光标的问题
 
 ## [0.9.2] - 2026-08-20
 
