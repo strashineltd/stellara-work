@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage, nativeTheme, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell, safeStorage, nativeTheme, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import log from 'electron-log/main';
@@ -167,7 +167,7 @@ function createWindow(): void {
             height: 72,
           },
         }),
-    icon: path.join(__dirname, '..', '..', 'assets', isMac ? 'icon-512.png' : 'icon.ico'),
+    icon: path.join(__dirname, '..', '..', '..', 'assets', isMac ? 'icon-512.png' : 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -188,6 +188,13 @@ function createWindow(): void {
   mainWindow.once('ready-to-show', () => {
     log.info('Window ready to show');
     mainWindow?.show();
+  });
+  // 全屏状态（macOS 全屏时红绿灯隐藏，渲染层据此把顶栏箭头贴左）
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('window-fullscreen-changed', true);
+  });
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('window-fullscreen-changed', false);
   });
   setTimeout(() => {
     if (mainWindow && !mainWindow.isVisible()) {
@@ -272,6 +279,10 @@ function registerIpcHandlers(): void {
     const { readGitBranch } = await import('./git-branch');
     if (typeof workDir !== 'string' || !workDir.trim()) return null;
     return readGitBranch(workDir);
+  });
+
+  handle('app:isFullScreen', async (event): Promise<boolean> => {
+    return BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false;
   });
 
   // Models（v1，保留兼容但走 v2 数据）
@@ -799,7 +810,10 @@ function registerIpcHandlers(): void {
   });
 
   handle('servers:remove', async (_e, id: string) => {
-    await requireServerRuntime().manager.remove(id);
+    const runtime = requireServerRuntime();
+    await runtime.manager.remove(id);
+    // 删除服务器时一并清理其本地会话映射与缓存，避免侧栏残留“未知服务器”分组
+    runtime.sessions.removeByServer(id);
     broadcastSettingsChanged();
   });
 
@@ -2022,6 +2036,11 @@ async function resolveSessionExecutionContext(sessionId: string): Promise<ModelC
 app.whenReady().then(async () => {
   // M2.3: Windows toast 通知需要 AppUserModelID
   if (process.platform === 'win32') app.setAppUserModelId('work.stellara.app');
+  // macOS：Dock 图标跟随 assets（开发模式显示 Electron 默认图标，需显式设置）
+  if (process.platform === 'darwin') {
+    const dockIcon = nativeImage.createFromPath(path.join(__dirname, '..', '..', '..', 'assets', 'icon-512.png'));
+    if (!dockIcon.isEmpty()) app.dock?.setIcon(dockIcon);
+  }
   const { setAppDataDir, migrateLegacyAppData } = await import('./config/data-dir');
   const appDataDir = app.getPath('userData');
   setAppDataDir(appDataDir);

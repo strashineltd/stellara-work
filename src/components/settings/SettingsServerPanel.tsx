@@ -119,7 +119,7 @@ export function SettingsServerPanel({ onChanged, refreshKey = 0 }: SettingsServe
 
   async function handleDelete(entry: ServerEntry) {
     setMenuFor(null);
-    if (!window.confirm(`删除服务器「${entry.name}」？该服务器的会话将标记为离线。`)) return;
+    if (!window.confirm(`删除服务器「${entry.name}」？侧栏中该服务器的会话记录将一并移除。`)) return;
     try {
       await window.electronAPI.servers.remove(entry.id);
       await load();

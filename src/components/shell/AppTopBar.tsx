@@ -29,7 +29,7 @@ export function AppTopBar(props: AppTopBarProps) {
       <div className="app-topbar__actions">
         {props.executionTarget ?? (
           <span className="execution-target-chip">
-            <i aria-hidden="true" />
+            <Icon name="server" size={13} />
             本地
           </span>
         )}

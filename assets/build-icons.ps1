@@ -1,11 +1,11 @@
 # Stellara Work icon generation script
-# Converts assets/icon.jpg to .ico + multi-size .png (for electron-builder)
+# Converts assets/icon-win.png (Windows logo-only source) to .ico + multi-size .png
 # Requires ImageMagick: winget install ImageMagick.ImageMagick
 # Usage: powershell -ExecutionPolicy Bypass -File assets/build-icons.ps1
 
 $ErrorActionPreference = 'Stop'
 
-$SourceIcon = Join-Path $PSScriptRoot 'icon.jpg'
+$SourceIcon = Join-Path $PSScriptRoot 'icon-win.png'
 $OutputDir = $PSScriptRoot
 
 # Check source file

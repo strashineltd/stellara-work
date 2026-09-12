@@ -151,7 +151,9 @@ export class SessionBridge {
     if (!session) throw new Error(`Session 不存在: ${id}`);
 
     if (session.runtime === 'server') {
-      const client = this.requireClient(session.serverId);
+      const client = this.connectedClient(session.serverId);
+      // 服务器离线/已删除：回退本地缓存（渲染层按只读展示）；连上时远端为准，失败照常抛出
+      if (!client) return { session, messages: this.db.getMessages(id) };
       if (!session.remoteSessionId) throw new Error('会话缺少远端映射');
       const messages = await client.listMessages(session.remoteSessionId);
       return { session, messages: remoteMessagesToRows(id, messages) };
@@ -209,6 +211,13 @@ export class SessionBridge {
   /** 处理 session.deleted：删除本地映射行。 */
   removeByRemote(serverId: string, remoteSessionId: string): void {
     this.db.deleteSessionByRemote(serverId, remoteSessionId);
+  }
+
+  /** 服务器被删除：清理其全部本地会话映射（消息缓存随外键级联删除）。 */
+  removeByServer(serverId: string): void {
+    for (const session of this.db.listServerSessions(serverId)) {
+      this.db.deleteSession(session.id);
+    }
   }
 
   private connectedClient(serverId: string | undefined): OpencodeClient | null {

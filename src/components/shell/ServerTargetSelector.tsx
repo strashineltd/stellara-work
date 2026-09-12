@@ -64,9 +64,8 @@ export function ServerTargetSelector(props: ServerTargetSelectorProps) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="server-status-dot" data-status={currentStatus} aria-hidden="true" />
+        <Icon name="server" size={13} />
         <span>{currentName}</span>
-        <Icon name="chevron-down" size={12} />
       </button>
       {presence.mounted && (
         <div className="server-target__menu" role="menu" aria-label="执行端" {...presenceRootProps(presence)}>

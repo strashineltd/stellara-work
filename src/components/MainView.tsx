@@ -373,16 +373,11 @@ export function MainView(props: MainViewProps) {
       if (cancelled) return;
       entriesSessionRef.current = null;
       setAttachments([]);
-      if (serverOffline) {
-        setEntries([]);
-        setLastUserForRetry(null);
-        setPendingPlanApproval(null);
-        return;
-      }
       void window.electronAPI.sessions.get(activeSessionId).then(({ messages }) => {
         if (cancelled) return;
         setEntries(messagesToEntries(messages));
-        entriesSessionRef.current = activeSessionId;
+        // 只读会话（服务器离线/已删除，来自本地缓存）不参与 autosave/flush，避免每次切换重写整段缓存
+        entriesSessionRef.current = serverOffline ? null : activeSessionId;
         setApprovalMode('step');
         setLastUserForRetry(null);
         setPendingPlanApproval(null);
@@ -1156,8 +1151,12 @@ export function MainView(props: MainViewProps) {
                 <div className="no-model-banner server-offline-banner" role="alert">
                   <span className="server-offline-banner__text">
                     {activeServerMissing
-                      ? '服务器已删除：该会话仅可查看'
-                      : `服务器未连接：${activeServerName ?? '未知服务器'}`}
+                      ? (entries.length > 0
+                          ? '服务器已删除：以下为本地缓存，仅可查看'
+                          : '服务器已删除：本地无缓存，无法查看内容')
+                      : (entries.length > 0
+                          ? '服务器未连接：以下为本地缓存，仅可查看'
+                          : `服务器未连接：${activeServerName ?? '未知服务器'}`)}
                   </span>
                   {activeServerId && !activeServerMissing && (
                     <div className="no-model-banner__actions">

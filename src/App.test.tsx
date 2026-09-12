@@ -30,6 +30,7 @@ const SESSION: SessionSummary = {
 };
 
 let mounted: { container: HTMLDivElement; root: Root } | null = null;
+let fullscreenListener: ((fullscreen: boolean) => void) | null = null;
 
 async function renderApp() {
   const container = document.createElement('div');
@@ -57,12 +58,18 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   Element.prototype.scrollIntoView = () => {};
+  fullscreenListener = null;
   (window as any).electronAPI = {
     menu: { onAction: vi.fn().mockReturnValue(() => {}) },
     app: {
       getInfo: vi.fn().mockResolvedValue(INFO),
       onSettingsChanged: vi.fn().mockReturnValue(() => {}),
       getGitBranch: vi.fn().mockResolvedValue(null),
+      isFullScreen: vi.fn().mockResolvedValue(false),
+      onFullscreenChanged: vi.fn((callback: (fullscreen: boolean) => void) => {
+        fullscreenListener = callback;
+        return () => {};
+      }),
     },
     models: {
       list: vi.fn().mockResolvedValue({ presets: [], configured: CONFIG }),
@@ -93,6 +100,25 @@ afterEach(() => {
   }
   vi.unstubAllGlobals();
   document.body.replaceChildren();
+});
+
+describe('App fullscreen layout state', () => {
+  it('tracks window fullscreen changes on documentElement', async () => {
+    await renderApp();
+    expect(document.documentElement.dataset.fullscreen).toBe('false');
+
+    act(() => fullscreenListener?.(true));
+    expect(document.documentElement.dataset.fullscreen).toBe('true');
+
+    act(() => fullscreenListener?.(false));
+    expect(document.documentElement.dataset.fullscreen).toBe('false');
+  });
+
+  it('reflects an initially fullscreen window', async () => {
+    (window as any).electronAPI.app.isFullScreen.mockResolvedValue(true);
+    await renderApp();
+    expect(document.documentElement.dataset.fullscreen).toBe('true');
+  });
 });
 
 describe('App panel shortcut focus management', () => {

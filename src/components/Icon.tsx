@@ -55,6 +55,7 @@ export function Icon({ name, size = 16, className, ...props }: IconProps) {
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
     focusable: false,
+    'data-icon': name,
     className: ['app-icon', className].filter(Boolean).join(' '),
     ...props,
   };

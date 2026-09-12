@@ -102,6 +102,14 @@ const api: ElectronAPI = {
         ipcRenderer.removeListener('settings-changed', handler);
       };
     },
+    isFullScreen: (): Promise<boolean> => ipcRenderer.invoke('app:isFullScreen'),
+    onFullscreenChanged: (callback: (fullscreen: boolean) => void) => {
+      const handler = (_e: unknown, fullscreen: boolean) => callback(fullscreen);
+      ipcRenderer.on('window-fullscreen-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('window-fullscreen-changed', handler);
+      };
+    },
   },
   models: {
     list: (): Promise<ModelListResponse> => ipcRenderer.invoke('models:list'),

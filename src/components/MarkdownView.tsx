@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { extractRelativePaths } from '../lib/path-utils';
@@ -27,8 +28,9 @@ function resolveHref(href: string | undefined): string | null {
  * - 支持 GFM（表格、任务列表、删除线、链接）
  * - 代码块、列表、标题、引用、行内代码、链接
  * - 简单代码高亮（关键词颜色），不上 highlight.js（避免 50KB 依赖）
+ * - memo：父组件因无关状态重渲染时跳过 markdown 重新解析（长会话性能关键）
  */
-export function MarkdownView({ content, workDir, onAnchorClick }: MarkdownViewProps) {
+export const MarkdownView = memo(function MarkdownView({ content, workDir, onAnchorClick }: MarkdownViewProps) {
   return (
     <div className="md-content">
       <ReactMarkdown
@@ -97,4 +99,4 @@ export function MarkdownView({ content, workDir, onAnchorClick }: MarkdownViewPr
       </ReactMarkdown>
     </div>
   );
-}
+});

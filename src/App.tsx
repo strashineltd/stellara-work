@@ -125,6 +125,16 @@ export default function App() {
     });
   }, []);
 
+  // 全屏状态写到 documentElement.dataset.fullscreen（macOS 全屏红绿灯隐藏，顶栏箭头贴左）
+  useEffect(() => {
+    const api = window.electronAPI.app;
+    const apply = (fullscreen: boolean) => {
+      document.documentElement.dataset.fullscreen = fullscreen ? 'true' : 'false';
+    };
+    void api.isFullScreen().then(apply).catch(() => {});
+    return api.onFullscreenChanged(apply);
+  }, []);
+
   useEffect(() => {
     Promise.all([
       window.electronAPI.app.getInfo(),

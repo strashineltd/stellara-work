@@ -118,10 +118,6 @@ export function HomeComposer(props: HomeComposerProps) {
               )}
             </span>
           )}
-        <span className="home-composer__chip home-composer__target">
-          <Icon name="server" size={13} />
-          {props.serverTarget?.name ?? '本地'}
-        </span>
         {props.branch !== null && (
           <span className="home-composer__chip home-composer__branch">
             <Icon name="file-tree" size={13} />

@@ -2664,7 +2664,7 @@ describe('MainView execution target selector', () => {
     unmount();
   });
 
-  it('shows the selected server chip on the home composer instead of the project chip', async () => {
+  it('keeps the server indicator in the topbar and hides the composer project chip in server mode', async () => {
     installApi();
     const { querySelector, unmount } = await renderMainView({
       activeSessionId: null,
@@ -2675,7 +2675,8 @@ describe('MainView execution target selector', () => {
     fireClick(querySelector('.server-target__trigger'));
     fireClick(querySelector('.server-target__item[data-status="connected"]'));
 
-    expect(querySelector('.home-composer__target')?.textContent).toContain('本地服务器');
+    expect(querySelector('.server-target__trigger')?.textContent).toContain('本地服务器');
+    expect(querySelector('.home-composer__target')).toBeNull();
     expect(querySelector('.home-composer__project')).toBeNull();
     expect(querySelector('.attach-btn')?.hasAttribute('disabled')).toBe(true);
     expect(querySelector('.home-composer')?.textContent).toContain('服务器会话暂不支持附件');
@@ -2904,6 +2905,86 @@ describe('MainView execution target selector', () => {
     await act(async () => {});
     expect(querySelector('.server-offline-banner')).toBeNull();
     expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(false);
+    unmount();
+  });
+
+  it('renders cached messages read-only when a server session is offline', async () => {
+    const api = installApi();
+    api.sessions.get.mockResolvedValue({
+      session: SESSIONS[0],
+      messages: [{ sessionId: 'a', position: 0, role: 'user', content: '缓存中的任务', createdAt: 1 }],
+    });
+    const { querySelector, container, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ serverId: 'srv-2' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    expect(api.sessions.get).toHaveBeenCalledWith('a');
+    expect(container.textContent).toContain('缓存中的任务');
+    const banner = querySelector('.server-offline-banner');
+    expect(banner?.textContent).toContain('服务器未连接');
+    expect(banner?.textContent).toContain('本地缓存');
+    expect(banner?.textContent).toContain('仅可查看');
+    expect((querySelector('.main-input .btn-primary') as HTMLButtonElement).disabled).toBe(true);
+    unmount();
+  });
+
+  it('labels a deleted-server session with cached content as read-only', async () => {
+    const api = installApi();
+    api.sessions.get.mockResolvedValue({
+      session: SESSIONS[0],
+      messages: [{ sessionId: 'a', position: 0, role: 'user', content: '缓存中的任务', createdAt: 1 }],
+    });
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ serverId: 'srv-gone' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    const banner = querySelector('.server-offline-banner');
+    expect(banner?.textContent).toContain('服务器已删除');
+    expect(banner?.textContent).toContain('本地缓存');
+    expect(banner?.textContent).toContain('仅可查看');
+    unmount();
+  });
+
+  it('does not promise viewability when a deleted-server session has no cache', async () => {
+    installApi();
+    const { querySelector, unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ serverId: 'srv-gone' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+
+    const banner = querySelector('.server-offline-banner');
+    expect(banner?.textContent).toContain('服务器已删除');
+    expect(banner?.textContent).not.toContain('仅可查看');
+    unmount();
+  });
+
+  it('does not rewrite the local cache of an offline read-only server session', async () => {
+    const api = installApi();
+    api.sessions.get.mockResolvedValue({
+      session: SESSIONS[0],
+      messages: [{ sessionId: 'a', position: 0, role: 'user', content: '缓存中的任务', createdAt: 1 }],
+    });
+    const { unmount } = await renderMainView({
+      config: null,
+      sessions: [serverSession({ serverId: 'srv-2' })],
+      activeSessionId: 'a',
+    });
+    await act(async () => {});
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+
+    const rewrites = api.sessions.saveMessages.mock.calls.filter(
+      ([id, messages]) => id === 'a'
+        && (messages as Array<{ content?: string }>).some((m) => m.content === '缓存中的任务'),
+    );
+    expect(rewrites).toHaveLength(0);
     unmount();
   });
 });

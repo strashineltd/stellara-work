@@ -87,14 +87,14 @@ describe('ServerTargetSelector', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   });
 
-  it('shows 本地 as the default target with a connected dot', () => {
+  it('shows 本地 as the default target with the server icon', () => {
     const { container, unmount } = renderSelector();
     const trigger = container.querySelector('.server-target__trigger');
     expect(trigger?.textContent).toContain('本地');
     expect(trigger?.getAttribute('data-status')).toBe('connected');
-    const dot = trigger?.querySelector('.server-status-dot');
-    expect(dot).not.toBeNull();
-    expect(dot?.getAttribute('data-status')).toBe('connected');
+    expect(trigger?.querySelector('.server-status-dot')).toBeNull();
+    expect(trigger?.querySelector('[data-icon="server"]')).not.toBeNull();
+    expect(trigger?.querySelector('[data-icon="chevron-down"]')).toBeNull();
     unmount();
   });
 
@@ -103,7 +103,7 @@ describe('ServerTargetSelector', () => {
     const trigger = container.querySelector('.server-target__trigger');
     expect(trigger?.textContent).toContain('远程开发机');
     expect(trigger?.getAttribute('data-status')).toBe('error');
-    expect(trigger?.querySelector('.server-status-dot')?.getAttribute('data-status')).toBe('error');
+    expect(trigger?.querySelector('.server-status-dot')).toBeNull();
     unmount();
   });
 

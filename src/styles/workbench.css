@@ -24,6 +24,15 @@ body,
 
 html {
   background: var(--color-bg-app);
+  /* 静态文字不显示浏览器默认的文本输入光标；可编辑控件在下方恢复 */
+  cursor: default;
+}
+
+/* 可编辑控件保留文本光标（排除复选框/按钮等非文本类型） */
+input:not([type='checkbox'], [type='radio'], [type='button'], [type='submit'], [type='reset'], [type='file'], [type='range'], [type='color']),
+textarea,
+[contenteditable]:not([contenteditable='false']) {
+  cursor: text;
 }
 
 body {
@@ -952,6 +961,15 @@ html[data-platform='darwin'] .app-topbar {
   padding-left: 78px;
 }
 
+/* macOS 全屏：红绿灯隐藏，导航箭头平移贴左（平移动画） */
+html[data-platform='darwin'] .app-topbar__nav {
+  transition: transform var(--motion-slow) var(--ease-standard);
+}
+
+html[data-platform='darwin'][data-fullscreen='true'] .app-topbar__nav {
+  transform: translateX(-66px);
+}
+
 .app-topbar button,
 .app-topbar a,
 .app-topbar input,
@@ -983,19 +1001,13 @@ html[data-platform='darwin'] .app-topbar {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  height: 26px;
+  height: 24px;
   padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
+  background: var(--color-chip-bg);
   color: var(--color-text-soft);
-  font-size: var(--fs-sm);
-}
-
-.execution-target-chip i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-success);
+  font-size: var(--fs-xs);
 }
 
 .main-model {

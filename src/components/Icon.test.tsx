@@ -37,6 +37,12 @@ describe('Icon', () => {
     unmount();
   });
 
+  it('exposes the icon name as data-icon', () => {
+    const { svg, unmount } = renderIcon(<Icon name="server" />);
+    expect(svg.getAttribute('data-icon')).toBe('server');
+    unmount();
+  });
+
   it('supports the paperclip icon used by the attachment picker', () => {
     const { svg, unmount } = renderIcon(<Icon name="paperclip" />);
     expect(svg.querySelectorAll('path').length).toBeGreaterThan(0);

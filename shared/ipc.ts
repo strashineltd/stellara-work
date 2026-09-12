@@ -1075,6 +1075,10 @@ export interface ElectronAPI {
     getGitBranch: (workDir: string) => Promise<string | null>;
     /** 监听设置变更广播 */
     onSettingsChanged: (callback: () => void) => () => void;
+    /** 当前窗口是否全屏（macOS 全屏时红绿灯隐藏，顶栏箭头需贴左） */
+    isFullScreen: () => Promise<boolean>;
+    /** 监听窗口全屏状态变化 */
+    onFullscreenChanged: (callback: (fullscreen: boolean) => void) => () => void;
   };
   models: {
     list: () => Promise<ModelListResponse>;

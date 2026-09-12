@@ -92,16 +92,16 @@ describe('HomeView', () => {
     second.unmount();
   });
 
-  it('shows the server name on the target chip and hides the project chip in server mode', () => {
+  it('hides the project chip and shows no server chip in server mode', () => {
     const { container, unmount } = render(<HomeView {...BASE_PROPS} serverTarget={{ name: '本地服务器' }} />);
-    expect(container.querySelector('.home-composer__target')?.textContent).toContain('本地服务器');
+    expect(container.querySelector('.home-composer__target')).toBeNull();
     expect(container.querySelector('.home-composer__project')).toBeNull();
     unmount();
   });
 
-  it('keeps the local target and project chips when no server target is set', () => {
+  it('keeps the project chip and shows no server chip for the local target', () => {
     const { container, unmount } = render(<HomeView {...BASE_PROPS} serverTarget={null} />);
-    expect(container.querySelector('.home-composer__target')?.textContent).toContain('本地');
+    expect(container.querySelector('.home-composer__target')).toBeNull();
     expect(container.querySelector('.home-composer__project')).not.toBeNull();
     unmount();
   });

@@ -118,6 +118,8 @@ export function installDevPreviewApi(): void {
         settingsListeners.add(callback);
         return () => settingsListeners.delete(callback);
       },
+      isFullScreen: async () => false,
+      onFullscreenChanged: () => () => {},
     },
     models: {
       list: async () => ({ presets: [], configured: previewModel }),
