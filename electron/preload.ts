@@ -270,7 +270,7 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('memory:search', query, options),
     list: (options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('memory:list', options),
-    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) =>
+    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount' | 'userId'>) =>
       ipcRenderer.invoke('memory:save', memory),
     update: (id: string, patch: { content?: string; importance?: number; tags?: string[] }) =>
       ipcRenderer.invoke('memory:update', id, patch),

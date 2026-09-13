@@ -11,7 +11,8 @@ describe('memory-store', () => {
       CREATE TABLE memories (
         id TEXT PRIMARY KEY, scope TEXT, scope_id TEXT, kind TEXT, content TEXT,
         source TEXT, importance REAL, confidence REAL, access_count INTEGER,
-        tags TEXT, created_at INTEGER, updated_at INTEGER
+        tags TEXT, created_at INTEGER, updated_at INTEGER,
+        user_id TEXT NOT NULL DEFAULT 'default'
       );
     `);
     db.exec(`CREATE VIRTUAL TABLE memories_fts USING fts5(memory_id UNINDEXED, content, tags, tokenize='unicode61')`);

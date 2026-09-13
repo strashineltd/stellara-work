@@ -573,6 +573,8 @@ export interface Memory {
   importance: number;
   confidence: number;
   accessCount: number;
+  /** 归属身份（主进程注入，渲染层不传） */
+  userId: string;
   tags?: string[];
   createdAt: number;
   updatedAt: number;
@@ -1221,7 +1223,7 @@ export interface ElectronAPI {
   memory: {
     search: (query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => Promise<Memory[]>;
     list: (options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) => Promise<Memory[]>;
-    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) => Promise<Memory>;
+    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount' | 'userId'>) => Promise<Memory>;
     update: (id: string, patch: Partial<Pick<Memory, 'content' | 'importance' | 'tags'>>) => Promise<void>;
     delete: (id: string) => Promise<void>;
     stats: () => Promise<MemoryStats>;
