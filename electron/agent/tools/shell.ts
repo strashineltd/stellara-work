@@ -160,6 +160,15 @@ const NON_PATH_FLAGS: Record<string, NonPathFlagSpec[]> = {
   cmake: [{ flag: '-D', attached: true }],
 };
 
+/**
+ * 取值“非路径”但支持 `@file` 文件读取的旗标（curl header/referer）：
+ * 取值本身允许任意字符串（含 /、..），但 @ 之后的候选仍按文件路径做包含校验，
+ * 防止 `-H@/abs` / `--header=@/abs` 把任意文件读进请求头外带。
+ */
+const AT_FILE_NON_PATH_FLAGS: Record<string, string[]> = {
+  curl: ['--header', '-H', '--referer', '-e'],
+};
+
 function matchesNonPathFlag(arg: string, specs: NonPathFlagSpec[] | undefined): boolean {
   if (!specs) return false;
   for (const spec of specs) {
@@ -360,6 +369,43 @@ function flagTokenLooksLikePath(token: string): boolean {
 }
 
 /**
+ * 校验“非路径且支持 @file”的旗标取值：只对 @ 之后的候选做路径包含校验；
+ * 不含 @ 的普通取值（如 `Accept: application/json`）保持放行。
+ */
+async function checkAtFileFlagValue(
+  flags: string[],
+  arg: string,
+  next: string | undefined,
+  baseDir: string,
+  root: string,
+  exeBase: string,
+): Promise<string | null> {
+  for (const flag of flags) {
+    let value: string | undefined;
+    if (arg === flag) {
+      value = next;
+    } else if (arg.startsWith(flag + '=')) {
+      value = arg.slice(flag.length + 1);
+    } else if (!flag.startsWith('--') && arg.startsWith(flag) && arg.length > flag.length) {
+      value = arg.slice(flag.length);
+    }
+    if (value === undefined) continue;
+    if (!value.includes('@')) return null;
+    for (const candidate of atPathCandidates(value)) {
+      const err = await validateContainedPath(
+        candidate,
+        baseDir,
+        root,
+        `命令 ${exeBase} 的 ${flag} 参数`,
+      );
+      if (err) return err;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
  * 校验所有 `-`/`--` 参数：
  * - 已知路径旗标（PATH_FLAGS）的取值按路径校验，覆盖 `--flag value`、
  *   `--flag=value`、短选项贴值（`-Cvalue`）与 `@`/`key=value` 形式；
@@ -416,6 +462,12 @@ async function validatePathFlags(
       continue;
     }
 
+    const atFileFlags = AT_FILE_NON_PATH_FLAGS[exeBase];
+    if (atFileFlags) {
+      const atErr = await checkAtFileFlagValue(atFileFlags, arg, args[i + 1], baseDir, root, exeBase);
+      if (atErr) return atErr;
+    }
+
     if (matchesNonPathFlag(arg, nonPathFlags)) continue;
 
     if (flagTokenLooksLikePath(arg)) {
@@ -463,16 +515,42 @@ function findDisallowedUrlScheme(args: string[]): string | null {
 }
 
 /**
+ * sqlite3 dot-command 的文件目标（.read/.import/.output/.once）：
+ * CLI 会再次解析引号，故先去引号再判定；含 `/`、`\`、`..` 或盘符相对即失败关闭。
+ */
+function sqlite3DotCommandReadsOutside(arg: string): boolean {
+  const unquoted = arg.replace(/["']/g, '');
+  const re = /\.(read|import|output|once)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(unquoted)) !== null) {
+    const rest = unquoted.slice(m.index + m[0].length).trim();
+    const target = rest.split(/\s+/)[0] ?? '';
+    if (!target) continue;
+    if (
+      target.includes('/') ||
+      target.includes('\\') ||
+      target.includes('..') ||
+      isAbsolutePathArg(target) ||
+      isDriveRelativePathArg(target)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 工具级显式拒绝（fail-closed）：无法安全解析其内容、且会读取任意文件或注入可执行配置的旗标。
- * - curl -K/--config：从任意路径读取配置（可再指向其他文件/输出路径）
+ * - curl -K/--config：从任意路径读取配置（可再指向其他文件/输出路径）；-K 藏进短选项簇同样拒绝
  * - git -c/--config-env：注入 core.fsmonitor / credential.helper 等可执行配置
- * - sqlite3 .read/.import：读取任意文件
+ * - sqlite3 .read/.import/.output/.once：读取/写入任意文件（含引号包裹的目标）
+ * - cmake -D：取值可能指向工具链/预加载脚本（绝对路径或 .. 一律拒绝）
  * 返回错误文案，null 表示通过。
  */
 function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   if (exeBase === 'curl') {
     for (const arg of args) {
-      if (arg.startsWith('-K') || arg === '--config' || arg.startsWith('--config=')) {
+      if (arg.startsWith('--config') || /^-[A-Za-z]*K/.test(arg)) {
         return '不允许：-K/--config 可读取任意配置';
       }
     }
@@ -489,13 +567,30 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   }
   if (exeBase === 'sqlite3') {
     for (const arg of args) {
-      const re = /\.(read|import)\s+(\S+)/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(arg)) !== null) {
-        const target = m[2]!;
-        if (isAbsolutePathArg(target) || isDriveRelativePathArg(target) || target.includes('..')) {
-          return `不允许：sqlite3 .${m[1]} 指向工作目录外路径（${target}）。`;
-        }
+      if (sqlite3DotCommandReadsOutside(arg)) {
+        return '不允许：sqlite3 .read/.import/.output/.once 可读写工作目录外文件。';
+      }
+    }
+  }
+  if (exeBase === 'cmake') {
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i]!;
+      let value: string | undefined;
+      if (arg === '-D') {
+        value = args[i + 1];
+      } else if (arg.startsWith('-D') && !arg.startsWith('--')) {
+        value = arg.slice(2);
+      }
+      if (value === undefined || value === '') continue;
+      const eq = value.indexOf('=');
+      const target = eq === -1 ? value : value.slice(eq + 1);
+      if (
+        isAbsolutePathArg(target) ||
+        isDriveRelativePathArg(target) ||
+        target.includes('..') ||
+        target.includes('\\')
+      ) {
+        return `不允许：cmake -D 取值包含工作目录外的路径（${value}）。`;
       }
     }
   }
@@ -517,6 +612,98 @@ function httpUrlCandidate(arg: string): string | null {
   return null;
 }
 
+/** 会把取值当作网络目标（URL/代理）使用的 curl 旗标 */
+const CURL_URL_VALUE_FLAGS = new Set(['--url', '--proxy', '-x']);
+
+/**
+ * curl 取值旗标：其后的 token 是取值而不是位置目标 URL（SSRF 扫描需跳过）。
+ * 布尔旗标（-s/-S/--version 等）不在此列。
+ */
+const CURL_VALUE_TAKING_FLAGS = new Set([
+  '-T', '--upload-file', '-o', '--output', '-K', '--config', '-b', '--cookie',
+  '-c', '--cookie-jar', '-D', '--dump-header', '--data', '--data-binary',
+  '--data-ascii', '--data-raw', '--json', '-F', '--form',
+  '-d', '--data-urlencode', '--url-query', '-w', '--write-out',
+  '--header', '-H', '--referer', '-e', '--user-agent', '-A',
+  '--proxy', '-x', '--proxy-user', '-u', '--user', '-m', '--max-time',
+  '--connect-timeout', '--retry', '--retry-delay', '--cacert', '--capath',
+  '--cert', '--key', '--resolve', '--interface', '--limit-rate',
+  '--unix-socket', '--oauth2-bearer', '--netrc-file',
+]);
+
+/** 需要做 SSRF 目标校验的网络类命令 */
+const NETWORK_COMMANDS = new Set(['curl']);
+
+/**
+ * 归一化 curl 目标文本：
+ * - `http(s)://...` 原样；
+ * - 半斜杠 `http:/host` / `https:/host` 补成 `http://host`；
+ * - 裸 `host[:port][/path]`（含 IP、IPv6 字面量）视为 `http://host...`。
+ * 返回 null 表示无法归类为 http(s) 目标 —— 调用方必须失败关闭。
+ */
+function normalizeNetworkDestination(raw: string): string | null {
+  const s = raw.trim();
+  if (!s || /\s/.test(s) || s.includes('\\')) return null;
+  if (HTTP_URL_RE.test(s)) return s;
+  const halfSlash = /^(https?):\/+(.*)$/i.exec(s);
+  if (halfSlash) return `${halfSlash[1]!.toLowerCase()}://${halfSlash[2]}`;
+  try {
+    if (!new URL(`http://${s}`).hostname) return null;
+  } catch {
+    return null;
+  }
+  return `http://${s}`;
+}
+
+/**
+ * 对网络类命令（curl）的每个位置目标 / `--url` / 代理取值做 SSRF 校验：
+ * 方案缺失（`127.0.0.1:9`）、半斜杠（`http:/127.0.0.1:9/`）与裸 IP 都会被归一化后再判定；
+ * 无法归类为公网 http(s) 目标时失败关闭。
+ */
+async function validateNetworkDestinations(
+  exeBase: string,
+  args: string[],
+): Promise<string | null> {
+  if (!NETWORK_COMMANDS.has(exeBase)) return null;
+
+  const candidates: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg.startsWith('-')) {
+      const eq = arg.indexOf('=');
+      if (arg.startsWith('--') && eq > 2) {
+        const flag = arg.slice(0, eq);
+        if (CURL_URL_VALUE_FLAGS.has(flag)) candidates.push(arg.slice(eq + 1));
+        continue;
+      }
+      if (CURL_VALUE_TAKING_FLAGS.has(arg)) {
+        const value = args[i + 1];
+        if (value !== undefined) {
+          if (CURL_URL_VALUE_FLAGS.has(arg)) candidates.push(value);
+          i++;
+        }
+        continue;
+      }
+      if (arg.startsWith('-x') && arg.length > 2) candidates.push(arg.slice(2));
+      continue;
+    }
+    candidates.push(arg);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const normalized = normalizeNetworkDestination(candidate);
+    if (normalized === null) {
+      return `不允许：无法确认为公网 http(s) 目标 "${candidate}"，已拒绝。`;
+    }
+    const destination = await checkUrlDestination(normalized);
+    if (!destination.ok) {
+      return `不允许访问私网/保留地址：${candidate}`;
+    }
+  }
+  return null;
+}
+
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024; // 5MB
 
 /**
@@ -526,7 +713,34 @@ const MAX_OUTPUT_BYTES = 5 * 1024 * 1024; // 5MB
 const FORBIDDEN_ENV_KEYS = new Set([
   'PATH', 'HOME', 'HOST', 'OSTYPE', 'TERM', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR',
   'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PWD', 'LOGNAME',
+  'GIT_EXTERNAL_DIFF', 'GIT_PAGER',
 ]);
+
+/**
+ * 禁止下传/覆盖的环境变量：
+ * - FORBIDDEN_ENV_KEYS 固定名单；
+ * - 所有 `GIT_CONFIG*`（COUNT/KEY_0/VALUE_0/PARAMETERS/GLOBAL/SYSTEM…）——
+ *   均可注入 core.fsmonitor / credential.helper 等可执行配置，等价于 git -c。
+ */
+export function isForbiddenEnvKey(key: string): boolean {
+  if (key.startsWith('GIT_CONFIG')) return true;
+  return FORBIDDEN_ENV_KEYS.has(key);
+}
+
+/**
+ * buildChildEnv 从宿主环境（base）额外屏蔽的 git 注入键：
+ * PATH/HOME 等只是“禁止模型覆盖”，仍需从宿主环境下传；而 GIT_CONFIG* /
+ * GIT_EXTERNAL_DIFF / GIT_PAGER 是注入可执行配置的通道，宿主环境也不下传。
+ * 注意：仅用于 base（宿主）循环；受信任的内部调用方可通过 extra 显式设置
+ * `GIT_PAGER=cat` 等加固值（git 工具），模型侧 extra 已被 sanitizeEnv 拒绝。
+ */
+function isChildEnvDeniedKey(key: string): boolean {
+  return (
+    key.startsWith('GIT_CONFIG') ||
+    key === 'GIT_EXTERNAL_DIFF' ||
+    key === 'GIT_PAGER'
+  );
+}
 
 /** 环境变量键名：仅允许 C 风格标识符（不能以数字开头） */
 const ENV_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -570,7 +784,7 @@ function sanitizeEnv(
     if (!ENV_KEY_REGEX.test(k)) {
       return { ok: false, error: `env 键名 "${k}" 不合法（仅允许 A-Za-z0-9_，且不能以数字开头）。` };
     }
-    if (FORBIDDEN_ENV_KEYS.has(k)) {
+    if (isForbiddenEnvKey(k)) {
       return { ok: false, error: `不允许覆盖关键环境变量：${k}。` };
     }
     safe[k] = v;
@@ -618,11 +832,11 @@ export function buildChildEnv(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
     if (value === undefined) continue;
-    if (isSecretEnvKey(key)) continue;
+    if (isSecretEnvKey(key) || isChildEnvDeniedKey(key)) continue;
     if (CHILD_ENV_ALLOWLIST.has(key) || key.startsWith('LC_')) out[key] = value;
   }
   for (const [key, value] of Object.entries(extra)) {
-    if (isSecretEnvKey(key)) continue;
+    if (isSecretEnvKey(key) || key.startsWith('GIT_CONFIG')) continue;
     out[key] = value;
   }
   return out;
@@ -684,6 +898,12 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     if (!destination.ok) {
       return { ok: false, output: '', error: `不允许访问私网/保留地址：${url}` };
     }
+  }
+
+  // 网络类命令（curl）的位置目标 / --url / 代理取值：覆盖无 scheme、半斜杠与裸 IP 形式
+  const networkErr = await validateNetworkDestinations(exeBase, parsed.args);
+  if (networkErr !== null) {
+    return { ok: false, output: '', error: networkErr };
   }
 
   // 路径参数校验（通用：检测含路径分隔符的参数）

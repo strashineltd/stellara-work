@@ -253,6 +253,9 @@ export async function checkUrlDestination(
   } catch {
     return { ok: false, error: `域名 ${host} 解析失败，已拒绝（安全默认）` };
   }
+  if (addresses.length === 0) {
+    return { ok: false, error: `域名 ${host} 无解析结果，已拒绝（安全默认）` };
+  }
   if (addresses.some((a) => isPrivateOrReservedIp(a.address))) {
     return { ok: false, error: `域名 ${host} 解析到受限 IP，已拒绝` };
   }

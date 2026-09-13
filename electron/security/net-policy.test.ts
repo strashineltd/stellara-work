@@ -224,6 +224,12 @@ describe('checkUrlDestination (async DNS)', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('fails closed on an empty DNS answer (bypass round)', async () => {
+    const lookup = vi.fn().mockResolvedValue([]);
+    const r = await checkUrlDestination('https://empty.example.com/', { lookup });
+    expect(r.ok).toBe(false);
+  });
+
   it('blocks restricted hosts and literal private IPs without any DNS lookup', async () => {
     const lookup = vi.fn();
     for (const url of ['http://localhost/', 'http://[::ffff:169.254.169.254]/', 'http://10.0.0.1/']) {
