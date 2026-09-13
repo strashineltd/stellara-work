@@ -76,6 +76,24 @@ describe('webFetch', () => {
     expect(result.error).toContain('私网');
   });
 
+  it('rejects dotted IPv4-mapped cloud metadata address after URL canonicalization (H3)', async () => {
+    const result = await webFetch({ url: 'http://[::ffff:169.254.169.254]/' }, '/tmp');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('私网');
+  });
+
+  it('rejects ULA fd00::/8 (H3)', async () => {
+    const result = await webFetch({ url: 'http://[fd00::1]/' }, '/tmp');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('私网');
+  });
+
+  it('allows a public IPv6 literal (H3)', async () => {
+    mockFetch('ok', { headers: { 'content-type': 'text/plain' } });
+    const result = await webFetch({ url: 'http://[2606:4700:4700::1111]/' }, '/tmp');
+    expect(result.ok).toBe(true);
+  });
+
   it('rejects hex-encoded IPv4-compatible IPv6 (H3)', async () => {
     const result = await webFetch({ url: 'http://[::7f00:1]/' }, '/tmp');
     expect(result.ok).toBe(false);

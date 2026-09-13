@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseCommand, runCommand } from './shell';
+import { parseCommand, runCommand, buildChildEnv } from './shell';
 
 let tmpDir: string;
 
@@ -285,5 +285,139 @@ describe('runCommand', () => {
     for (let i = 0; i < 11; i++) many[`K${i}`] = 'v';
     const r2 = await runCommand({ command: 'pwd', env: many }, tmpDir);
     expect(r2.ok).toBe(false);
+  });
+
+  it('rejects sibling directory sharing the cwd path prefix (H4)', async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-prefix-'));
+    const proj = path.join(parent, 'proj');
+    const sibling = path.join(parent, 'proj-x');
+    await fs.mkdir(proj);
+    await fs.mkdir(sibling);
+    await fs.writeFile(path.join(sibling, 'secret.txt'), 'secret');
+    try {
+      const viaArg = await runCommand({ command: 'cat ../proj-x/secret.txt' }, proj);
+      expect(viaArg.ok).toBe(false);
+      expect(viaArg.error).toContain('超出');
+
+      const viaFlag = await runCommand({ command: 'git -C ../proj-x status' }, proj);
+      expect(viaFlag.ok).toBe(false);
+      expect(viaFlag.error).toContain('超出');
+
+      const viaAttached = await runCommand({ command: 'git -C../proj-x status' }, proj);
+      expect(viaAttached.ok).toBe(false);
+      expect(viaAttached.error).toContain('超出');
+
+      const viaEquals = await runCommand({ command: 'npm --prefix=../proj-x list' }, proj);
+      expect(viaEquals.ok).toBe(false);
+      expect(viaEquals.error).toContain('超出');
+    } finally {
+      await fs.rm(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts genuine in-workspace path arguments (H4)', async () => {
+    await fs.mkdir(path.join(tmpDir, 'src'));
+    await fs.writeFile(path.join(tmpDir, 'src', 'note.txt'), 'hello');
+    const result = await runCommand({ command: 'cat src/note.txt' }, tmpDir);
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('hello');
+  });
+
+  it('rejects Windows drive-relative path arguments (H4)', async () => {
+    for (const command of ['node C:evil.js', 'git -C C:repo status', 'cat C:secret.txt']) {
+      const result = await runCommand({ command }, tmpDir);
+      expect(result.ok, command).toBe(false);
+      expect(result.error, command).toContain('盘符');
+    }
+  });
+
+  it('rejects path args escaping via symlinked directory (H4)', async () => {
+    const outside = path.join(os.tmpdir(), `stellara-outside-arg-${Date.now()}`);
+    await fs.mkdir(outside);
+    try {
+      await fs.writeFile(path.join(outside, 'secret.txt'), 'secret');
+      try {
+        await fs.symlink(outside, path.join(tmpDir, 'link'), 'dir');
+      } catch {
+        return; // 平台不允许 symlink 时跳过
+      }
+      const result = await runCommand({ command: 'cat link/secret.txt' }, tmpDir);
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('超出');
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects env command from the whitelist (H5)', async () => {
+    const result = await runCommand({ command: 'env' }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('白名单');
+  });
+
+  it('does not leak STELLARA_* or secret-like vars into spawned commands (H5)', async () => {
+    process.env.STELLARA_TEST_LEAK = 'top-secret';
+    process.env.LEAKY_TOKEN = 'tok';
+    try {
+      await fs.writeFile(
+        path.join(tmpDir, 'dump.js'),
+        "console.log((process.env.STELLARA_TEST_LEAK ?? 'none') + ' ' + (process.env.LEAKY_TOKEN ?? 'none'))",
+      );
+      const result = await runCommand({ command: 'node dump.js' }, tmpDir);
+      expect(result.ok).toBe(true);
+      expect(result.output.trim()).toBe('none none');
+    } finally {
+      delete process.env.STELLARA_TEST_LEAK;
+      delete process.env.LEAKY_TOKEN;
+    }
+  });
+});
+
+describe('buildChildEnv (H5)', () => {
+  it('keeps operational vars and strips STELLARA_* / secret-like keys', () => {
+    const env = buildChildEnv({}, {
+      PATH: '/usr/bin',
+      HOME: '/home/u',
+      SHELL: '/bin/zsh',
+      USER: 'u',
+      TMPDIR: '/tmp',
+      LANG: 'en_US.UTF-8',
+      LC_ALL: 'en_US.UTF-8',
+      TERM: 'xterm-256color',
+      TZ: 'UTC',
+      STELLARA_KEY_openai: 'sk-secret',
+      STELLARA_SERVER_srv: 'password',
+      STELLARA_CLOUD_cloudbase: 'token',
+      GITHUB_TOKEN: 'ghp_x',
+      APP_SECRET: 's',
+      DB_PASSWORD: 'p',
+      OPENAI_API_KEY: 'k',
+      RANDOM_VAR: 'v',
+    } as NodeJS.ProcessEnv);
+
+    expect(env.PATH).toBe('/usr/bin');
+    expect(env.HOME).toBe('/home/u');
+    expect(env.SHELL).toBe('/bin/zsh');
+    expect(env.USER).toBe('u');
+    expect(env.TMPDIR).toBe('/tmp');
+    expect(env.LANG).toBe('en_US.UTF-8');
+    expect(env.LC_ALL).toBe('en_US.UTF-8');
+    expect(env.TERM).toBe('xterm-256color');
+    expect(env.TZ).toBe('UTC');
+    expect(env.RANDOM_VAR).toBeUndefined();
+    for (const key of Object.keys(env)) {
+      expect(key.startsWith('STELLARA_'), key).toBe(false);
+      expect(/_TOKEN$|_SECRET$|_PASSWORD$|_API_KEY$/.test(key), key).toBe(false);
+    }
+  });
+
+  it('keeps explicit extras but never STELLARA_* keys', () => {
+    const env = buildChildEnv(
+      { MY_FLAG: 'ok', STELLARA_KEY_injected: 'nope' },
+      { PATH: '/usr/bin' } as NodeJS.ProcessEnv,
+    );
+    expect(env.MY_FLAG).toBe('ok');
+    expect(env.PATH).toBe('/usr/bin');
+    expect(env.STELLARA_KEY_injected).toBeUndefined();
   });
 });

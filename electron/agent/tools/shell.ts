@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import type { RunCommandArgs, ToolResult, OpenAITool, ToolResultMeta } from '../../../shared/ipc';
-import { isWithinDir, canonicalCwd } from '../../fs/path-security';
+import { isWithinDir, canonicalCwd, verifyWritePath } from '../../fs/path-security';
 
 /**
  * 命令白名单（安全子集）。
@@ -28,7 +28,7 @@ const ALLOWED_COMMANDS_POSIX = new Set([
   'git',
   // 只读文件操作
   'ls', 'cat', 'head', 'tail', 'grep', 'find', 'rg',
-  'pwd', 'whoami', 'uname', 'which', 'env', 'true', 'false', 'test',
+  'pwd', 'whoami', 'uname', 'which', 'true', 'false', 'test',
   // 开发工具
   'python', 'python3', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
   // 文本处理（只读）
@@ -133,52 +133,92 @@ export function isAbsolutePathArg(p: string): boolean {
 }
 
 /**
- * 校验路径参数是否在工作目录内。
- * 拒绝绝对路径和 .. 越界。
- * 返回 null 表示 OK，返回字符串表示错误。
+ * Windows 盘符相对路径（如 `C:foo`）：
+ * 不是绝对路径，但在 Windows 上相对于该盘符的当前目录解析，必须一并拒绝。
  */
-function validatePathArg(arg: string, cwd: string): string | null {
-  // 跳过 flag（--xxx, -x）—— 除非它是带路径语义的 flag，由 validatePathFlags 处理
-  if (arg.startsWith('-')) return null;
-  // 跳过不含路径分隔符且不含 .. 的纯文本参数（如 commit message）
-  if (!arg.includes('/') && !arg.includes('\\') && !arg.includes('..')) return null;
-  // 拒绝绝对路径
-  if (isAbsolutePathArg(arg)) {
-    return `路径参数 "${arg}" 是绝对路径，不允许。请使用相对路径。`;
+export function isDriveRelativePathArg(p: string): boolean {
+  return /^[a-zA-Z]:(?![\\/])/.test(p);
+}
+
+/**
+ * 校验路径值是否真正落在 root 工作目录内：
+ * - 盘符相对路径拒绝
+ * - 绝对路径拒绝
+ * - 用 realpath 感知的 verifyWritePath 做包含判断（防 symlink/junction 与前缀同名绕过）
+ * 返回 null 表示 OK，否则返回错误文案。
+ */
+async function validateContainedPath(
+  value: string,
+  baseDir: string,
+  root: string,
+  label: string,
+): Promise<string | null> {
+  if (isDriveRelativePathArg(value)) {
+    return `${label} "${value}" 是 Windows 盘符相对路径，不允许。请使用工作目录内的相对路径。`;
   }
-  // 拒绝 .. 越界
-  if (arg.includes('..')) {
-    const resolved = path.resolve(cwd, arg);
-    if (!resolved.startsWith(path.normalize(cwd))) {
-      return `路径参数 "${arg}" 超出工作目录。`;
-    }
+  if (isAbsolutePathArg(value)) {
+    return `${label} "${value}" 是绝对路径，不允许。请使用相对路径。`;
+  }
+  const resolved = path.resolve(baseDir, value);
+  const checked = await verifyWritePath(resolved, root);
+  if (!checked.ok) {
+    return `${label} "${value}" 超出工作目录。`;
   }
   return null;
 }
 
 /**
- * 校验带路径语义的 flag（如 git -C /path, npm --prefix /path）。
+ * 校验路径参数是否在工作目录内。
+ * 拒绝盘符相对/绝对路径、`..` 越界、symlink 逃逸与原前缀同名的兄弟路径。
+ * 返回 null 表示 OK，返回字符串表示错误。
  */
-function validatePathFlags(exe: string, args: string[], cwd: string): string | null {
+async function validatePathArg(arg: string, baseDir: string, root: string): Promise<string | null> {
+  // 跳过 flag（--xxx, -x）—— 除非它是带路径语义的 flag，由 validatePathFlags 处理
+  if (arg.startsWith('-')) return null;
+  // 跳过不含路径分隔符且不含 .. 的纯文本参数（如 commit message）
+  if (
+    !arg.includes('/') &&
+    !arg.includes('\\') &&
+    !arg.includes('..') &&
+    !isDriveRelativePathArg(arg)
+  ) {
+    return null;
+  }
+  return validateContainedPath(arg, baseDir, root, '路径参数');
+}
+
+/**
+ * 校验带路径语义的 flag（如 git -C /path, npm --prefix=/path）。
+ * 同时覆盖 `--flag value`、`--flag=value` 与短选项贴值（`-Cvalue`）三种形式。
+ */
+async function validatePathFlags(
+  exe: string,
+  args: string[],
+  baseDir: string,
+  root: string,
+): Promise<string | null> {
   const exeBase = path.basename(exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   const pathFlags = PATH_FLAGS[exeBase];
   if (!pathFlags || pathFlags.size === 0) return null;
 
+  const check = async (flag: string, value: string): Promise<string | null> =>
+    validateContainedPath(value, baseDir, root, `命令 ${exeBase} 的 ${flag} 参数`);
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (pathFlags.has(arg)) {
-      // 下一个 token 是路径值
-      const value = args[i + 1];
-      if (value) {
-        if (isAbsolutePathArg(value)) {
-          return `命令 ${exeBase} 的 ${arg} 参数 "${value}" 是绝对路径，不允许。请使用相对路径。`;
-        }
-        if (value.includes('..')) {
-          const resolved = path.resolve(cwd, value);
-          if (!resolved.startsWith(path.normalize(cwd))) {
-            return `命令 ${exeBase} 的 ${arg} 参数 "${value}" 超出工作目录。`;
-          }
-        }
+    for (const flag of pathFlags) {
+      let value: string | undefined;
+      if (arg === flag) {
+        value = args[i + 1];
+      } else if (arg.startsWith(flag + '=')) {
+        value = arg.slice(flag.length + 1);
+      } else if (!flag.startsWith('--') && arg.startsWith(flag) && arg.length > flag.length) {
+        // 短选项贴值：git -C../dir
+        value = arg.slice(flag.length);
+      }
+      if (value !== undefined && value !== '') {
+        const err = await check(flag, value);
+        if (err) return err;
       }
     }
   }
@@ -191,7 +231,12 @@ function validatePathFlags(exe: string, args: string[], cwd: string): string | n
  * - node -e "code" → 不是文件路径（跳过）
  * - python script.py → script.py 是文件路径
  */
-function validateFileArgs(exe: string, args: string[], cwd: string): string | null {
+async function validateFileArgs(
+  exe: string,
+  args: string[],
+  baseDir: string,
+  root: string,
+): Promise<string | null> {
   const exeBase = path.basename(exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   if (!['node', 'python', 'python3'].includes(exeBase)) return null;
 
@@ -201,16 +246,7 @@ function validateFileArgs(exe: string, args: string[], cwd: string): string | nu
     // 跳过 flag
     if (arg.startsWith('-')) continue;
     // 这是文件参数
-    if (isAbsolutePathArg(arg)) {
-      return `${exeBase} 的文件参数 "${arg}" 是绝对路径，不允许。请使用相对路径。`;
-    }
-    if (arg.includes('..')) {
-      const resolved = path.resolve(cwd, arg);
-      if (!resolved.startsWith(path.normalize(cwd))) {
-        return `${exeBase} 的文件参数 "${arg}" 超出工作目录。`;
-      }
-    }
-    break; // 只检查第一个非 flag 参数
+    return validateContainedPath(arg, baseDir, root, `${exeBase} 的文件参数`);
   }
   return null;
 }
@@ -277,6 +313,56 @@ function sanitizeEnv(
 }
 
 /**
+ * 子进程环境变量最小白名单（H5）：
+ * 只保留命令运行所需的操作性变量。process.env 里的 STELLARA_*（模型密钥 /
+ * 服务器密码 / 云 token）与 * _TOKEN/_SECRET/_PASSWORD/_API_KEY 一律不下传，
+ * 避免 `node -p process.env` 之类转储实时密钥。
+ */
+const CHILD_ENV_ALLOWLIST: ReadonlySet<string> = (() => {
+  const keys = ['PATH', 'HOME', 'SHELL', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'TERM', 'TZ'];
+  if (process.platform === 'win32') {
+    keys.push(
+      'Path', 'SystemRoot', 'SYSTEMROOT', 'SystemDrive', 'COMSPEC', 'ComSpec',
+      'APPDATA', 'LOCALAPPDATA', 'PATHEXT', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
+      'TEMP', 'TMP',
+    );
+  }
+  return new Set(keys);
+})();
+
+/** 明显的密钥型键名模式 */
+const SECRET_ENV_PATTERNS = [/_TOKEN$/i, /_SECRET$/i, /_PASSWORD$/i, /_API_KEY$/i];
+
+/** 判定一个环境变量键是否携带密钥/凭据（不下传给子进程） */
+export function isSecretEnvKey(key: string): boolean {
+  if (key.startsWith('STELLARA_')) return true;
+  return SECRET_ENV_PATTERNS.some((re) => re.test(key));
+}
+
+/**
+ * 构造子进程环境：
+ * - 从 base（默认 process.env）中只取操作性变量（见 CHILD_ENV_ALLOWLIST 与 LC_*）
+ * - 剔除所有 STELLARA_* 与密钥型键名
+ * - 叠加调用方显式要求的额外变量（同样过密钥过滤）
+ */
+export function buildChildEnv(
+  extra: Record<string, string> = {},
+  base: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue;
+    if (isSecretEnvKey(key)) continue;
+    if (CHILD_ENV_ALLOWLIST.has(key) || key.startsWith('LC_')) out[key] = value;
+  }
+  for (const [key, value] of Object.entries(extra)) {
+    if (isSecretEnvKey(key)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
  * 跑 shell 命令（白名单 + no-shell + 路径约束）
  */
 export async function runCommand(args: RunCommandArgs, cwd: string): Promise<ToolResult> {
@@ -316,16 +402,16 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
 
   // 路径参数校验（通用：检测含路径分隔符的参数）
   for (const arg of parsed.args) {
-    const err = validatePathArg(arg, cwd);
+    const err = await validatePathArg(arg, resolvedCwd, cwd);
     if (err) return { ok: false, output: '', error: err };
   }
 
   // 带路径语义的 flag 校验（git -C, npm --prefix 等）
-  const flagErr = validatePathFlags(parsed.exe, parsed.args, cwd);
+  const flagErr = await validatePathFlags(parsed.exe, parsed.args, resolvedCwd, cwd);
   if (flagErr) return { ok: false, output: '', error: flagErr };
 
   // node/python 文件参数校验
-  const fileErr = validateFileArgs(parsed.exe, parsed.args, cwd);
+  const fileErr = await validateFileArgs(parsed.exe, parsed.args, resolvedCwd, cwd);
   if (fileErr) return { ok: false, output: '', error: fileErr };
 
   const timeoutMs = args.timeoutMs ?? 30000;
@@ -343,7 +429,7 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     try {
       child = spawn(exeBase, parsed.args, {
         cwd: resolvedCwd,
-        env: { ...process.env, ...safeEnv.env },
+        env: buildChildEnv(safeEnv.env),
         shell: false,
         windowsHide: true,
       });
