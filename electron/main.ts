@@ -1106,7 +1106,8 @@ function registerIpcHandlers(): void {
 
   handle('auth:local:list', async () => {
     const { localAuth } = await import('./auth/local-auth-manager');
-    return localAuth.list();
+    // H10：用户列表附带虚拟「本地默认」档（固定第一个）
+    return localAuth.listIdentities();
   });
 
   handle('auth:local:create', async (_e, displayName?: string) => {
@@ -1120,11 +1121,12 @@ function registerIpcHandlers(): void {
   });
 
   handle('auth:local:switch', async (_e, id: string) => {
-    const { localAuth } = await import('./auth/local-auth-manager');
+    const { localAuth, getActiveUserId } = await import('./auth/local-auth-manager');
     const user = localAuth.switch(id);
     // H10：身份切换后若云会话主体与新身份绑定不一致 → 登出并广播账号状态
+    // （切到「本地默认」档时 getActiveUserId() 为 'default'，无绑定 → 清理云会话）
     const { cloudAuth } = await import('./auth/cloud-auth-manager');
-    const cleared = await cloudAuth.reconcileLocalIdentitySwitch(user.id);
+    const cleared = await cloudAuth.reconcileLocalIdentitySwitch(getActiveUserId());
     if (cleared) broadcastSettingsChanged();
     return user;
   });
