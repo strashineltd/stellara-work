@@ -21,6 +21,12 @@ describe('BUILD_MODE_SYSTEM_PROMPT', () => {
     expect(BUILD_MODE_SYSTEM_PROMPT).toContain('git_status');
     expect(BUILD_MODE_SYSTEM_PROMPT).toContain('task_complete');
   });
+
+  it('documents network exit and approval-gated project scripts', () => {
+    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('web_fetch');
+    expect(BUILD_MODE_SYSTEM_PROMPT).toMatch(/审批/);
+    expect(BUILD_MODE_SYSTEM_PROMPT).toMatch(/项目代码|项目内代码/);
+  });
 });
 
 describe('platformPromptBlock', () => {
@@ -31,6 +37,15 @@ describe('platformPromptBlock', () => {
     expect(block).toContain('POSIX');
     expect(block).toContain('swift');
     expect(block).toContain('osascript');
+  });
+
+  it('does not advertise removed executables (corepack/rustup/open)', () => {
+    const block = platformPromptBlock({ platform: 'darwin', arch: 'arm64' });
+    const available = block.match(/可用 macOS 开发工具：[^\n]*/)?.[0] ?? '';
+    expect(available).toContain('swift');
+    expect(available).not.toContain('open');
+    expect(available).not.toContain('rustup');
+    expect(available).not.toContain('corepack');
   });
 
   it('describes macOS Intel with x64', () => {

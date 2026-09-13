@@ -15,6 +15,18 @@ import type {
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+const GIT_DIR_WRITE_ERROR = '不允许修改 .git 目录内容';
+
+/**
+ * 判断路径是否位于任意 .git 目录之下（大小写不敏感，适配 macOS/Windows 的大小写不敏感文件系统）。
+ * 同时用于词法路径与 realpath（防 symlink 指向 .git）。
+ */
+function isInsideGitDir(absPath: string, cwd: string): boolean {
+  const rel = path.relative(path.normalize(cwd), path.normalize(absPath));
+  if (rel === '') return false;
+  return rel.split(path.sep).some((segment) => segment.toLowerCase() === '.git');
+}
+
 export async function readFile(args: ReadFileArgs, cwd: string): Promise<ToolResult> {
   try {
     const absPath = resolvePath(args.path, cwd);
@@ -57,10 +69,16 @@ export async function readFile(args: ReadFileArgs, cwd: string): Promise<ToolRes
 export async function writeFile(args: WriteFileArgs, cwd: string): Promise<ToolResult> {
   try {
     const absPath = resolvePath(args.path, cwd);
+    if (isInsideGitDir(absPath, cwd)) {
+      return { ok: false, output: '', error: GIT_DIR_WRITE_ERROR };
+    }
 
     // 验证写入路径安全（含父目录 symlink 检查）
     const check = await verifyWritePath(absPath, cwd);
     if (!check.ok) return { ok: false, output: '', error: check.error };
+    if (isInsideGitDir(check.realPath, cwd)) {
+      return { ok: false, output: '', error: GIT_DIR_WRITE_ERROR };
+    }
 
     await fs.mkdir(path.dirname(absPath), { recursive: true });
     // 读旧内容（可能不存在）
@@ -84,10 +102,16 @@ export async function writeFile(args: WriteFileArgs, cwd: string): Promise<ToolR
 export async function editFile(args: EditFileArgs, cwd: string): Promise<ToolResult> {
   try {
     const absPath = resolvePath(args.path, cwd);
+    if (isInsideGitDir(absPath, cwd)) {
+      return { ok: false, output: '', error: GIT_DIR_WRITE_ERROR };
+    }
 
     // 验证路径安全（含 symlink 真实路径检查）
     const check = await verifyExistingPath(absPath, cwd);
     if (!check.ok) return { ok: false, output: '', error: check.error };
+    if (isInsideGitDir(check.realPath, cwd)) {
+      return { ok: false, output: '', error: GIT_DIR_WRITE_ERROR };
+    }
 
     const original = await fs.readFile(absPath, 'utf-8');
 

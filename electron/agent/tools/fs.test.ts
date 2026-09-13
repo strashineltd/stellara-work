@@ -69,7 +69,6 @@ describe('writeFile', () => {
     const content = await fs.readFile(path.join(tmpDir, 'out.txt'), 'utf-8');
     expect(content).toBe('world');
   });
-
   it('creates parent directories', async () => {
     const result = await writeFile(
       { path: 'a/b/c/out.txt', content: 'nested' },
@@ -193,5 +192,77 @@ describe('editFile', () => {
     } finally {
       await fs.rm(target, { force: true });
     }
+  });
+});
+
+describe('.git write protection', () => {
+  beforeEach(async () => {
+    await fs.mkdir(path.join(tmpDir, '.git', 'hooks'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.git', 'config'), '[core]\n');
+  });
+
+  it('rejects write_file into .git and leaves content untouched', async () => {
+    const result = await writeFile(
+      { path: '.git/config', content: '[diff]\n\texternal = /bin/echo\n' },
+      tmpDir,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('不允许修改 .git 目录内容');
+    expect(await fs.readFile(path.join(tmpDir, '.git', 'config'), 'utf-8')).toBe('[core]\n');
+  });
+
+  it('rejects creating files under .git (hooks)', async () => {
+    const result = await writeFile({ path: '.git/hooks/pre-commit', content: '#!/bin/sh\n' }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('不允许修改 .git 目录内容');
+    await expect(fs.access(path.join(tmpDir, '.git', 'hooks', 'pre-commit'))).rejects.toThrow();
+  });
+
+  it('rejects nested .git directories', async () => {
+    const result = await writeFile({ path: 'pkg/.git/config', content: 'x' }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('不允许修改 .git 目录内容');
+  });
+
+  it('rejects case-variant .GIT paths', async () => {
+    const result = await writeFile({ path: '.GIT/config', content: 'x' }, tmpDir);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('不允许修改 .git 目录内容');
+  });
+
+  it('rejects edit_file into .git and leaves content untouched', async () => {
+    const result = await editFile(
+      { path: '.git/config', oldText: '[core]', newText: '[evil]' },
+      tmpDir,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('不允许修改 .git 目录内容');
+    expect(await fs.readFile(path.join(tmpDir, '.git', 'config'), 'utf-8')).toBe('[core]\n');
+  });
+
+  it('rejects edit_file through a symlink to .git', async () => {
+    try {
+      await fs.symlink(path.join(tmpDir, '.git'), path.join(tmpDir, 'gitlink'), 'dir');
+    } catch {
+      return; // 平台不允许 symlink 时跳过
+    }
+    const result = await editFile(
+      { path: 'gitlink/config', oldText: '[core]', newText: '[evil]' },
+      tmpDir,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('不允许修改 .git 目录内容');
+    expect(await fs.readFile(path.join(tmpDir, '.git', 'config'), 'utf-8')).toBe('[core]\n');
+  });
+
+  it('still allows reading .git files', async () => {
+    const result = await readFile({ path: '.git/config' }, tmpDir);
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('[core]');
+  });
+
+  it('allows files whose names merely start with .git', async () => {
+    const result = await writeFile({ path: '.gitignore', content: 'node_modules\n' }, tmpDir);
+    expect(result.ok).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseCommand, runCommand, buildChildEnv } from './shell';
+import { parseCommand, runCommand, buildChildEnv, shellTools } from './shell';
 
 vi.mock('node:dns/promises', () => ({
   default: {
@@ -118,11 +118,10 @@ describe('runCommand', () => {
     for (const cmd of [
       'swift --version',
       'xcrun --version',
-      'xcodebuild -version',
+      'xcodebuild --help',
       'swiftc --version',
       'brew --version',
       'plutil -lint Info.plist',
-      'open --version',
       'make --version',
       'clang --version',
       'mdls -name kMDItemFSName .',
@@ -162,16 +161,16 @@ describe('runCommand', () => {
     expect(result.error).toContain('绝对路径');
   });
 
-  it('rejects git -C pointing outside cwd', async () => {
+  it('rejects git clone remote path pointing outside cwd', async () => {
     const outside = path.join(os.tmpdir(), 'outside-repo');
-    const result = await runCommand({ command: `git -C "${outside}" status` }, tmpDir);
+    const result = await runCommand({ command: `git clone "${outside}" target` }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('绝对路径');
   });
 
-  it('rejects npm --prefix pointing outside cwd', async () => {
+  it('rejects npm --prefix pointing outside cwd (after subcommand)', async () => {
     const outside = path.join(os.tmpdir(), 'outside-pkg');
-    const result = await runCommand({ command: `npm --prefix "${outside}" test` }, tmpDir);
+    const result = await runCommand({ command: `npm test --prefix "${outside}"` }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('绝对路径');
   });
@@ -218,8 +217,8 @@ describe('runCommand', () => {
     }
   });
 
-  it('rejects git with .. path flag value', async () => {
-    const result = await runCommand({ command: 'git -C ../../.. status' }, tmpDir);
+  it('rejects git with .. path argument', async () => {
+    const result = await runCommand({ command: 'git clone ../../.. target' }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('超出');
   });
@@ -238,9 +237,9 @@ describe('runCommand', () => {
     expect(result.error).toContain('绝对路径');
   });
 
-  it('rejects xcodebuild -project pointing outside cwd', async () => {
+  it('rejects xcodebuild -project pointing outside cwd (after subcommand)', async () => {
     const outside = path.join(os.tmpdir(), 'outside.xcodeproj');
-    const result = await runCommand({ command: `xcodebuild -project "${outside}" -list` }, tmpDir);
+    const result = await runCommand({ command: `xcodebuild build -project "${outside}"` }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('绝对路径');
   });
@@ -322,15 +321,15 @@ describe('runCommand', () => {
       expect(viaArg.ok).toBe(false);
       expect(viaArg.error).toContain('超出');
 
-      const viaFlag = await runCommand({ command: 'git -C ../proj-x status' }, proj);
+      const viaFlag = await runCommand({ command: 'npm test --prefix=../proj-x' }, proj);
       expect(viaFlag.ok).toBe(false);
       expect(viaFlag.error).toContain('超出');
 
-      const viaAttached = await runCommand({ command: 'git -C../proj-x status' }, proj);
-      expect(viaAttached.ok).toBe(false);
-      expect(viaAttached.error).toContain('超出');
+      const viaSpaced = await runCommand({ command: 'npm test --prefix ../proj-x' }, proj);
+      expect(viaSpaced.ok).toBe(false);
+      expect(viaSpaced.error).toContain('超出');
 
-      const viaEquals = await runCommand({ command: 'npm --prefix=../proj-x test' }, proj);
+      const viaEquals = await runCommand({ command: 'go build -o ../proj-x/out .' }, proj);
       expect(viaEquals.ok).toBe(false);
       expect(viaEquals.error).toContain('超出');
     } finally {
@@ -347,7 +346,7 @@ describe('runCommand', () => {
   });
 
   it('rejects Windows drive-relative path arguments (H4)', async () => {
-    for (const command of ['git -C C:repo status', 'cat C:secret.txt', 'find C:evil']) {
+    for (const command of ['go build -o C:out .', 'cat C:secret.txt', 'find C:evil']) {
       const result = await runCommand({ command }, tmpDir);
       expect(result.ok, command).toBe(false);
       expect(result.error, command).toContain('盘符');
@@ -403,11 +402,11 @@ describe('runCommand', () => {
     await fs.writeFile(outside, 'evil');
     try {
       for (const cmd of [
-        `pip3 -r${outside}`,
-        `pip3 -r "${outside}"`,
-        'pip3 -r ../../requirements.txt',
-        `pip3 --requirement=${outside}`,
-        `pip3 --requirement "${outside}"`,
+        `pip3 install -r${outside}`,
+        `pip3 install -r "${outside}"`,
+        'pip3 install -r ../../requirements.txt',
+        `pip3 install --requirement=${outside}`,
+        `pip3 install --requirement "${outside}"`,
       ]) {
         const r = await runCommand({ command: cmd }, tmpDir);
         expect(r.ok, cmd).toBe(false);
@@ -423,10 +422,10 @@ describe('runCommand', () => {
     await fs.mkdir(outside);
     try {
       for (const cmd of [
-        `npm --prefix=${outside} test`,
-        `pnpm --cwd "${outside}" install`,
-        `yarn --cwd ${outside} run build`,
-        `git --exec-path=${outside} status`,
+        `npm test --prefix=${outside}`,
+        `pnpm install --cwd "${outside}"`,
+        `yarn run build --cwd ${outside}`,
+        `go build -o "${outside}/bin" .`,
       ]) {
         const r = await runCommand({ command: cmd }, tmpDir);
         expect(r.ok, cmd).toBe(false);
@@ -509,7 +508,7 @@ describe('runCommand', () => {
     expect(r.output).toContain('inside-content');
   });
 
-  it('rejects non-http(s) URL schemes (security follow-up)', async () => {
+  it('rejects non-http(s) remote addresses for git clone (security follow-up)', async () => {
     for (const cmd of [
       'git clone file:///etc/passwd',
       'git clone "file:///etc/passwd"',
@@ -519,19 +518,19 @@ describe('runCommand', () => {
     ]) {
       const r = await runCommand({ command: cmd }, tmpDir);
       expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toContain('不允许的 URL 协议');
+      expect(r.error ?? '', cmd).toContain('不允许的远端地址');
     }
   });
 
   it('keeps http(s) URLs and non-URL args allowed', async () => {
-    for (const cmd of [
-      'git --version https://example.com',
-      'git --version "HTTP://example.com"',
-      'npm --version',
-    ]) {
-      const r = await runCommand({ command: cmd }, tmpDir);
-      expect(r.ok, cmd).toBe(true);
-    }
+    const http = await runCommand(
+      { command: 'git clone "HTTP://example.com/repo.git"', timeoutMs: 1000 },
+      tmpDir,
+    );
+    expect(http.error ?? '').not.toMatch(/不允许的远端地址|不允许的 URL 协议/);
+
+    const fetch = await runCommand({ command: 'git fetch origin', timeoutMs: 1000 }, tmpDir);
+    expect(fetch.error ?? '').not.toMatch(/不允许的远端地址|不允许的 URL 协议/);
   });
 
   it('does not leak STELLARA_* or secret-like vars into spawned commands (H5)', async () => {
@@ -598,12 +597,16 @@ describe('runCommand', () => {
   });
 
   it('allows public URL destinations and fails closed on DNS errors (final re-review B)', async () => {
-    const ok = await runCommand({ command: 'git --version https://example.com' }, tmpDir);
-    expect(ok.ok).toBe(true);
+    const ok = await runCommand(
+      { command: 'git clone https://example.com/repo.git target', timeoutMs: 1000 },
+      tmpDir,
+    );
+    expect(mockDns.lookup).toHaveBeenCalled();
+    expect(ok.error ?? '').not.toMatch(/不允许访问私网|不允许的远端地址|不允许的 URL 协议/);
 
     mockDns.lookup.mockRejectedValueOnce(new Error('ENOTFOUND'));
     const fail = await runCommand(
-      { command: 'git --version https://maybe-evil.example.com/' },
+      { command: 'git clone https://maybe-evil.example.com/ target2', timeoutMs: 1000 },
       tmpDir,
     );
     expect(fail.ok).toBe(false);
@@ -747,6 +750,10 @@ describe('runCommand structural policy (executable + subcommand allowlist)', () 
     ['ftp', 'ftp example.com'],
     ['telnet', 'telnet example.com'],
     ['sqlite3', 'sqlite3 :memory: "select 1"'],
+    ['corepack', 'corepack pnpm dlx x'],
+    ['rustup', 'rustup run stable sh -c x'],
+    ['open', 'open --version'],
+    ['xargs', 'xargs -n1 echo hi'],
   ])('rejects removed executable: %s', async (_label: string, command: string) => {
     const r = await runCommand({ command }, tmpDir);
     expect(r.ok).toBe(false);
@@ -786,6 +793,7 @@ describe('runCommand structural policy (executable + subcommand allowlist)', () 
   it.each([
     'git status',
     'git log',
+    'git diff',
     'npm run build',
     'pnpm test',
     'cargo clippy',
@@ -796,28 +804,66 @@ describe('runCommand structural policy (executable + subcommand allowlist)', () 
     'git --version',
     'git config --get user.name',
     'git config --list',
-    'git -C . status',
-    'npm --prefix . test',
+    'pip install -r requirements.txt',
+    'cargo build --manifest-path Cargo.toml',
+    'git status -uno',
   ])('passes policy for allowlisted form: %s', async (command: string) => {
-    const r = await runCommand({ command }, tmpDir);
-    expect(r.error ?? '').not.toMatch(/命令不在白名单内|未允许的子命令|不允许：git config/);
+    const r = await runCommand({ command, timeoutMs: 3000 }, tmpDir);
+    expect(r.error ?? '').not.toMatch(
+      /命令不在白名单内|未允许的子命令|子命令必须是第一个参数|不允许/,
+    );
   });
 
-  it('allows universal safe no-op forms for whitelisted executables', async () => {
-    for (const cmd of ['npm --version', 'npm -v', 'git --version', 'git -v', 'make -h']) {
+  it.each([
+    ['npm --tag install exec x'],
+    ['npm --tag install config get prefix'],
+    ['pip3 -v uninstall x'],
+    ['pip -v uninstall x'],
+    ['cargo +nightly build'],
+    ['git -C . status'],
+    ['npm --prefix . test'],
+    ['pnpm --cwd . install'],
+    ['yarn --cwd . run build'],
+    ['go -C . test'],
+    ['swift --package-path . build'],
+    ['xcodebuild -project Foo build'],
+    ['gradle -p . build'],
+    ['mvn -f pom.xml test'],
+    ['cargo --manifest-path Cargo.toml build'],
+  ])('rejects leading flag before subcommand (strict position): %s', async (command: string) => {
+    const r = await runCommand({ command, timeoutMs: 1000 }, tmpDir);
+    expect(r.ok, command).toBe(false);
+    expect(r.error, command).toBe('子命令必须是第一个参数');
+  });
+
+  it('allows universal safe no-op flags only as the sole argument', async () => {
+    for (const cmd of ['npm --version', 'npm -V', 'git --version', 'swift --help', 'make -h', 'make --version']) {
       const r = await runCommand({ command: cmd, timeoutMs: 5000 }, tmpDir);
-      expect(r.error ?? '', cmd).not.toMatch(/命令不在白名单内|未允许的子命令/);
+      expect(r.error ?? '', cmd).not.toMatch(
+        /命令不在白名单内|未允许的子命令|子命令必须是第一个参数/,
+      );
     }
   });
 
-  it('resolves the subcommand after value-taking flags', async () => {
+  it('rejects -v and safe flags mixed with other arguments', async () => {
+    for (const cmd of ['npm -v', 'git -v', 'cargo -v', 'xcodebuild -version']) {
+      const r = await runCommand({ command: cmd }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error, cmd).toBe('子命令必须是第一个参数');
+    }
+    const extra = await runCommand({ command: 'git --version https://example.com' }, tmpDir);
+    expect(extra.ok).toBe(false);
+    expect(extra.error).toBe('子命令必须是第一个参数');
+  });
+
+  it('rejects subcommand discovery through value-taking flags', async () => {
     const r = await runCommand({ command: 'git -C . frobnicate' }, tmpDir);
     expect(r.ok).toBe(false);
-    expect(r.error).toBe('未允许的子命令：git frobnicate');
+    expect(r.error).toBe('子命令必须是第一个参数');
 
     const r2 = await runCommand({ command: 'npm --prefix . exec foo' }, tmpDir);
     expect(r2.ok).toBe(false);
-    expect(r2.error).toBe('未允许的子命令：npm exec');
+    expect(r2.error).toBe('子命令必须是第一个参数');
   });
 
   it('allows read-only git config queries', async () => {
@@ -838,6 +884,79 @@ describe('runCommand structural policy (executable + subcommand allowlist)', () 
       expect(r.ok, cmd).toBe(false);
       expect(r.error ?? '', cmd).toContain('不允许：git config 仅允许只读查询');
     }
+  });
+
+  it('rejects find execution primaries (-exec/-execdir/-ok/-okdir)', async () => {
+    for (const cmd of [
+      'find . -maxdepth 0 -exec sh -c "echo pwned"',
+      'find . -exec echo x',
+      'find . -execdir echo x',
+      'find . -ok echo x',
+      'find . -okdir echo x',
+    ]) {
+      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toContain('不允许：find');
+    }
+    const ok = await runCommand(
+      { command: 'find . -maxdepth 1 -name "*.ts"', timeoutMs: 5000 },
+      tmpDir,
+    );
+    expect(ok.error ?? '').not.toMatch(/不允许：find/);
+
+    const executable = await runCommand(
+      { command: 'find . -maxdepth 1 -executable', timeoutMs: 5000 },
+      tmpDir,
+    );
+    expect(executable.error ?? '').not.toMatch(/不允许：find/);
+  });
+
+  it('rejects git config/upload-pack/receive-pack injection inside subcommands', async () => {
+    for (const cmd of [
+      'git clone --config diff.external=/bin/echo src dst',
+      'git clone --upload-pack=/bin/sh src',
+      'git clone -u/bin/sh src',
+      'git fetch --upload-pack=/bin/sh origin',
+      'git push --receive-pack=/bin/sh origin main',
+    ]) {
+      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toContain('不允许');
+    }
+  });
+
+  it.each([
+    ['git clone git@host:repo'],
+    ['git clone git@host:repo target'],
+    ['git clone ssh://git@host/repo'],
+    ['git clone git://host/repo'],
+    ['git fetch git@host:repo'],
+    ['git pull git@host:repo'],
+    ['git push git@host:repo main'],
+  ])('rejects disallowed git remote address: %s', async (command: string) => {
+    const r = await runCommand({ command, timeoutMs: 1000 }, tmpDir);
+    expect(r.ok).toBe(false);
+    expect(r.error ?? '').toContain('不允许的远端地址');
+  });
+
+  it('allows in-cwd path remotes for git clone', async () => {
+    await fs.mkdir(path.join(tmpDir, 'local-repo'));
+    const seed = await runCommand({ command: 'git init', cwd: 'local-repo' }, tmpDir);
+    expect(seed.ok).toBe(true);
+    const r = await runCommand(
+      { command: 'git clone ./local-repo copied', timeoutMs: 15000 },
+      tmpDir,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('documents network exit and approval-gated project scripts in tool description', () => {
+    const desc = shellTools[0]!.function.description ?? '';
+    expect(desc).toContain('web_fetch');
+    expect(desc).toContain('浏览器');
+    expect(desc).toContain('审批');
+    expect(desc).toMatch(/项目代码|项目内代码/);
+    expect(desc).toContain('子命令');
   });
 });
 

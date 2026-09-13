@@ -20,7 +20,7 @@ import { checkUrlDestination } from '../../security/net-policy';
  */
 const ALLOWED_COMMANDS_WIN = new Set([
   // 包管理 / 构建（子命令受限）
-  'npm', 'pnpm', 'yarn', 'corepack',
+  'npm', 'pnpm', 'yarn',
   // 版本控制
   'git',
   // 只读文件操作
@@ -28,24 +28,24 @@ const ALLOWED_COMMANDS_WIN = new Set([
   // 系统信息（只读）
   'whoami', 'systeminfo', 'tasklist', 'ver', 'hostname',
   // 开发 / 构建工具
-  'pip', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
+  'pip', 'cargo', 'rustc', 'go', 'java', 'javac', 'gradle', 'mvn',
 ]);
 
 const ALLOWED_COMMANDS_POSIX = new Set([
-  'npm', 'pnpm', 'yarn', 'corepack',
+  'npm', 'pnpm', 'yarn',
   'git',
   // 只读文件操作
   'ls', 'cat', 'head', 'tail', 'grep', 'find', 'rg',
   'pwd', 'whoami', 'uname', 'which', 'true', 'false', 'test',
   // 开发 / 构建工具
-  'pip', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
+  'pip', 'pip3', 'cargo', 'rustc', 'go', 'java', 'javac', 'gradle', 'mvn',
   // 文本处理（只读）
   'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'diff',
   // macOS / Linux 构建链
   'make', 'cmake', 'ninja', 'clang', 'clang++', 'cc', 'gcc', 'g++',
   // macOS 专属开发命令
   'swift', 'swiftc', 'swiftformat', 'swiftlint', 'xcrun', 'xcodebuild', 'brew',
-  'plutil', 'open', 'mdls',
+  'plutil', 'mdls',
   // macOS 系统信息（只读）
   'sw_vers', 'sysctl', 'defaults', 'diskutil',
   // 只读系统信息（POSIX / macOS）
@@ -54,7 +54,8 @@ const ALLOWED_COMMANDS_POSIX = new Set([
 
 /**
  * 子命令白名单（按 executable basename）。
- * 第一个非旗标 token 必须命中；`-v/--version/-h/--help` 作为首参数时免检（safe form）。
+ * 结构性约束：第一个参数必须是子命令（不允许任何前置旗标），
+ * 唯一例外是“单独一个” safe no-op 旗标（版本/帮助查询）。
  * 未列出的 executable（ls/cat/grep/make/cmake 等）不要求子命令。
  */
 const PACKAGE_MANAGER_SUBCOMMANDS = [
@@ -81,8 +82,8 @@ const SUBCOMMAND_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   swift: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
 };
 
-/** 通用 safe form：版本/帮助查询（单独使用或作为首参数时免子命令检查） */
-const SAFE_NOOP_FLAGS = new Set(['-v', '--version', '-h', '--help']);
+/** 通用 safe form：版本/帮助查询。仅当它是唯一参数时免子命令检查；不包含 -v（与 pip/cargo 的 -v 语义冲突）。 */
+const SAFE_NOOP_FLAGS = new Set(['--version', '-V', '-h', '--help']);
 
 /** git config 只读查询旗标（其余带赋值的写法一律拒绝） */
 const GIT_CONFIG_READ_FLAGS = new Set(['-l', '--list']);
@@ -461,18 +462,44 @@ function findDisallowedUrlScheme(args: string[]): string | null {
 
 /**
  * 工具级显式拒绝（fail-closed）：无法安全解析其内容、且会读取任意文件或注入可执行配置的旗标。
- * - git -c/--config-env：注入 core.fsmonitor / credential.helper 等可执行配置
+ * - git -c/--config/--config-env：注入 core.fsmonitor / credential.helper / diff.external 等可执行配置
+ * - git --upload-pack/-u/--receive-pack：指定远端执行的程序（等价任意命令执行）
+ * - find -exec/-execdir/-ok/-okdir：find 自行 execvp，绕过 executable 白名单
  * - cmake -D：取值可能指向工具链/预加载脚本（绝对路径或 .. 一律拒绝）
  * 返回错误文案，null 表示通过。
  */
 function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   if (exeBase === 'git') {
+    // clone/fetch/pull 的短选项 -u 是 --upload-pack（可贴值 -u/bin/sh）；其余子命令的 -u 无此语义
+    const sub = args[0];
+    const shortUploadPack = sub === 'clone' || sub === 'fetch' || sub === 'pull';
     for (const arg of args) {
       if (arg === '-c' || (arg.startsWith('-c') && !arg.startsWith('--'))) {
         return '不允许：git -c 可注入可执行配置（请使用专用 git 工具）。';
       }
+      if (arg === '--config' || arg.startsWith('--config=')) {
+        return '不允许：git --config 可注入可执行配置（请使用专用 git 工具）。';
+      }
       if (arg === '--config-env' || arg.startsWith('--config-env=')) {
         return '不允许：git --config-env 可注入可执行配置（请使用专用 git 工具）。';
+      }
+      if (
+        arg === '--upload-pack' ||
+        arg.startsWith('--upload-pack=') ||
+        arg === '-u' ||
+        (shortUploadPack && arg.startsWith('-u') && !arg.startsWith('--'))
+      ) {
+        return '不允许：git -u/--upload-pack 可指定远端执行的程序。';
+      }
+      if (arg === '--receive-pack' || arg.startsWith('--receive-pack=')) {
+        return '不允许：git --receive-pack 可指定远端执行的程序。';
+      }
+    }
+  }
+  if (exeBase === 'find') {
+    for (const arg of args) {
+      if (arg === '-exec' || arg === '-execdir' || arg === '-ok' || arg === '-okdir') {
+        return '不允许：find -exec/-execdir/-ok/-okdir 会执行外部命令。';
       }
     }
   }
@@ -502,24 +529,6 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
 }
 
 /**
- * 子命令定位：跳过所有旗标；已知取值旗标（PATH_FLAGS）连同其取值一起跳过，
- * 避免把 `git -C <dir> status` 的路径值当成子命令。
- * 返回 null 表示没有非旗标 token（如 `xcodebuild -list`），调用方按免检处理。
- */
-function firstNonFlagToken(exeBase: string, args: string[]): string | null {
-  const valueFlags = PATH_FLAGS[exeBase];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg.startsWith('-')) {
-      if (valueFlags?.has(arg)) i++;
-      continue;
-    }
-    return arg;
-  }
-  return null;
-}
-
-/**
  * git config 只读约束：仅允许查询（显式 --get/--list/-l，或无赋值的单 key 读取），
  * 带值赋值与已知写旗标（--add/--unset/--edit…）一律拒绝。
  */
@@ -538,17 +547,21 @@ function gitConfigWriteError(args: string[]): string | null {
 }
 
 /**
- * 子命令白名单：首个非旗标 token 必须在 SUBCOMMAND_ALLOWLIST 内。
- * `-v/--version/-h/--help` 作为首参数时无条件放行（safe form，版本/帮助为只读 no-op）。
+ * 子命令白名单（严格位置）：
+ * - 第一个参数必须是子命令，不允许任何前置旗标（`+toolchain` 之类前缀同样拒绝）；
+ * - 唯一例外：参数恰好一个且为 safe no-op 旗标（--version/-V/-h/--help）；
+ * - 未列出的子命令拒绝。
+ * 子命令定位不做任何“跳过旗标取值”的猜测，避免 `npm --tag install exec x` 之类的走私。
  */
 function subcommandError(exeBase: string, args: string[]): string | null {
   const allowed = SUBCOMMAND_ALLOWLIST[exeBase];
   if (!allowed) return null;
-  if (args.length > 0 && SAFE_NOOP_FLAGS.has(args[0]!)) return null;
-  const sub = firstNonFlagToken(exeBase, args);
-  if (sub === null) return null;
-  if (!allowed.has(sub)) return `未允许的子命令：${exeBase} ${sub}`;
-  if (exeBase === 'git' && sub === 'config') return gitConfigWriteError(args);
+  if (args.length === 0) return null;
+  const first = args[0]!;
+  if (args.length === 1 && SAFE_NOOP_FLAGS.has(first)) return null;
+  if (first.startsWith('-') || first.startsWith('+')) return '子命令必须是第一个参数';
+  if (!allowed.has(first)) return `未允许的子命令：${exeBase} ${first}`;
+  if (exeBase === 'git' && first === 'config') return gitConfigWriteError(args);
   return null;
 }
 
@@ -563,6 +576,27 @@ function httpUrlCandidate(arg: string): string | null {
       const value = arg.slice(eq + 1);
       if (HTTP_URL_RE.test(value)) return value;
     }
+  }
+  return null;
+}
+
+/** 允许显式远端地址的 git 子命令 */
+const GIT_REMOTE_SUBCOMMANDS = new Set(['clone', 'fetch', 'pull', 'push']);
+
+/**
+ * git 远端地址策略：clone/fetch/pull/push 的非旗标参数不允许 scp-like
+ * （git@host:path、host:path）与 http(s) 之外的 scheme（file://、ssh://、git://…），
+ * 仅 http(s) URL（随后做 SSRF 校验）与工作目录内路径/远端名可通过。
+ * 对含 `:` 的 refspec（如 HEAD:main）一并拒绝（fail-closed）。
+ */
+function gitRemoteAddressError(exeBase: string, args: string[]): string | null {
+  if (exeBase !== 'git') return null;
+  const sub = args[0];
+  if (sub === undefined || !GIT_REMOTE_SUBCOMMANDS.has(sub)) return null;
+  for (const arg of args.slice(1)) {
+    if (arg.startsWith('-')) continue;
+    if (HTTP_URL_RE.test(arg)) continue;
+    if (arg.includes(':')) return `不允许的远端地址：${arg}`;
   }
   return null;
 }
@@ -761,6 +795,12 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     return { ok: false, output: '', error: subErr };
   }
 
+  // git 远端地址策略：clone/fetch/pull/push 仅允许 http(s) URL 或工作目录内路径
+  const remoteErr = gitRemoteAddressError(exeBase, parsed.args);
+  if (remoteErr !== null) {
+    return { ok: false, output: '', error: remoteErr };
+  }
+
   const badSchemeArg = findDisallowedUrlScheme(parsed.args);
   if (badSchemeArg !== null) {
     return { ok: false, output: '', error: `不允许的 URL 协议：${badSchemeArg}。仅允许 http/https。` };
@@ -886,7 +926,7 @@ export const shellTools: OpenAITool[] = [
     function: {
       name: 'run_command',
       description:
-        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。解释器（node/python/sh/bash 等）与网络工具（curl/wget/ssh/scp 等）已整体移除：联网获取资源请用 web_fetch 或浏览器工具。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
+        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。有子命令白名单的命令（npm/git/cargo/go/pip/swift/xcodebuild 等），第一个参数必须是子命令（仅可单独使用 --version/-V/-h/--help 查询版本/帮助）。解释器（node/python/sh/bash 等）与网络工具（curl/wget/ssh/scp 等）已整体移除：联网获取资源请用 web_fetch 或浏览器工具。npm install/npm run/cargo build 等会执行项目内代码（安装脚本、构建脚本、Makefile 等），属于需用户审批的敏感操作。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
       parameters: {
         type: 'object',
         properties: {
