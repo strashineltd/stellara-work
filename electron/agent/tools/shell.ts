@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { RunCommandArgs, ToolResult, OpenAITool, ToolResultMeta } from '../../../shared/ipc';
-import { isWithinDir, canonicalCwd, verifyWritePath } from '../../fs/path-security';
+import { isWithinDir, canonicalCwd, verifyExistingPath, verifyWritePath } from '../../fs/path-security';
 
 /**
  * 命令白名单（安全子集）。
@@ -50,21 +51,71 @@ function allowedCommands(): Set<string> {
   return process.platform === 'win32' ? ALLOWED_COMMANDS_WIN : ALLOWED_COMMANDS_POSIX;
 }
 
+const COMPILER_PATH_FLAGS = new Set([
+  '-o', '--output', '-I', '-L', '-include', '-isystem', '-imacros', '-idirafter', '-iquote',
+]);
+
+const PIP_PATH_FLAGS = new Set([
+  '-r', '--requirement', '-c', '--constraint', '-e', '--editable', '-t', '--target',
+  '--log', '--cache-dir',
+]);
+
 /**
  * 带路径语义的 flag 定义。
- * key: 命令名
- * value: flag → 如果后面跟值，该值是否代表路径
+ * key: 命令名（basename，小写）
+ * value: 该命令取值代表路径的 flag 集合（值可能是 `@file` / `key=@file` 形式，见
+ *        pathValueCandidates）。
+ *
+ * 未列出的 `-`/`--` 参数由 validatePathFlags 的 fail-closed 规则兜底：
+ * 只要旗标自身携带 `/`、`\`、`..` 或绝对路径，就按超出工作目录拒绝。
  */
 const PATH_FLAGS: Record<string, Set<string>> = {
-  git: new Set(['-C', '--work-tree', '--git-dir']),
-  npm: new Set(['--prefix']),
-  swift: new Set(['--package-path']),
-  cargo: new Set(['--manifest-path', '--target-dir']),
-  xcodebuild: new Set(['-project', '-workspace']),
-  go: new Set(['-C', '-modfile']),
-  node: new Set(), // node 的文件参数由 validateFileArgs 处理
-  python: new Set(),
+  git: new Set(['-C', '--work-tree', '--git-dir', '--exec-path', '--output']),
+  npm: new Set(['--prefix', '-C', '--userconfig', '--globalconfig', '--cache']),
+  npx: new Set(['--prefix', '-C', '--userconfig', '--cache']),
+  pnpm: new Set(['--prefix', '-C', '--dir', '--cwd', '--store-dir', '--state-dir', '--modules-dir', '--global-dir']),
+  yarn: new Set(['--cwd', '--prefix', '--modules-folder', '--cache-folder', '--global-folder', '--use-yarnrc']),
+  node: new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '--env-file']),
+  python: new Set(), // python 的文件参数由 validateFileArgs 处理；-m 是模块名不是路径
   python3: new Set(),
+  pip: PIP_PATH_FLAGS,
+  pip3: PIP_PATH_FLAGS,
+  curl: new Set([
+    '-T', '--upload-file', '-o', '--output', '-K', '--config', '-b', '--cookie',
+    '-c', '--cookie-jar', '-D', '--dump-header', '--data', '--data-binary',
+    '--data-ascii', '--data-raw', '--json', '-F', '--form',
+  ]),
+  make: new Set(['-C', '--directory', '-f', '--file', '--makefile', '-I', '--include-dir']),
+  cmake: new Set(['-S', '-B', '-C', '--source', '--build', '--install']),
+  ninja: new Set(['-C', '-f']),
+  rustc: new Set(['-o', '--out-dir', '-L', '--extern']),
+  cargo: new Set(['--manifest-path', '--target-dir']),
+  go: new Set(['-C', '-modfile', '-o']),
+  swift: new Set(['--package-path', '--scratch-path', '--cache-path', '--config-path', '--security-path']),
+  swiftc: new Set(['-o', '-I', '-L', '-module-cache-path']),
+  clang: COMPILER_PATH_FLAGS,
+  'clang++': COMPILER_PATH_FLAGS,
+  cc: COMPILER_PATH_FLAGS,
+  gcc: COMPILER_PATH_FLAGS,
+  'g++': COMPILER_PATH_FLAGS,
+  xcodebuild: new Set([
+    '-project', '-workspace', '-derivedDataPath', '-resultBundlePath', '-archivePath',
+    '-exportPath', '-clonedSourcePackagesDirPath', '-xcconfig',
+  ]),
+  javac: new Set(['-d', '-cp', '-classpath', '-sourcepath', '--module-path', '--class-path', '-h']),
+  java: new Set(['-cp', '-classpath', '--class-path', '--module-path', '-jar']),
+  gradle: new Set(['-p', '--project-dir', '-g', '--gradle-user-home', '--project-cache-dir', '-I', '--init-script']),
+  mvn: new Set(['-f', '--file', '-s', '--settings', '-gs', '--global-settings']),
+  grep: new Set(['-f', '--file']),
+  rg: new Set(['-f', '--file']),
+  awk: new Set(['-f', '--file']),
+  sed: new Set(['-f', '--file']),
+  sort: new Set(['-o', '--output']),
+  file: new Set(['-f', '--files-from']),
+  find: new Set(['-fprint', '-fprint0', '-fprintf', '-fls']),
+  sqlite3: new Set(['-init']),
+  plutil: new Set(['-o', '--output']),
+  diff: new Set(['--from-file', '--to-file']),
 };
 
 /**
@@ -182,14 +233,55 @@ async function validatePathArg(arg: string, baseDir: string, root: string): Prom
     !arg.includes('..') &&
     !isDriveRelativePathArg(arg)
   ) {
+    // 单 token：既可能是纯文本参数（如 commit message），也可能是文件/链接名。
+    // 若它实际存在于 cwd 内，按真实路径复核，防止 `evil -> /etc/passwd` 之类的链接逃逸；
+    // 不存在则保持放行（build/test 之类的非文件词）。
+    const resolved = path.resolve(baseDir, arg);
+    try {
+      await fs.lstat(resolved);
+    } catch {
+      return null;
+    }
+    const checked = await verifyExistingPath(resolved, baseDir);
+    if (!checked.ok) {
+      return `路径参数 "${arg}" 超出工作目录。`;
+    }
     return null;
   }
   return validateContainedPath(arg, baseDir, root, '路径参数');
 }
 
 /**
- * 校验带路径语义的 flag（如 git -C /path, npm --prefix=/path）。
- * 同时覆盖 `--flag value`、`--flag=value` 与短选项贴值（`-Cvalue`）三种形式。
+ * 已知路径旗标的值可能是直接路径，也可能带 `@`（curl -d @file）或 `key=value`
+ * （-F name=@file / --extern name=path）。逐个候选校验，任一候选越界即拒绝，
+ * 避免剥离前缀后漏掉绝对路径（如 `-o /tmp/x=y`）。
+ */
+function pathValueCandidates(value: string): string[] {
+  const candidates = [value];
+  if (value.startsWith('@')) candidates.push(value.slice(1));
+  const atIndex = value.indexOf('=@');
+  if (atIndex !== -1) candidates.push(value.slice(atIndex + 2));
+  const eqIndex = value.indexOf('=');
+  if (eqIndex !== -1) candidates.push(value.slice(eqIndex + 1));
+  return candidates;
+}
+
+/** 未知旗标自身携带路径的判定（fail-closed）：含分隔符 / 上级引用 / 绝对路径。 */
+function flagTokenLooksLikePath(token: string): boolean {
+  return (
+    token.includes('/') ||
+    token.includes('\\') ||
+    token.includes('..') ||
+    isAbsolutePathArg(token)
+  );
+}
+
+/**
+ * 校验所有 `-`/`--` 参数：
+ * - 已知路径旗标（PATH_FLAGS）的取值按路径校验，覆盖 `--flag value`、
+ *   `--flag=value`、短选项贴值（`-Cvalue`）与 `@`/`key=value` 形式；
+ * - 未知旗标若自身携带路径，则无法确认其指向工作目录内，按超出工作目录拒绝；
+ * - 纯布尔旗标（`-l`、`--verbose`）保持放行。
  */
 async function validatePathFlags(
   exe: string,
@@ -199,27 +291,49 @@ async function validatePathFlags(
 ): Promise<string | null> {
   const exeBase = path.basename(exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   const pathFlags = PATH_FLAGS[exeBase];
-  if (!pathFlags || pathFlags.size === 0) return null;
 
   const check = async (flag: string, value: string): Promise<string | null> =>
     validateContainedPath(value, baseDir, root, `命令 ${exeBase} 的 ${flag} 参数`);
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    for (const flag of pathFlags) {
-      let value: string | undefined;
-      if (arg === flag) {
-        value = args[i + 1];
-      } else if (arg.startsWith(flag + '=')) {
-        value = arg.slice(flag.length + 1);
-      } else if (!flag.startsWith('--') && arg.startsWith(flag) && arg.length > flag.length) {
-        // 短选项贴值：git -C../dir
-        value = arg.slice(flag.length);
+    if (!arg.startsWith('-')) continue;
+
+    let matchedFlag: string | null = null;
+    let matchedValue: string | undefined;
+    if (pathFlags) {
+      for (const flag of pathFlags) {
+        if (arg === flag) {
+          matchedFlag = flag;
+          matchedValue = args[i + 1];
+          break;
+        }
+        if (arg.startsWith(flag + '=')) {
+          matchedFlag = flag;
+          matchedValue = arg.slice(flag.length + 1);
+          break;
+        }
+        if (!flag.startsWith('--') && arg.startsWith(flag) && arg.length > flag.length) {
+          // 短选项贴值：git -C../dir
+          matchedFlag = flag;
+          matchedValue = arg.slice(flag.length);
+          break;
+        }
       }
-      if (value !== undefined && value !== '') {
-        const err = await check(flag, value);
-        if (err) return err;
+    }
+
+    if (matchedFlag !== null) {
+      if (matchedValue !== undefined && matchedValue !== '') {
+        for (const candidate of pathValueCandidates(matchedValue)) {
+          const err = await check(matchedFlag, candidate);
+          if (err) return err;
+        }
       }
+      continue;
+    }
+
+    if (flagTokenLooksLikePath(arg)) {
+      return `命令 ${exeBase} 的参数 "${arg}" 含路径，已按超出工作目录拒绝。`;
     }
   }
   return null;

@@ -31,6 +31,27 @@ describe('isPrivateOrReservedIp (IPv4)', () => {
       expect(isPrivateOrReservedIp(ip), ip).toBe(false);
     }
   });
+
+  it('blocks TEST-NET, benchmarking and IETF protocol assignment ranges (P1 review)', () => {
+    for (const ip of [
+      '192.0.2.1',
+      '192.0.2.254',
+      '198.51.100.10',
+      '203.0.113.10',
+      '198.18.0.1',
+      '198.19.255.255',
+      '192.0.0.1',
+      '192.0.0.255',
+    ]) {
+      expect(isPrivateOrReservedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it('still allows adjacent public IPv4 outside those ranges (P1 review)', () => {
+    for (const ip of ['192.0.1.1', '192.0.3.1', '198.20.0.1', '203.0.114.1']) {
+      expect(isPrivateOrReservedIp(ip), ip).toBe(false);
+    }
+  });
 });
 
 describe('isPrivateOrReservedIp (IPv6 canonicalization)', () => {
@@ -64,6 +85,16 @@ describe('isPrivateOrReservedIp (IPv6 canonicalization)', () => {
     }
     expect(isPrivateOrReservedIp('64:ff9b::808:808')).toBe(false);
     expect(isPrivateOrReservedIp('2002:0808:0808::')).toBe(false);
+  });
+
+  it('blocks Teredo 2001::/32 (P1 review)', () => {
+    for (const ip of [
+      '2001::1',
+      '2001:0:1:2:3:4:5:6',
+      '2001:0000:4136:e378:8000:63bf:3fff:fdd2',
+    ]) {
+      expect(isPrivateOrReservedIp(ip), ip).toBe(true);
+    }
   });
 
   it('allows public IPv6, including mapped/compat with public IPv4', () => {

@@ -1,13 +1,15 @@
 import { execFile } from 'node:child_process';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
+import { buildChildEnv } from './shell';
 
 // 只读 git 命令的加固参数：core.pager 可为任意命令，core.fsmonitor 可指向外部程序，
 // 恶意仓库配置会借这些配置在"只读"工具中执行代码，因此统一强制禁用。
 const GIT_HARDENING_ARGS = ['-c', 'core.pager=cat', '-c', 'core.fsmonitor=false'];
 
 function gitEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_PAGER: 'cat' };
-  // GIT_EXTERNAL_DIFF 也能指定外部 diff 程序，一并清除（--no-ext-diff 已禁用配置来源）
+  // 与 run_command 同源的环境清洗（H5）：只保留操作性变量，剥离 STELLARA_* 与密钥型变量
+  const env = buildChildEnv({ GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' });
+  // GIT_EXTERNAL_DIFF 也能指定外部 diff 程序，禁止透传（--no-ext-diff 已禁用配置来源）
   delete env.GIT_EXTERNAL_DIFF;
   return env;
 }

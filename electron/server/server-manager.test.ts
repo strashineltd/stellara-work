@@ -72,6 +72,65 @@ describe('ServerManager', () => {
     expect(added.url).toBe('https://10.0.0.5:4096');
   });
 
+  it('rejects a legacy remote http entry at connect time (P1 review)', async () => {
+    const createClient = vi.fn();
+    const { manager } = makeManager({
+      loadEntries: async () => [entry('srv-1', 'http://10.0.0.5:4096')],
+      createClient,
+    });
+    await manager.connectAll();
+    expect(createClient).not.toHaveBeenCalled();
+    expect(manager.statuses()[0]).toMatchObject({
+      id: 'srv-1',
+      status: 'error',
+      error: '非本机服务器必须使用 https',
+    });
+    expect(manager.getClient('srv-1')).toBeNull();
+  });
+
+  it('rejects a legacy remote http entry in test() (P1 review)', async () => {
+    const createClient = vi.fn();
+    const { manager } = makeManager({
+      loadEntries: async () => [entry('srv-1', 'http://10.0.0.5:4096')],
+      createClient,
+    });
+    const result = await manager.test('srv-1');
+    expect(result).toEqual({ ok: false, status: 'error', error: '非本机服务器必须使用 https' });
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it('reports a legacy remote http entry as error from connect() (P1 review)', async () => {
+    const createClient = vi.fn();
+    const { manager } = makeManager({
+      loadEntries: async () => [entry('srv-1', 'http://10.0.0.5:4096')],
+      createClient,
+    });
+    const status = await manager.connect('srv-1');
+    expect(status).toMatchObject({ id: 'srv-1', status: 'error', error: '非本机服务器必须使用 https' });
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it('still connects loopback http and remote https entries (P1 review)', async () => {
+    const createClient = vi.fn(() => ({
+      health: async () => ({ healthy: true }),
+      subscribeEvents: () => () => {},
+      listSessions: async () => [],
+    }));
+    const { manager } = makeManager({
+      loadEntries: async () => [
+        entry('srv-1', 'http://127.0.0.1:4096'),
+        entry('srv-2', 'https://10.0.0.5:4096'),
+      ],
+      createClient: createClient as never,
+    });
+    await manager.connectAll();
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(manager.statuses().map((s) => `${s.id}:${s.status}`)).toEqual([
+      'srv-1:connected',
+      'srv-2:connected',
+    ]);
+  });
+
   it('adds a valid server, stores password and hides it from list()', async () => {
     const setPassword = vi.fn(async () => {});
     const { manager } = makeManager({ setPassword });

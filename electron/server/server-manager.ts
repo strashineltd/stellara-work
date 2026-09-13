@@ -57,6 +57,18 @@ function requireServerUrl(raw: string): string {
   throw new Error(result.error === 'https-required' ? HTTPS_REQUIRED_ERROR : URL_ERROR);
 }
 
+/**
+ * P1 review：存量条目（旧版本写入）可能仍是 `http://远程主机`，
+ * 连接/测试时必须按同一 https-except-loopback 规则重新校验，
+ * 防止遗留条目继续把 Basic 凭据明文发往远端。
+ * 合法返回 null，否则返回可展示的错误文案。
+ */
+function storedUrlError(url: string): string | null {
+  const result = validateServerUrl(url);
+  if ('url' in result) return null;
+  return result.error === 'https-required' ? HTTPS_REQUIRED_ERROR : URL_ERROR;
+}
+
 function describeConnectError(error: unknown): string {
   const message = errorMessage(error);
   return /HTTP (401|403)\b/.test(message) ? `鉴权失败: ${message}` : `连接失败: ${message}`;
@@ -170,6 +182,10 @@ export class ServerManager {
 
   async test(id: string): Promise<ServerTestResult> {
     const entry = await this.requireEntry(id);
+    const urlError = storedUrlError(entry.url);
+    if (urlError) {
+      return { ok: false, status: 'error', error: urlError };
+    }
     try {
       const info = await this.probe(entry, this.deps.getPassword(id));
       return {
@@ -219,6 +235,14 @@ export class ServerManager {
     const id = entry.id;
     const state = this.ensureRuntime(id);
     if (state.status === 'connected' || state.status === 'connecting') return;
+
+    const urlError = storedUrlError(entry.url);
+    if (urlError) {
+      if (this.isCurrent(id)) {
+        this.setRuntime(id, { status: 'error', error: urlError, version: undefined });
+      }
+      return;
+    }
 
     this.setRuntime(id, { status: 'connecting', error: undefined, version: undefined });
     const client = this.deps.createClient(entry, this.deps.getPassword(id));

@@ -53,6 +53,7 @@ function isPrivateOrReservedIpv4(ip: string): boolean {
   if (a === 169 && b === 254) return true; // link-local / cloud metadata
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
   if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0.0/24 IETF + 192.0.2.0/24 TEST-NET-1
   if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
   if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
   if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
@@ -160,6 +161,8 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   if (bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80) return true;
   // multicast ff00::/8
   if (bytes[0] === 0xff) return true;
+  // Teredo 2001::/32（隧道地址，可承载私网目标）
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0 && bytes[3] === 0) return true;
   // documentation 2001:db8::/32
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true;
 

@@ -91,6 +91,34 @@ describe('git hardening (H7)', () => {
     }
   });
 
+  it('scrubs STELLARA_* and secret-like vars from the git child env (P1 review)', async () => {
+    mockResult(null, 'ok');
+    process.env.STELLARA_TEST_LEAK = 'top-secret';
+    process.env.GITHUB_TOKEN = 'ghp_x';
+    process.env.SOME_PASSWORD = 'pw';
+    process.env.MY_RANDOM_VAR = 'visible';
+    try {
+      await gitStatus({}, '/tmp/repo');
+      const env = lastEnv();
+      expect(env.STELLARA_TEST_LEAK).toBeUndefined();
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+      expect(env.SOME_PASSWORD).toBeUndefined();
+      expect(env.MY_RANDOM_VAR).toBeUndefined();
+      expect(env.GIT_PAGER).toBe('cat');
+      expect(env.GIT_TERMINAL_PROMPT).toBe('0');
+      expect(env.GIT_EXTERNAL_DIFF).toBeUndefined();
+      for (const key of Object.keys(env)) {
+        expect(key.startsWith('STELLARA_'), key).toBe(false);
+        expect(/_TOKEN$|_SECRET$|_PASSWORD$|_API_KEY$/.test(key), key).toBe(false);
+      }
+    } finally {
+      delete process.env.STELLARA_TEST_LEAK;
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.SOME_PASSWORD;
+      delete process.env.MY_RANDOM_VAR;
+    }
+  });
+
   it('keeps git_status and git_log output shape unchanged', async () => {
     mockResult(null, '## main\n M a.ts\n');
     const status = await gitStatus({}, '/tmp/repo');

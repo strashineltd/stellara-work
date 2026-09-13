@@ -99,6 +99,29 @@ describe('configureModel', () => {
     expect(mockUpsertModel).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: 'https://new.example' }));
   });
 
+  it('writes the key before persisting the new baseUrl (H8 ordering)', async () => {
+    mockGetKey.mockReturnValue(null);
+    mockTestConnection.mockResolvedValue({ ok: true });
+    const r = await configureModel(cfg({ apiKey: 'sk-new', baseUrl: 'https://new.example' }));
+    expect(r.ok).toBe(true);
+    expect(mockSetKey).toHaveBeenCalledWith('custom', 'sk-new');
+    expect(mockUpsertModel).toHaveBeenCalled();
+    expect(mockSetKey.mock.invocationCallOrder[0]).toBeLessThan(
+      mockUpsertModel.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('keeps key/baseUrl consistent when the key write fails (H8 ordering)', async () => {
+    mockGetKey.mockReturnValue('sk-old');
+    mockLoadConfig.mockResolvedValue(storedConfig('https://old.example'));
+    mockTestConnection.mockResolvedValue({ ok: true });
+    mockSetKey.mockRejectedValue(new Error('env 写入失败'));
+    await expect(
+      configureModel(cfg({ apiKey: 'sk-new', baseUrl: 'https://new.example' })),
+    ).rejects.toThrow('env 写入失败');
+    expect(mockUpsertModel).not.toHaveBeenCalled();
+  });
+
   it('allows same-baseUrl edits without a key (normalized comparison)', async () => {
     mockGetKey.mockReturnValue('sk-old');
     mockLoadConfig.mockResolvedValue(storedConfig('https://API.deepseek.com/v1/'));

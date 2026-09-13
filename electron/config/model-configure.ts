@@ -83,10 +83,12 @@ export async function configureModel(config: ModelConfig): Promise<ConfigureResu
     verifiedAt: config.apiKey ? new Date().toISOString() : undefined,
     createdAt: new Date().toISOString(),
   };
-  await upsertModel(entry);
+  // H8 顺序：先写 key 再落 baseUrl。若 key 写入失败，旧 key/baseUrl 组合保持不变，
+  // 不会出现"新 baseUrl + 旧 key"把旧密钥发往新主机的状态。
   if (config.apiKey) {
     await setKey(config.id, config.apiKey);
   }
+  await upsertModel(entry);
   return { ok: true };
 }
 

@@ -49,4 +49,41 @@ describe('searchFiles', () => {
     expect(r.ok).toBe(true);
     expect(r.output).toContain('inner.js');
   });
+
+  it('does not enumerate symlinked directories outside the workdir (P1 review)', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'search-outside-'));
+    try {
+      await fs.writeFile(path.join(outside, 'secret.js'), '');
+      try {
+        await fs.symlink(outside, path.join(tmpDir, 'link'), 'dir');
+      } catch {
+        return; // 平台不允许创建 symlink 时跳过
+      }
+      const r = await searchFiles({ pattern: '**/*.js' }, tmpDir);
+      expect(r.ok).toBe(true);
+      expect(r.output).not.toContain('secret.js');
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes symlinked files escaping the workdir while keeping real files (P1 review)', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'search-outside-file-'));
+    try {
+      await fs.writeFile(path.join(outside, 'secret.js'), '');
+      await write('real.js', '');
+      try {
+        await fs.symlink(path.join(outside, 'secret.js'), path.join(tmpDir, 'evil.js'));
+      } catch {
+        return; // 平台不允许创建 symlink 时跳过
+      }
+      const r = await searchFiles({ pattern: '**/*.js' }, tmpDir);
+      expect(r.ok).toBe(true);
+      expect(r.output).toContain('real.js');
+      expect(r.output).not.toContain('evil.js');
+      expect(r.output).not.toContain('secret.js');
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
 });

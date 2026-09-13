@@ -1,7 +1,7 @@
 import fg from 'fast-glob';
 import path from 'node:path';
 import type { SearchFilesArgs, ToolResult, OpenAITool } from '../../../shared/ipc';
-import { isWithinDir, canonicalCwd } from '../../fs/path-security';
+import { isWithinDir, canonicalCwd, verifyExistingPath } from '../../fs/path-security';
 import { isAbsolutePathArg } from './shell';
 
 /**
@@ -39,10 +39,21 @@ export async function searchFiles(args: SearchFilesArgs, cwd: string): Promise<T
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
+      // 不跟随符号链接：fast-glob 默认跟随，配合词法前缀检查会枚举工作区外文件名
+      followSymbolicLinks: false,
     })).filter((file) => isWithinDir(path.resolve(searchRoot, file), searchRoot));
+
+    // 真实路径复核（防目录级链接与竞态）：指向工作区外的链接结果不返回
+    const safeFiles: string[] = [];
+    for (const file of files) {
+      if (safeFiles.length >= 200) break;
+      const verified = await verifyExistingPath(path.join(searchRoot, file), searchRoot);
+      if (verified.ok) safeFiles.push(file);
+    }
+
     return {
       ok: true,
-      output: files.length === 0 ? '(无匹配)' : files.slice(0, 200).join('\n'),
+      output: safeFiles.length === 0 ? '(无匹配)' : safeFiles.join('\n'),
     };
   } catch (err) {
     return { ok: false, output: '', error: errorMessage(err) };
