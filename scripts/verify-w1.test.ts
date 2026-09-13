@@ -104,10 +104,10 @@ describe('W1 verify - direct tool invocation (no LLM needed)', () => {
 
   it('run_command works', async () => {
     if (!cwd) return;
-    // 使用 node -e 替代 echo（echo 是 shell 内建命令，不能直接 spawn）
+    // 解释器已移出白名单，用包管理器的 safe form 验证 run_command
     const result = await invokeTool(
       'run_command',
-      { command: 'node --version', timeoutMs: 5000 },
+      { command: 'npm --version', timeoutMs: 5000 },
       cwd,
     );
     if (!result.ok) {
@@ -115,7 +115,7 @@ describe('W1 verify - direct tool invocation (no LLM needed)', () => {
       console.log('[run_command] output:', result.output);
     }
     expect(result.ok).toBe(true);
-    expect(result.output).toContain('v');
+    expect(result.output).toMatch(/\d+\.\d+/);
   });
 });
 

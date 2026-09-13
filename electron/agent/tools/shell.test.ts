@@ -80,23 +80,33 @@ describe('parseCommand', () => {
 });
 
 describe('runCommand', () => {
-  it('runs node --version successfully', async () => {
-    const result = await runCommand({ command: 'node --version' }, tmpDir);
+  it('runs npm --version successfully (safe form)', async () => {
+    const result = await runCommand({ command: 'npm --version' }, tmpDir);
     expect(result.ok).toBe(true);
-    expect(result.output).toMatch(/v\d+/);
+    expect(result.output).toMatch(/\d+\.\d+/);
   });
 
   it('rejects command not in whitelist', async () => {
     const result = await runCommand({ command: 'osascript -e "say hi"' }, tmpDir);
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('白名单');
+    expect(result.error).toBe('命令不在白名单内：osascript');
   });
 
   it('rejects script interpreters and privilege escalation', async () => {
-    for (const cmd of ['bash script.sh', 'zsh script.zsh', 'sudo ls', 'osascript x.applescript']) {
+    for (const cmd of [
+      'sh script.sh',
+      'bash script.sh',
+      'zsh script.zsh',
+      'ruby x.rb',
+      'perl x.pl',
+      'bun x.ts',
+      'deno x.ts',
+      'sudo ls',
+      'osascript x.applescript',
+    ]) {
       const result = await runCommand({ command: cmd }, tmpDir);
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain('白名单');
+      expect(result.ok, cmd).toBe(false);
+      expect(result.error, cmd).toBe(`命令不在白名单内：${cmd.split(' ')[0]}`);
     }
   });
 
@@ -113,7 +123,6 @@ describe('runCommand', () => {
       'brew --version',
       'plutil -lint Info.plist',
       'open --version',
-      'sqlite3 --version',
       'make --version',
       'clang --version',
       'mdls -name kMDItemFSName .',
@@ -136,13 +145,13 @@ describe('runCommand', () => {
   });
 
   it('rejects shell special characters', async () => {
-    const result = await runCommand({ command: 'node --version | findstr v' }, tmpDir);
+    const result = await runCommand({ command: 'git status | cat' }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('特殊字符');
   });
 
   it('rejects multiline commands', async () => {
-    const result = await runCommand({ command: 'node --version\nrm -rf /' }, tmpDir);
+    const result = await runCommand({ command: 'git status\nrm -rf /' }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('多行');
   });
@@ -162,36 +171,35 @@ describe('runCommand', () => {
 
   it('rejects npm --prefix pointing outside cwd', async () => {
     const outside = path.join(os.tmpdir(), 'outside-pkg');
-    const result = await runCommand({ command: `npm --prefix "${outside}" list` }, tmpDir);
+    const result = await runCommand({ command: `npm --prefix "${outside}" test` }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('绝对路径');
   });
 
-  it('rejects node with absolute path file argument', async () => {
-    const outside = path.join(os.tmpdir(), 'evil.js');
-    const result = await runCommand({ command: `node "${outside}"` }, tmpDir);
+  it('rejects absolute path file arguments', async () => {
+    const outside = path.join(os.tmpdir(), 'evil.txt');
+    const result = await runCommand({ command: `cat "${outside}"` }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('绝对路径');
   });
 
-  it('rejects python with .. path file argument', async () => {
-    const result = await runCommand({ command: 'python ../../../etc/passwd' }, tmpDir);
+  it('rejects .. path arguments', async () => {
+    const result = await runCommand({ command: 'cat ../../../etc/passwd' }, tmpDir);
     expect(result.ok).toBe(false);
     expect(result.error).toContain('超出');
   });
 
-  it('runs safe in-cwd node script', async () => {
-    await fs.writeFile(path.join(tmpDir, 'test.js'), 'console.log("ok")');
-    const result = await runCommand({ command: 'node test.js' }, tmpDir);
+  it('runs safe in-cwd file read', async () => {
+    await fs.writeFile(path.join(tmpDir, 'test.txt'), 'ok');
+    const result = await runCommand({ command: 'cat test.txt' }, tmpDir);
     expect(result.ok).toBe(true);
     expect(result.output).toContain('ok');
   });
 
   it('timeout cleans up timer and does not leave dangling resolve', async () => {
-    // 写一个长时间运行的脚本，避免 shell 特殊字符
-    await fs.writeFile(path.join(tmpDir, 'sleep.js'), 'setTimeout(function(){}, 100000);');
+    // cat 无参数会阻塞在 stdin（stdin 是未关闭的 pipe），避免依赖解释器
     const result = await runCommand(
-      { command: 'node sleep.js', timeoutMs: 200 },
+      { command: 'cat', timeoutMs: 200 },
       tmpDir,
     );
     expect(result.ok).toBe(false);
@@ -201,7 +209,7 @@ describe('runCommand', () => {
   });
 
   it('includes meta on success', async () => {
-    const result = await runCommand({ command: 'node --version' }, tmpDir);
+    const result = await runCommand({ command: 'git --version' }, tmpDir);
     expect(result.ok).toBe(true);
     expect(result.meta).toBeDefined();
     if (result.meta?.kind === 'command') {
@@ -270,8 +278,11 @@ describe('runCommand', () => {
   });
 
   it('injects env variables', async () => {
-    await fs.writeFile(path.join(tmpDir, 'env-check.js'), 'console.log(process.env.MY_FLAG)');
-    const r = await runCommand({ command: 'node env-check.js', env: { MY_FLAG: 'ok' } }, tmpDir);
+    await fs.writeFile(
+      path.join(tmpDir, 'Makefile'),
+      'all:\n\t@printf \'%s\\n\' "$${MY_FLAG:-missing}"\n',
+    );
+    const r = await runCommand({ command: 'make all', env: { MY_FLAG: 'ok' } }, tmpDir);
     expect(r.ok).toBe(true);
     expect(r.output.trim()).toBe('ok');
   });
@@ -319,7 +330,7 @@ describe('runCommand', () => {
       expect(viaAttached.ok).toBe(false);
       expect(viaAttached.error).toContain('超出');
 
-      const viaEquals = await runCommand({ command: 'npm --prefix=../proj-x list' }, proj);
+      const viaEquals = await runCommand({ command: 'npm --prefix=../proj-x test' }, proj);
       expect(viaEquals.ok).toBe(false);
       expect(viaEquals.error).toContain('超出');
     } finally {
@@ -336,7 +347,7 @@ describe('runCommand', () => {
   });
 
   it('rejects Windows drive-relative path arguments (H4)', async () => {
-    for (const command of ['node C:evil.js', 'git -C C:repo status', 'cat C:secret.txt']) {
+    for (const command of ['git -C C:repo status', 'cat C:secret.txt', 'find C:evil']) {
       const result = await runCommand({ command }, tmpDir);
       expect(result.ok, command).toBe(false);
       expect(result.error, command).toContain('盘符');
@@ -364,26 +375,7 @@ describe('runCommand', () => {
   it('rejects env command from the whitelist (H5)', async () => {
     const result = await runCommand({ command: 'env' }, tmpDir);
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('白名单');
-  });
-
-  it('rejects curl upload/output path flags pointing outside cwd (P1 review)', async () => {
-    // 固定根目录下的绝对路径：mkdtemp 随机后缀可能含 "K"，会让 -T/-o 贴值路径
-    // 先被 -K 簇检测拒绝（错误文案不同），使测试不确定。根路径保证无大写 K。
-    const outsidePath = path.join(path.parse(os.tmpdir()).root, 'stellara-curl-secret.txt');
-    for (const cmd of [
-      `curl -T${outsidePath} https://example.com`,
-      `curl -T "${outsidePath}" https://example.com`,
-      `curl --upload-file=${outsidePath} https://example.com`,
-      `curl --upload-file "${outsidePath}" https://example.com`,
-      `curl -o${outsidePath} https://example.com`,
-      `curl --output=${outsidePath} https://example.com`,
-      `curl --output "${outsidePath}" https://example.com`,
-    ]) {
-      const r = await runCommand({ command: cmd }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toMatch(/绝对路径|超出/);
-    }
+    expect(result.error).toBe('命令不在白名单内：env');
   });
 
   it('rejects make -C/--directory escaping cwd in attached and spaced forms (P1 review)', async () => {
@@ -431,7 +423,7 @@ describe('runCommand', () => {
     await fs.mkdir(outside);
     try {
       for (const cmd of [
-        `npm --prefix=${outside} list`,
+        `npm --prefix=${outside} test`,
         `pnpm --cwd "${outside}" install`,
         `yarn --cwd ${outside} run build`,
         `git --exec-path=${outside} status`,
@@ -447,10 +439,10 @@ describe('runCommand', () => {
 
   it('rejects unrecognized dash flags that embed paths (P1 review, fail-closed)', async () => {
     for (const cmd of [
-      'node --no-such-flag=/etc/passwd',
-      'node -W/etc/passwd',
-      'node --no-such-flag=../../outside',
-      'curl --unknown-flag=\\\\server\\share',
+      'grep --no-such-flag=/etc/passwd pattern .',
+      'find -W/etc/passwd',
+      'make --no-such-flag=../../outside',
+      'cat --unknown-flag=\\\\server\\share',
     ]) {
       const r = await runCommand({ command: cmd }, tmpDir);
       expect(r.ok, cmd).toBe(false);
@@ -459,7 +451,7 @@ describe('runCommand', () => {
   });
 
   it('keeps boolean flags and genuine non-file tokens allowed (P1 review)', async () => {
-    const version = await runCommand({ command: 'node --version' }, tmpDir);
+    const version = await runCommand({ command: 'git --version' }, tmpDir);
     expect(version.ok).toBe(true);
 
     await fs.mkdir(path.join(tmpDir, 'sub'));
@@ -477,9 +469,8 @@ describe('runCommand', () => {
     expect(makeBuild.ok).toBe(true);
     expect(makeBuild.output).toContain('built');
 
-    const curlOut = await runCommand({ command: 'curl --version -o out.txt' }, tmpDir);
-    expect(curlOut.ok).toBe(true);
-    expect(curlOut.error ?? '').not.toMatch(/超出|绝对路径|不允许/);
+    const gitLog = await runCommand({ command: 'git log --oneline --no-color' }, tmpDir);
+    expect(gitLog.error ?? '').not.toMatch(/超出|绝对路径|不允许/);
   });
 
   it('rejects a separator-less symlink escaping cwd (P1 review)', async () => {
@@ -520,12 +511,11 @@ describe('runCommand', () => {
 
   it('rejects non-http(s) URL schemes (security follow-up)', async () => {
     for (const cmd of [
-      'curl file:///etc/passwd',
-      'curl "file:///etc/passwd"',
-      'curl FILE:///etc/passwd',
-      'curl file:/etc/passwd',
-      'curl ftp://example.com/secret',
-      'curl --url file:///etc/passwd',
+      'git clone file:///etc/passwd',
+      'git clone "file:///etc/passwd"',
+      'git clone FILE:///etc/passwd',
+      'git clone file:/etc/passwd',
+      'git clone ftp://example.com/secret',
     ]) {
       const r = await runCommand({ command: cmd }, tmpDir);
       expect(r.ok, cmd).toBe(false);
@@ -535,9 +525,9 @@ describe('runCommand', () => {
 
   it('keeps http(s) URLs and non-URL args allowed', async () => {
     for (const cmd of [
-      'curl --version https://example.com',
-      'curl --version "HTTP://example.com"',
-      'node --version',
+      'git --version https://example.com',
+      'git --version "HTTP://example.com"',
+      'npm --version',
     ]) {
       const r = await runCommand({ command: cmd }, tmpDir);
       expect(r.ok, cmd).toBe(true);
@@ -549,10 +539,10 @@ describe('runCommand', () => {
     process.env.LEAKY_TOKEN = 'tok';
     try {
       await fs.writeFile(
-        path.join(tmpDir, 'dump.js'),
-        "console.log((process.env.STELLARA_TEST_LEAK ?? 'none') + ' ' + (process.env.LEAKY_TOKEN ?? 'none'))",
+        path.join(tmpDir, 'Makefile'),
+        'all:\n\t@printf \'%s %s\\n\' "$${STELLARA_TEST_LEAK:-none}" "$${LEAKY_TOKEN:-none}"\n',
       );
-      const result = await runCommand({ command: 'node dump.js' }, tmpDir);
+      const result = await runCommand({ command: 'make all' }, tmpDir);
       expect(result.ok).toBe(true);
       expect(result.output.trim()).toBe('none none');
     } finally {
@@ -563,12 +553,9 @@ describe('runCommand', () => {
 
   it('rejects @-form paths and mid-token @ paths (final re-review A1)', async () => {
     for (const cmd of [
-      'curl --version -d @/etc/hosts https://example.com',
-      'curl --version --data-urlencode name@/etc/hosts https://example.com',
-      'curl --version --url-query name@/etc/hosts https://example.com',
-      'curl --version -w @/etc/hosts',
-      'curl --version --write-out=@/etc/hosts https://example.com',
-      'curl --version --data-binary @/etc/hosts https://example.com',
+      'grep -f @/etc/hosts pattern .',
+      'sed -f @/etc/hosts',
+      'make @/etc/hosts',
       'clang @/etc/passwd',
       'clang name@/etc/passwd',
       'clang @C:evil',
@@ -576,31 +563,6 @@ describe('runCommand', () => {
       const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
       expect(r.ok, cmd).toBe(false);
       expect(r.error ?? '', cmd).toMatch(/绝对路径|超出|盘符/);
-    }
-  });
-
-  it('rejects curl -K/--config outright (final re-review A2)', async () => {
-    for (const cmd of [
-      'curl -K /etc/hosts https://example.com',
-      'curl --version -K/etc/hosts https://example.com',
-      'curl --config=/etc/hosts https://example.com',
-      'curl --config /etc/hosts https://example.com',
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toContain('不允许：-K/--config 可读取任意配置');
-    }
-  });
-
-  it('rejects sqlite3 .read/.import dot-commands with absolute paths (final re-review A3)', async () => {
-    for (const cmd of [
-      'sqlite3 -cmd ".read /etc/passwd" :memory:',
-      'sqlite3 :memory: ".import /etc/passwd t"',
-      "sqlite3 -cmd '.read /etc/passwd' :memory:",
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toContain('不允许');
     }
   });
 
@@ -617,24 +579,17 @@ describe('runCommand', () => {
     }
   });
 
-  it('allows legitimate curl/git forms from the re-review (final re-review A)', async () => {
-    for (const cmd of [
-      'curl --version -o out.txt https://example.com',
-      'curl --version -d name=value https://example.com',
-    ]) {
-      const r = await runCommand({ command: cmd }, tmpDir);
-      expect(r.error ?? '', cmd).not.toMatch(/超出|绝对路径|不允许|私网/);
-    }
+  it('allows legitimate git forms from the re-review (final re-review A)', async () => {
     const status = await runCommand({ command: 'git status' }, tmpDir);
-    expect(status.error ?? '').not.toMatch(/超出|绝对路径|不允许|私网/);
+    expect(status.error ?? '').not.toMatch(/超出|绝对路径|不允许|私网|未允许的子命令/);
   });
 
   it('rejects private/reserved URL destinations (final re-review B)', async () => {
     for (const cmd of [
-      'curl --version http://169.254.169.254/',
-      'curl --version http://127.0.0.1:8080/',
-      'curl --version --url=http://10.0.0.1/',
-      'curl --version http://[::ffff:7f00:1]/',
+      'git clone http://169.254.169.254/',
+      'git clone http://127.0.0.1:8080/',
+      'git clone http://10.0.0.1/',
+      'git clone http://[::ffff:7f00:1]/',
     ]) {
       const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
       expect(r.ok, cmd).toBe(false);
@@ -643,12 +598,12 @@ describe('runCommand', () => {
   });
 
   it('allows public URL destinations and fails closed on DNS errors (final re-review B)', async () => {
-    const ok = await runCommand({ command: 'curl --version https://example.com' }, tmpDir);
+    const ok = await runCommand({ command: 'git --version https://example.com' }, tmpDir);
     expect(ok.ok).toBe(true);
 
     mockDns.lookup.mockRejectedValueOnce(new Error('ENOTFOUND'));
     const fail = await runCommand(
-      { command: 'curl --version https://maybe-evil.example.com/' },
+      { command: 'git --version https://maybe-evil.example.com/' },
       tmpDir,
     );
     expect(fail.ok).toBe(false);
@@ -657,138 +612,16 @@ describe('runCommand', () => {
 
   it('allows known non-path flags containing slashes (final re-review C)', async () => {
     for (const cmd of [
-      'curl --version --header=Referer:https://x',
-      'curl --version -H',
-      'curl --version --referer=',
       'git log --grep=fix/a',
       'git log -Sfoo/bar',
+      'git log --pretty=format:%h/%s',
       'rg --glob=!**/dist/** pattern .',
       'grep --exclude=**/vendor/** pattern .',
-      'git log --pretty=format:%h/%s',
       'cmake -DCMAKE_BUILD_TYPE=Release --version',
     ]) {
       const r = await runCommand({ command: cmd, timeoutMs: 3000 }, tmpDir);
       expect(r.error ?? '', cmd).not.toMatch(/含路径|超出工作目录|绝对路径|不允许/);
     }
-  });
-
-  it('rejects sqlite3 dot-commands with quoted absolute paths (bypass round)', async () => {
-    const absSql = path.join(os.tmpdir(), 'evil.sql');
-    const absCsv = path.join(os.tmpdir(), 'evil.csv');
-    for (const cmd of [
-      `sqlite3 :memory: ".read '${absSql}'"`,
-      `sqlite3 :memory: ".import '${absCsv}' t"`,
-      `sqlite3 :memory: '.read "${absSql}"'`,
-      `sqlite3 :memory: ".output '${absSql}'"`,
-      `sqlite3 :memory: '.once "${absSql}"'`,
-      'sqlite3 :memory: ".read \'../outside.sql\'"',
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toContain('sqlite3 .read/.import/.output/.once');
-    }
-  });
-
-  it('does not execute a rejected sqlite3 .output dot-command (marker file)', async () => {
-    const marker = path.join(os.tmpdir(), `stellara-sqlite-marker-${Date.now()}`);
-    try {
-      const r = await runCommand(
-        { command: `sqlite3 :memory: ".output '${marker}'"`, timeoutMs: 2000 },
-        tmpDir,
-      );
-      expect(r.ok).toBe(false);
-      expect(r.error ?? '').toContain('sqlite3 .read/.import/.output/.once');
-      expect(await fs.stat(marker).catch(() => null)).toBeNull();
-    } finally {
-      await fs.rm(marker, { force: true });
-    }
-  });
-
-  it('rejects abbreviated sqlite3 dot-commands targeting outside paths (abbreviation bypass)', async () => {
-    const absSql = path.join(os.tmpdir(), 'evil-abbrev.sql');
-    const absCsv = path.join(os.tmpdir(), 'evil-abbrev.csv');
-    const marker = path.join(os.tmpdir(), `stellara-sqlite-abbrev-${Date.now()}.out`);
-    try {
-      for (const cmd of [
-        `sqlite3 :memory: ".rea '${absSql}'"`,
-        `sqlite3 :memory: '.rea "${absSql}"'`,
-        `sqlite3 :memory: ".imp '${absCsv}' t"`,
-        `sqlite3 :memory: ".onc '${marker}'"`,
-        `sqlite3 :memory: ".out ${marker}"`,
-        'sqlite3 :memory: ".rea \'../outside.sql\'"',
-        `sqlite3 :memory: ".REA '${absSql}'"`,
-      ]) {
-        const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-        expect(r.ok, cmd).toBe(false);
-        expect(r.meta, cmd).toBeUndefined();
-        expect(r.error ?? '', cmd).toContain('sqlite3 .read/.import/.output/.once');
-      }
-      // .out 若被执行会写文件；验证拒绝后 marker 不存在
-      expect(await fs.stat(marker).catch(() => null)).toBeNull();
-    } finally {
-      await fs.rm(marker, { force: true });
-    }
-
-    const benign = await runCommand(
-      { command: 'sqlite3 :memory: "select 1"', timeoutMs: 2000 },
-      tmpDir,
-    );
-    expect(benign.ok).toBe(true);
-    expect(benign.output.trim()).toBe('1');
-  });
-
-  it('rejects curl header/referer @file forms and allows plain header values (bypass round)', async () => {
-    for (const cmd of [
-      'curl --version -H@/etc/passwd',
-      'curl --version --header=@/etc/passwd https://example.com',
-      'curl --version -H @/etc/passwd',
-      'curl --version -H@../outside.txt',
-      'curl --version -e@/etc/passwd',
-      'curl --version --referer=@/etc/passwd',
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toMatch(/绝对路径|超出|盘符/);
-    }
-    for (const cmd of [
-      "curl --version -H 'Accept: application/json'",
-      'curl --version --header=Referer:https://x',
-      'curl --version --referer=',
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(true);
-    }
-  });
-
-  it('rejects curl -K hidden in short-option clusters (bypass round)', async () => {
-    for (const cmd of [
-      'curl --version -sK evil.cfg https://example.com',
-      'curl --version -sOK cfg https://example.com',
-      'curl --version -Ks cfg https://example.com',
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toContain('不允许：-K/--config 可读取任意配置');
-    }
-    const ok = await runCommand({ command: 'curl --version -sS https://example.com' }, tmpDir);
-    expect(ok.ok).toBe(true);
-  });
-
-  it('rejects curl -K hidden in digit/# short-option clusters (abbreviation bypass)', async () => {
-    for (const cmd of [
-      'curl -s1K cfg',
-      'curl -#K cfg',
-      'curl -sOK cfg',
-      'curl --version -s1K cfg https://example.com',
-      'curl --version -#K cfg https://example.com',
-    ]) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.meta, cmd).toBeUndefined();
-      expect(r.error ?? '', cmd).toContain('不允许：-K/--config 可读取任意配置');
-    }
-    const ok = await runCommand({ command: 'curl --version -sS https://example.com' }, tmpDir);
-    expect(ok.ok).toBe(true);
   });
 
   it('rejects GIT_SSH_COMMAND and other git exec env overrides (env injection)', async () => {
@@ -811,7 +644,7 @@ describe('runCommand', () => {
       ]) {
         const r = await runCommand(
           {
-            command: 'git ls-remote git@example.invalid:repo',
+            command: 'git status',
             env: { [key]: `sh -c "touch ${marker}"` },
             timeoutMs: 1000,
           },
@@ -871,21 +704,6 @@ describe('runCommand', () => {
     }
   });
 
-  it('rejects scheme-less and half-slash curl destinations (bypass round)', async () => {
-    for (const cmd of ['curl 127.0.0.1:9', 'curl http:/127.0.0.1:9/', 'curl 169.254.169.254']) {
-      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
-      expect(r.ok, cmd).toBe(false);
-      expect(r.error ?? '', cmd).toContain('不允许访问私网/保留地址');
-    }
-    const ok = await runCommand({ command: 'curl --version https://example.com' }, tmpDir);
-    expect(ok.ok).toBe(true);
-    const okOut = await runCommand(
-      { command: 'curl --version -o out.txt https://example.com' },
-      tmpDir,
-    );
-    expect(okOut.ok).toBe(true);
-  });
-
   it('rejects cmake -D values with absolute or .. paths (bypass round)', async () => {
     for (const cmd of [
       'cmake -DCMAKE_TOOLCHAIN_FILE=/abs/toolchain.cmake --version',
@@ -901,6 +719,125 @@ describe('runCommand', () => {
       tmpDir,
     );
     expect(ok.error ?? '').not.toMatch(/不允许|含路径|超出|绝对路径/);
+  });
+});
+
+describe('runCommand structural policy (executable + subcommand allowlist)', () => {
+  it.each([
+    ['node -e', 'node -e "1+1"'],
+    ['node script', 'node evil.js'],
+    ['python script', 'python x.py'],
+    ['python3 script', 'python3 x.py'],
+    ['python3.11 script', 'python3.11 x.py'],
+    ['sh', 'sh script.sh'],
+    ['bash', 'bash script.sh'],
+    ['zsh', 'zsh script.zsh'],
+    ['ruby', 'ruby x.rb'],
+    ['perl', 'perl x.pl'],
+    ['bun', 'bun run evil.ts'],
+    ['deno', 'deno run evil.ts'],
+    ['npx', 'npx evil'],
+    ['curl', 'curl https://example.com'],
+    ['wget', 'wget https://example.com'],
+    ['nc', 'nc -l 1234'],
+    ['ncat', 'ncat -l 1234'],
+    ['ssh', 'ssh example.com'],
+    ['scp', 'scp a.txt example.com:b.txt'],
+    ['rsync', 'rsync -a a b'],
+    ['ftp', 'ftp example.com'],
+    ['telnet', 'telnet example.com'],
+    ['sqlite3', 'sqlite3 :memory: "select 1"'],
+  ])('rejects removed executable: %s', async (_label: string, command: string) => {
+    const r = await runCommand({ command }, tmpDir);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(`命令不在白名单内：${command.split(' ')[0]}`);
+  });
+
+  it('does not grant safe no-op forms to removed interpreters/network tools', async () => {
+    for (const cmd of ['python --version', 'python3 -v', 'node -v', 'npx --version', 'curl --version']) {
+      const r = await runCommand({ command: cmd }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error, cmd).toBe(`命令不在白名单内：${cmd.split(' ')[0]}`);
+    }
+  });
+
+  it.each([
+    ['git frobnicate', 'git frobnicate'],
+    ['npm exec', 'npm exec foo'],
+    ['npm x', 'npm x foo'],
+    ['pnpm dlx', 'pnpm dlx foo'],
+    ['yarn create', 'yarn create app'],
+    ['yarn init', 'yarn init'],
+    ['cargo publish', 'cargo publish'],
+    ['go install', 'go install ./...'],
+    ['pip uninstall', 'pip uninstall x'],
+    ['pip3 download', 'pip3 download x'],
+    ['xcodebuild archive', 'xcodebuild archive'],
+    ['gradle wrapper', 'gradle wrapper'],
+    ['mvn deploy', 'mvn deploy'],
+    ['swift repl', 'swift repl'],
+  ])('rejects disallowed subcommand: %s', async (_label: string, command: string) => {
+    const r = await runCommand({ command }, tmpDir);
+    expect(r.ok).toBe(false);
+    const [exe, sub] = command.split(' ');
+    expect(r.error).toBe(`未允许的子命令：${exe} ${sub}`);
+  });
+
+  it.each([
+    'git status',
+    'git log',
+    'npm run build',
+    'pnpm test',
+    'cargo clippy',
+    'go test ./...',
+    'make build',
+    'pip list',
+    'npm --version',
+    'git --version',
+    'git config --get user.name',
+    'git config --list',
+    'git -C . status',
+    'npm --prefix . test',
+  ])('passes policy for allowlisted form: %s', async (command: string) => {
+    const r = await runCommand({ command }, tmpDir);
+    expect(r.error ?? '').not.toMatch(/命令不在白名单内|未允许的子命令|不允许：git config/);
+  });
+
+  it('allows universal safe no-op forms for whitelisted executables', async () => {
+    for (const cmd of ['npm --version', 'npm -v', 'git --version', 'git -v', 'make -h']) {
+      const r = await runCommand({ command: cmd, timeoutMs: 5000 }, tmpDir);
+      expect(r.error ?? '', cmd).not.toMatch(/命令不在白名单内|未允许的子命令/);
+    }
+  });
+
+  it('resolves the subcommand after value-taking flags', async () => {
+    const r = await runCommand({ command: 'git -C . frobnicate' }, tmpDir);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('未允许的子命令：git frobnicate');
+
+    const r2 = await runCommand({ command: 'npm --prefix . exec foo' }, tmpDir);
+    expect(r2.ok).toBe(false);
+    expect(r2.error).toBe('未允许的子命令：npm exec');
+  });
+
+  it('allows read-only git config queries', async () => {
+    for (const cmd of ['git config --get user.name', 'git config --list', 'git config -l']) {
+      const r = await runCommand({ command: cmd }, tmpDir);
+      expect(r.error ?? '', cmd).not.toMatch(/命令不在白名单内|未允许的子命令|不允许：git config/);
+    }
+  });
+
+  it('rejects git config writes', async () => {
+    for (const cmd of [
+      'git config user.name Foo',
+      'git config --global user.name Foo',
+      'git config --unset user.name',
+      'git config --add core.foo bar',
+    ]) {
+      const r = await runCommand({ command: cmd }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toContain('不允许：git config 仅允许只读查询');
+    }
   });
 });
 

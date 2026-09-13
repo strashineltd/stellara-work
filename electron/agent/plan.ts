@@ -20,8 +20,9 @@ function darwinPlatformBlock(info: AgentPlatformInfo): string {
 - 操作系统：macOS（${info.arch === 'arm64' ? 'Apple 芯片 arm64' : 'Intel x64'}）
 - 命令语法：POSIX（ls/cat/grep/find 等），不是 Windows 命令
 - 路径风格：正斜杠，工作目录就是项目根目录
-- 可用 macOS 开发工具：swift、swiftc、xcrun、xcodebuild、brew、plutil、open、sqlite3、make、clang
-- 禁止使用的命令（不在白名单，会直接失败）：sh、bash、zsh、osascript、sudo、rm、mv、cp、curl -o 下载到外部路径
+- 可用 macOS 开发工具：swift、swiftc、xcrun、xcodebuild、brew、plutil、open、make、clang
+- 禁止使用的命令（不在白名单，会直接失败）：node、python、sh、bash、zsh、ruby、perl、osascript、sudo、curl、wget、ssh、scp、rsync、rm、mv、cp
+- 联网获取资源请用 web_fetch（或用浏览器工具），不要尝试 curl/wget
 - 查看系统信息：sw_vers、sysctl、uname 是只读安全的`;
 }
 
@@ -29,8 +30,9 @@ function darwinPlatformBlock(info: AgentPlatformInfo): string {
 function win32PlatformBlock(info: AgentPlatformInfo): string {
   return `当前运行环境：
 - 操作系统：Windows（${info.arch}）
-- 命令语法：Windows 命令（npm/node/git 等），路径用反斜杠
-- 可用工具：npm、npx、node、git、python、where、findstr`;
+- 命令语法：Windows 命令（npm/git 等），路径用反斜杠
+- 可用工具：npm、pnpm、yarn、git、where、findstr、pip
+- node/python/npx 等解释器与 curl 等网络工具已移出白名单；联网请用 web_fetch`;
 }
 
 export function platformPromptBlock(info: AgentPlatformInfo): string {
@@ -73,7 +75,7 @@ export const BUILD_MODE_SYSTEM_PROMPT = `你现在处于 BUILD MODE（执行模�
 - read_file：读取文件（支持 offset/limit 行范围读取）
 - write_file：写入整个文件（覆盖）
 - edit_file：精确文本替换（默认要求唯一匹配，replaceAll=true 可替换所有匹配）
-- run_command：执行 shell 命令（有白名单限制）
+- run_command：执行包管理/构建/测试/版本控制等白名单命令（子命令受限；解释器与网络工具已移除，联网请用 web_fetch）
 - search_files：glob 模式搜索文件名
 - search_content：文本/正则搜索文件内容（regex=true 启用正则）
 - list_files：列出目录树

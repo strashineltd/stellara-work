@@ -98,7 +98,7 @@ async function main() {
 
   const commandResult = await invokeTool(
     'run_command',
-    { command: 'node -v', timeoutMs: 5000 },
+    { command: 'npm --version', timeoutMs: 5000 },
     cwd,
   );
   console.log(`  run_command: ${commandResult.ok ? '✓' : '✗'} (${commandResult.output.trim()})`);

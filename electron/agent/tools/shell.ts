@@ -8,44 +8,88 @@ import { checkUrlDestination } from '../../security/net-policy';
 /**
  * 命令白名单（安全子集）。
  *
- * 移除了破坏性命令（del, rmdir, move, ren, copy, attrib, rm, mv, cp）。
- * 只保留只读/安全的开发命令。
+ * 结构性收敛：
+ * - 移除解释器/运行时（node/python/sh/bash/zsh/ruby/perl/bun/deno/npx…）——
+ *   一行命令即可执行任意代码，任何参数启发式都无法约束；
+ * - 移除裸网络工具（curl/wget/nc/ncat/ssh/scp/rsync/ftp/telnet/sqlite3）——
+ *   网络出口统一走受控的 web_fetch / 浏览器工具（含 SSRF 校验）；
+ * - 仍移除破坏性命令（del, rmdir, move, ren, copy, attrib, rm, mv, cp）。
+ *
+ * 保留的开发工具（npm/git/cargo/go/make/…）另受子命令白名单约束（见 SUBCOMMAND_ALLOWLIST）。
  * 不包含 Windows cmd 内建命令（echo, dir, type, cd, md, rd）。
  */
 const ALLOWED_COMMANDS_WIN = new Set([
-  // 包管理 / 运行时
-  'npm', 'npx', 'pnpm', 'yarn', 'node', 'corepack',
+  // 包管理 / 构建（子命令受限）
+  'npm', 'pnpm', 'yarn', 'corepack',
   // 版本控制
   'git',
   // 只读文件操作
   'where', 'findstr',
   // 系统信息（只读）
   'whoami', 'systeminfo', 'tasklist', 'ver', 'hostname',
-  // 开发工具
-  'python', 'pip', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
+  // 开发 / 构建工具
+  'pip', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
 ]);
 
 const ALLOWED_COMMANDS_POSIX = new Set([
-  'npm', 'npx', 'pnpm', 'yarn', 'node', 'corepack',
+  'npm', 'pnpm', 'yarn', 'corepack',
   'git',
   // 只读文件操作
   'ls', 'cat', 'head', 'tail', 'grep', 'find', 'rg',
   'pwd', 'whoami', 'uname', 'which', 'true', 'false', 'test',
-  // 开发工具
-  'python', 'python3', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
+  // 开发 / 构建工具
+  'pip', 'pip3', 'cargo', 'rustc', 'rustup', 'go', 'java', 'javac', 'gradle', 'mvn',
   // 文本处理（只读）
   'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'diff',
   // macOS / Linux 构建链
   'make', 'cmake', 'ninja', 'clang', 'clang++', 'cc', 'gcc', 'g++',
   // macOS 专属开发命令
   'swift', 'swiftc', 'swiftformat', 'swiftlint', 'xcrun', 'xcodebuild', 'brew',
-  'plutil', 'open', 'sqlite3', 'mdls',
+  'plutil', 'open', 'mdls',
   // macOS 系统信息（只读）
   'sw_vers', 'sysctl', 'defaults', 'diskutil',
   // 只读系统信息（POSIX / macOS）
   'stat', 'du', 'df', 'file',
-  // 网络（只读语义：请求资源；下载写文件仍走 run_command 审批）
-  'curl',
+]);
+
+/**
+ * 子命令白名单（按 executable basename）。
+ * 第一个非旗标 token 必须命中；`-v/--version/-h/--help` 作为首参数时免检（safe form）。
+ * 未列出的 executable（ls/cat/grep/make/cmake 等）不要求子命令。
+ */
+const PACKAGE_MANAGER_SUBCOMMANDS = [
+  'install', 'i', 'ci', 'run', 'test', 't', 'build', 'lint', 'typecheck', 'format', 'outdated', 'audit',
+];
+
+const SUBCOMMAND_ALLOWLIST: Record<string, ReadonlySet<string>> = {
+  git: new Set([
+    'status', 'diff', 'log', 'show', 'branch', 'add', 'commit', 'checkout', 'switch',
+    'restore', 'stash', 'pull', 'push', 'fetch', 'merge', 'rebase', 'cherry-pick',
+    'tag', 'remote', 'rev-parse', 'ls-files', 'rev-list', 'describe', 'config',
+    'blame', 'grep', 'clean', 'init', 'clone',
+  ]),
+  npm: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
+  pnpm: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
+  yarn: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
+  pip: new Set(['install', 'list', 'show', 'freeze']),
+  pip3: new Set(['install', 'list', 'show', 'freeze']),
+  cargo: new Set(['build', 'test', 'check', 'clippy', 'fmt', 'run', 'bench', 'doc']),
+  go: new Set(['build', 'test', 'run', 'vet', 'fmt', 'mod', 'list', 'env']),
+  xcodebuild: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
+  gradle: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
+  mvn: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
+  swift: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
+};
+
+/** 通用 safe form：版本/帮助查询（单独使用或作为首参数时免子命令检查） */
+const SAFE_NOOP_FLAGS = new Set(['-v', '--version', '-h', '--help']);
+
+/** git config 只读查询旗标（其余带赋值的写法一律拒绝） */
+const GIT_CONFIG_READ_FLAGS = new Set(['-l', '--list']);
+
+/** git config 显式写操作旗标（--get/--list/-l 之外的写路径全部拒绝） */
+const GIT_CONFIG_WRITE_FLAGS = new Set([
+  '--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section', '--edit', '-e',
 ]);
 
 function allowedCommands(): Set<string> {
@@ -73,20 +117,10 @@ const PIP_PATH_FLAGS = new Set([
 const PATH_FLAGS: Record<string, Set<string>> = {
   git: new Set(['-C', '--work-tree', '--git-dir', '--exec-path', '--output']),
   npm: new Set(['--prefix', '-C', '--userconfig', '--globalconfig', '--cache']),
-  npx: new Set(['--prefix', '-C', '--userconfig', '--cache']),
   pnpm: new Set(['--prefix', '-C', '--dir', '--cwd', '--store-dir', '--state-dir', '--modules-dir', '--global-dir']),
   yarn: new Set(['--cwd', '--prefix', '--modules-folder', '--cache-folder', '--global-folder', '--use-yarnrc']),
-  node: new Set(['-r', '--require', '--import', '--loader', '--experimental-loader', '--env-file']),
-  python: new Set(), // python 的文件参数由 validateFileArgs 处理；-m 是模块名不是路径
-  python3: new Set(),
   pip: PIP_PATH_FLAGS,
   pip3: PIP_PATH_FLAGS,
-  curl: new Set([
-    '-T', '--upload-file', '-o', '--output', '-K', '--config', '-b', '--cookie',
-    '-c', '--cookie-jar', '-D', '--dump-header', '--data', '--data-binary',
-    '--data-ascii', '--data-raw', '--json', '-F', '--form',
-    '-d', '--data-urlencode', '--url-query', '-w', '--write-out',
-  ]),
   make: new Set(['-C', '--directory', '-f', '--file', '--makefile', '-I', '--include-dir']),
   cmake: new Set(['-S', '-B', '-C', '--source', '--build', '--install']),
   ninja: new Set(['-C', '-f']),
@@ -115,7 +149,6 @@ const PATH_FLAGS: Record<string, Set<string>> = {
   sort: new Set(['-o', '--output']),
   file: new Set(['-f', '--files-from']),
   find: new Set(['-fprint', '-fprint0', '-fprintf', '-fls']),
-  sqlite3: new Set(['-init']),
   plutil: new Set(['-o', '--output']),
   diff: new Set(['--from-file', '--to-file']),
 };
@@ -133,16 +166,6 @@ interface NonPathFlagSpec {
 }
 
 const NON_PATH_FLAGS: Record<string, NonPathFlagSpec[]> = {
-  curl: [
-    { flag: '--header', attached: true },
-    { flag: '-H', attached: true },
-    { flag: '--referer', attached: true },
-    { flag: '-e', attached: true },
-    { flag: '--user-agent', attached: true },
-    { flag: '-A', attached: true },
-    { flag: '-S' },
-    { flag: '-s' },
-  ],
   git: [
     { flag: '--grep', attached: true },
     { flag: '-S', attached: true },
@@ -158,15 +181,6 @@ const NON_PATH_FLAGS: Record<string, NonPathFlagSpec[]> = {
     { flag: '--include', attached: true },
   ],
   cmake: [{ flag: '-D', attached: true }],
-};
-
-/**
- * 取值“非路径”但支持 `@file` 文件读取的旗标（curl header/referer）：
- * 取值本身允许任意字符串（含 /、..），但 @ 之后的候选仍按文件路径做包含校验，
- * 防止 `-H@/abs` / `--header=@/abs` 把任意文件读进请求头外带。
- */
-const AT_FILE_NON_PATH_FLAGS: Record<string, string[]> = {
-  curl: ['--header', '-H', '--referer', '-e'],
 };
 
 function matchesNonPathFlag(arg: string, specs: NonPathFlagSpec[] | undefined): boolean {
@@ -284,7 +298,7 @@ async function validateContainedPath(
 
 /**
  * 提取 token 中 `@` 之后的候选路径（`@/abs`、`name@/abs`、`-d@/abs` 等）。
- * 编译器 response file、curl `name@file` 都以 @ 引入路径，需按路径语义复核。
+ * 编译器 response file 等以 @ 引入路径，需按路径语义复核。
  */
 function atPathCandidates(token: string): string[] {
   const out: string[] = [];
@@ -338,7 +352,7 @@ async function validatePathArg(arg: string, baseDir: string, root: string): Prom
 }
 
 /**
- * 已知路径旗标的值可能是直接路径，也可能带 `@`（curl -d @file）或 `key=value`
+ * 已知路径旗标的值可能是直接路径，也可能带 `@`（`-f @file`）或 `key=value`
  * （-F name=@file / --extern name=path）。逐个候选校验，任一候选越界即拒绝，
  * 避免剥离前缀后漏掉绝对路径（如 `-o /tmp/x=y`）。
  */
@@ -366,43 +380,6 @@ function flagTokenLooksLikePath(token: string): boolean {
       isDriveRelativePathArg(candidate) ||
       candidate.includes('..'),
   );
-}
-
-/**
- * 校验“非路径且支持 @file”的旗标取值：只对 @ 之后的候选做路径包含校验；
- * 不含 @ 的普通取值（如 `Accept: application/json`）保持放行。
- */
-async function checkAtFileFlagValue(
-  flags: string[],
-  arg: string,
-  next: string | undefined,
-  baseDir: string,
-  root: string,
-  exeBase: string,
-): Promise<string | null> {
-  for (const flag of flags) {
-    let value: string | undefined;
-    if (arg === flag) {
-      value = next;
-    } else if (arg.startsWith(flag + '=')) {
-      value = arg.slice(flag.length + 1);
-    } else if (!flag.startsWith('--') && arg.startsWith(flag) && arg.length > flag.length) {
-      value = arg.slice(flag.length);
-    }
-    if (value === undefined) continue;
-    if (!value.includes('@')) return null;
-    for (const candidate of atPathCandidates(value)) {
-      const err = await validateContainedPath(
-        candidate,
-        baseDir,
-        root,
-        `命令 ${exeBase} 的 ${flag} 参数`,
-      );
-      if (err) return err;
-    }
-    return null;
-  }
-  return null;
 }
 
 /**
@@ -462,43 +439,11 @@ async function validatePathFlags(
       continue;
     }
 
-    const atFileFlags = AT_FILE_NON_PATH_FLAGS[exeBase];
-    if (atFileFlags) {
-      const atErr = await checkAtFileFlagValue(atFileFlags, arg, args[i + 1], baseDir, root, exeBase);
-      if (atErr) return atErr;
-    }
-
     if (matchesNonPathFlag(arg, nonPathFlags)) continue;
 
     if (flagTokenLooksLikePath(arg)) {
       return `命令 ${exeBase} 的参数 "${arg}" 含路径，已按超出工作目录拒绝。`;
     }
-  }
-  return null;
-}
-
-/**
- * 校验 node/python 的文件参数（非 flag 的第一个参数）。
- * - node script.js → script.js 是文件路径
- * - node -e "code" → 不是文件路径（跳过）
- * - python script.py → script.py 是文件路径
- */
-async function validateFileArgs(
-  exe: string,
-  args: string[],
-  baseDir: string,
-  root: string,
-): Promise<string | null> {
-  const exeBase = path.basename(exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
-  if (!['node', 'python', 'python3'].includes(exeBase)) return null;
-
-  // 找到第一个非 flag 参数
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    // 跳过 flag
-    if (arg.startsWith('-')) continue;
-    // 这是文件参数
-    return validateContainedPath(arg, baseDir, root, `${exeBase} 的文件参数`);
   }
   return null;
 }
@@ -515,54 +460,12 @@ function findDisallowedUrlScheme(args: string[]): string | null {
 }
 
 /**
- * sqlite3 dot-command token（`\.\w+`），含 .read/.import/.output/.once 的唯一前缀
- * 缩写（.rea/.imp/.onc/.out，大小写不敏感；CLI 命令名扫描到首个非字母数字即结束）。
- */
-const SQLITE3_DOT_COMMAND_TOKEN_RE = /\.\w+/;
-
-/**
- * 参数中任意位置的绝对路径/越级特征：
- * - `/`、`\\` 位于 token 边界（行首/空白/`=`/`(`/`,`/`;`/`:` 或紧跟 dot-command）
- * - 盘符绝对路径（C:\ / C:/）与 UNC（\\\\）
- * - 任意位置的 `..`
- */
-const SQLITE3_ABS_PATH_RE = /(^|[\s=(,;:'"])[\\/]|\.\w+["']?[\\/]|[a-zA-Z]:[\\/]|\\\\/;
-const SQLITE3_DRIVE_RELATIVE_RE = /(^|[\s=(,;:'"])[a-zA-Z]:(?![\\/])/;
-
-/**
- * sqlite3 参数风险判定（fail-closed）：
- * 只要参数内出现 dot-command token，且同一参数内任意位置出现绝对路径（含盘符）
- * 或 `..`，即拒绝。不枚举命令名，避免被唯一前缀缩写/大小写/引号包裹绕过。
- * 引号会被 sqlite3 CLI 再次解析，故先去掉引号再判定。
- */
-function sqlite3ArgHasDotCommandWithEscape(arg: string): boolean {
-  const unquoted = arg.replace(/["']/g, '');
-  if (!SQLITE3_DOT_COMMAND_TOKEN_RE.test(unquoted)) return false;
-  return (
-    unquoted.includes('..') ||
-    SQLITE3_ABS_PATH_RE.test(unquoted) ||
-    SQLITE3_DRIVE_RELATIVE_RE.test(unquoted)
-  );
-}
-
-/**
  * 工具级显式拒绝（fail-closed）：无法安全解析其内容、且会读取任意文件或注入可执行配置的旗标。
- * - curl -K/--config：从任意路径读取配置（可再指向其他文件/输出路径）；-K 藏进短选项簇同样拒绝
  * - git -c/--config-env：注入 core.fsmonitor / credential.helper 等可执行配置
- * - sqlite3 .read/.import/.output/.once：读取/写入任意文件（含引号包裹的目标）
  * - cmake -D：取值可能指向工具链/预加载脚本（绝对路径或 .. 一律拒绝）
  * 返回错误文案，null 表示通过。
  */
 function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
-  if (exeBase === 'curl') {
-    for (const arg of args) {
-      // 任意单横线选项簇（字母/数字/#/. 等）中出现 K 都可能是 -K：
-      // /^-[A-Za-z]*K/ 会漏掉 -s1K、-#K。
-      if (arg.startsWith('--config') || /^-[^\s]*K/.test(arg)) {
-        return '不允许：-K/--config 可读取任意配置';
-      }
-    }
-  }
   if (exeBase === 'git') {
     for (const arg of args) {
       if (arg === '-c' || (arg.startsWith('-c') && !arg.startsWith('--'))) {
@@ -570,13 +473,6 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
       }
       if (arg === '--config-env' || arg.startsWith('--config-env=')) {
         return '不允许：git --config-env 可注入可执行配置（请使用专用 git 工具）。';
-      }
-    }
-  }
-  if (exeBase === 'sqlite3') {
-    for (const arg of args) {
-      if (sqlite3ArgHasDotCommandWithEscape(arg)) {
-        return '不允许：sqlite3 .read/.import/.output/.once 等 dot-command 可读写工作目录外文件。';
       }
     }
   }
@@ -605,6 +501,57 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   return null;
 }
 
+/**
+ * 子命令定位：跳过所有旗标；已知取值旗标（PATH_FLAGS）连同其取值一起跳过，
+ * 避免把 `git -C <dir> status` 的路径值当成子命令。
+ * 返回 null 表示没有非旗标 token（如 `xcodebuild -list`），调用方按免检处理。
+ */
+function firstNonFlagToken(exeBase: string, args: string[]): string | null {
+  const valueFlags = PATH_FLAGS[exeBase];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg.startsWith('-')) {
+      if (valueFlags?.has(arg)) i++;
+      continue;
+    }
+    return arg;
+  }
+  return null;
+}
+
+/**
+ * git config 只读约束：仅允许查询（显式 --get/--list/-l，或无赋值的单 key 读取），
+ * 带值赋值与已知写旗标（--add/--unset/--edit…）一律拒绝。
+ */
+function gitConfigWriteError(args: string[]): string | null {
+  const configIndex = args.indexOf('config');
+  const rest = configIndex === -1 ? args : args.slice(configIndex + 1);
+  if (rest.some((a) => GIT_CONFIG_READ_FLAGS.has(a) || a.startsWith('--get'))) return null;
+  if (rest.some((a) => GIT_CONFIG_WRITE_FLAGS.has(a))) {
+    return '不允许：git config 仅允许只读查询（--get/--list/-l）。';
+  }
+  const nonFlags = rest.filter((a) => !a.startsWith('-'));
+  if (nonFlags.length >= 2) {
+    return '不允许：git config 仅允许只读查询（--get/--list/-l）。';
+  }
+  return null;
+}
+
+/**
+ * 子命令白名单：首个非旗标 token 必须在 SUBCOMMAND_ALLOWLIST 内。
+ * `-v/--version/-h/--help` 作为首参数时无条件放行（safe form，版本/帮助为只读 no-op）。
+ */
+function subcommandError(exeBase: string, args: string[]): string | null {
+  const allowed = SUBCOMMAND_ALLOWLIST[exeBase];
+  if (!allowed) return null;
+  if (args.length > 0 && SAFE_NOOP_FLAGS.has(args[0]!)) return null;
+  const sub = firstNonFlagToken(exeBase, args);
+  if (sub === null) return null;
+  if (!allowed.has(sub)) return `未允许的子命令：${exeBase} ${sub}`;
+  if (exeBase === 'git' && sub === 'config') return gitConfigWriteError(args);
+  return null;
+}
+
 const HTTP_URL_RE = /^https?:\/\//i;
 
 /** 从参数中提取 http(s) URL（本身是 URL，或 `--flag=http://...` 形式的取值）。 */
@@ -615,98 +562,6 @@ function httpUrlCandidate(arg: string): string | null {
     if (eq !== -1) {
       const value = arg.slice(eq + 1);
       if (HTTP_URL_RE.test(value)) return value;
-    }
-  }
-  return null;
-}
-
-/** 会把取值当作网络目标（URL/代理）使用的 curl 旗标 */
-const CURL_URL_VALUE_FLAGS = new Set(['--url', '--proxy', '-x']);
-
-/**
- * curl 取值旗标：其后的 token 是取值而不是位置目标 URL（SSRF 扫描需跳过）。
- * 布尔旗标（-s/-S/--version 等）不在此列。
- */
-const CURL_VALUE_TAKING_FLAGS = new Set([
-  '-T', '--upload-file', '-o', '--output', '-K', '--config', '-b', '--cookie',
-  '-c', '--cookie-jar', '-D', '--dump-header', '--data', '--data-binary',
-  '--data-ascii', '--data-raw', '--json', '-F', '--form',
-  '-d', '--data-urlencode', '--url-query', '-w', '--write-out',
-  '--header', '-H', '--referer', '-e', '--user-agent', '-A',
-  '--proxy', '-x', '--proxy-user', '-u', '--user', '-m', '--max-time',
-  '--connect-timeout', '--retry', '--retry-delay', '--cacert', '--capath',
-  '--cert', '--key', '--resolve', '--interface', '--limit-rate',
-  '--unix-socket', '--oauth2-bearer', '--netrc-file',
-]);
-
-/** 需要做 SSRF 目标校验的网络类命令 */
-const NETWORK_COMMANDS = new Set(['curl']);
-
-/**
- * 归一化 curl 目标文本：
- * - `http(s)://...` 原样；
- * - 半斜杠 `http:/host` / `https:/host` 补成 `http://host`；
- * - 裸 `host[:port][/path]`（含 IP、IPv6 字面量）视为 `http://host...`。
- * 返回 null 表示无法归类为 http(s) 目标 —— 调用方必须失败关闭。
- */
-function normalizeNetworkDestination(raw: string): string | null {
-  const s = raw.trim();
-  if (!s || /\s/.test(s) || s.includes('\\')) return null;
-  if (HTTP_URL_RE.test(s)) return s;
-  const halfSlash = /^(https?):\/+(.*)$/i.exec(s);
-  if (halfSlash) return `${halfSlash[1]!.toLowerCase()}://${halfSlash[2]}`;
-  try {
-    if (!new URL(`http://${s}`).hostname) return null;
-  } catch {
-    return null;
-  }
-  return `http://${s}`;
-}
-
-/**
- * 对网络类命令（curl）的每个位置目标 / `--url` / 代理取值做 SSRF 校验：
- * 方案缺失（`127.0.0.1:9`）、半斜杠（`http:/127.0.0.1:9/`）与裸 IP 都会被归一化后再判定；
- * 无法归类为公网 http(s) 目标时失败关闭。
- */
-async function validateNetworkDestinations(
-  exeBase: string,
-  args: string[],
-): Promise<string | null> {
-  if (!NETWORK_COMMANDS.has(exeBase)) return null;
-
-  const candidates: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg.startsWith('-')) {
-      const eq = arg.indexOf('=');
-      if (arg.startsWith('--') && eq > 2) {
-        const flag = arg.slice(0, eq);
-        if (CURL_URL_VALUE_FLAGS.has(flag)) candidates.push(arg.slice(eq + 1));
-        continue;
-      }
-      if (CURL_VALUE_TAKING_FLAGS.has(arg)) {
-        const value = args[i + 1];
-        if (value !== undefined) {
-          if (CURL_URL_VALUE_FLAGS.has(arg)) candidates.push(value);
-          i++;
-        }
-        continue;
-      }
-      if (arg.startsWith('-x') && arg.length > 2) candidates.push(arg.slice(2));
-      continue;
-    }
-    candidates.push(arg);
-  }
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const normalized = normalizeNetworkDestination(candidate);
-    if (normalized === null) {
-      return `不允许：无法确认为公网 http(s) 目标 "${candidate}"，已拒绝。`;
-    }
-    const destination = await checkUrlDestination(normalized);
-    if (!destination.ok) {
-      return `不允许访问私网/保留地址：${candidate}`;
     }
   }
   return null;
@@ -811,7 +666,7 @@ function sanitizeEnv(
  * 子进程环境变量最小白名单（H5）：
  * 只保留命令运行所需的操作性变量。process.env 里的 STELLARA_*（模型密钥 /
  * 服务器密码 / 云 token）与 * _TOKEN/_SECRET/_PASSWORD/_API_KEY 一律不下传，
- * 避免 `node -p process.env` 之类转储实时密钥。
+ * 避免 npm 生命周期脚本等子进程转储实时密钥。
  */
 const CHILD_ENV_ALLOWLIST: ReadonlySet<string> = (() => {
   const keys = ['PATH', 'HOME', 'SHELL', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'TERM', 'TZ'];
@@ -891,13 +746,19 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     return {
       ok: false,
       output: '',
-      error: `命令未在白名单：${parsed.exe}。当前仅允许只读/安全的开发命令。`,
+      error: `命令不在白名单内：${parsed.exe}`,
     };
   }
 
   const forbiddenArg = findForbiddenToolArg(exeBase, parsed.args);
   if (forbiddenArg !== null) {
     return { ok: false, output: '', error: forbiddenArg };
+  }
+
+  // 子命令白名单：包管理/构建/版本控制命令只允许显式列出的子命令
+  const subErr = subcommandError(exeBase, parsed.args);
+  if (subErr !== null) {
+    return { ok: false, output: '', error: subErr };
   }
 
   const badSchemeArg = findDisallowedUrlScheme(parsed.args);
@@ -915,12 +776,6 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     }
   }
 
-  // 网络类命令（curl）的位置目标 / --url / 代理取值：覆盖无 scheme、半斜杠与裸 IP 形式
-  const networkErr = await validateNetworkDestinations(exeBase, parsed.args);
-  if (networkErr !== null) {
-    return { ok: false, output: '', error: networkErr };
-  }
-
   // 路径参数校验（通用：检测含路径分隔符的参数）
   for (const arg of parsed.args) {
     const err = await validatePathArg(arg, resolvedCwd, cwd);
@@ -930,10 +785,6 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
   // 带路径语义的 flag 校验（git -C, npm --prefix 等）
   const flagErr = await validatePathFlags(parsed.exe, parsed.args, resolvedCwd, cwd);
   if (flagErr) return { ok: false, output: '', error: flagErr };
-
-  // node/python 文件参数校验
-  const fileErr = await validateFileArgs(parsed.exe, parsed.args, resolvedCwd, cwd);
-  if (fileErr) return { ok: false, output: '', error: fileErr };
 
   const timeoutMs = args.timeoutMs ?? 30000;
 
@@ -1035,7 +886,7 @@ export const shellTools: OpenAITool[] = [
     function: {
       name: 'run_command',
       description:
-        '执行一个命令（无 shell）。仅允许白名单命令：npm/npx/node/git/ls/cat/grep/find/rg/python/cargo/go/make/clang 等只读和开发工具（macOS 还支持 swift/xcrun/xcodebuild/brew/plutil/open/sqlite3）。已移除破坏性命令（del/rm/mv/cp/rmdir/move）。不支持管道/重定向/变量展开/脚本解释器（sh/bash/osascript）。路径参数必须在工作目录内。',
+        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。解释器（node/python/sh/bash 等）与网络工具（curl/wget/ssh/scp 等）已整体移除：联网获取资源请用 web_fetch 或浏览器工具。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
       parameters: {
         type: 'object',
         properties: {
