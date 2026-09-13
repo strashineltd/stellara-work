@@ -328,6 +328,107 @@ describe('runResponsesLoop', () => {
     });
   });
 
+  describe('审批回调缺失时危险工具 fail-closed', () => {
+    const APPROVAL_UNAVAILABLE = '此操作需要用户批准，但当前上下文不支持审批（已拒绝）';
+
+    function toolCallStream(name: string, args: string): Array<Record<string, unknown>> {
+      return [
+        {
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: { type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: args, status: 'in_progress' },
+        },
+        {
+          type: 'response.function_call_arguments.done',
+          output_index: 0,
+          item_id: 'fc-1',
+          arguments: args,
+        },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-001',
+            object: 'response',
+            model: 'test',
+            status: 'completed',
+            output: [{ type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: args, status: 'completed' }],
+          },
+        },
+      ];
+    }
+
+    it('危险工具 + 无审批回调 → 不执行并返回审批不可用错误', async () => {
+      streamQueue.push(() => toolCallStream('write_file', '{"path":"blocked.txt","content":"x"}'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      for await (const _event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+      })) {
+      }
+
+      await expect(fs.stat(path.join(tmpDir, 'blocked.txt'))).rejects.toThrow();
+      const outputs = hub.getResponseItems().filter((item) => item.type === 'function_call_output');
+      expect(JSON.stringify(outputs)).toContain(APPROVAL_UNAVAILABLE);
+    });
+
+    it('危险工具 + 审批回调批准 → 正常执行', async () => {
+      streamQueue.push(() => toolCallStream('write_file', '{"path":"approved.txt","content":"ok"}'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const onApproval = vi.fn().mockResolvedValue(true);
+      for await (const _event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        onApproval,
+      })) {
+      }
+
+      expect(onApproval).toHaveBeenCalledTimes(1);
+      await expect(fs.readFile(path.join(tmpDir, 'approved.txt'), 'utf8')).resolves.toBe('ok');
+    });
+
+    it('非危险工具 + 无审批回调 → 正常执行', async () => {
+      await fs.writeFile(path.join(tmpDir, 'note.txt'), 'hello');
+      streamQueue.push(() => toolCallStream('read_file', '{"path":"note.txt"}'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const results: string[] = [];
+      for await (const event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+      })) {
+        if (event.type === 'tool_result' && event.toolResult) results.push(event.toolResult.name);
+      }
+
+      expect(results).toContain('read_file');
+    });
+
+    it('toolGuard 拒绝时不执行工具', async () => {
+      streamQueue.push(() => toolCallStream('write_file', '{"path":"guarded.txt","content":"x"}'));
+
+      const hub = new ContextHub('sess-001', tmpDir);
+      const toolGuard = vi.fn().mockReturnValue('超出 fileScopes（测试）');
+      for await (const _event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        toolGuard,
+      })) {
+      }
+
+      expect(toolGuard).toHaveBeenCalledWith('write_file', { path: 'guarded.txt', content: 'x' });
+      await expect(fs.stat(path.join(tmpDir, 'guarded.txt'))).rejects.toThrow();
+    });
+  });
+
   it('记忆注入携带会话所属项目 id（按项目检索项目记忆）', async () => {
     const hub = new ContextHub('sess-001', tmpDir);
     for await (const _ev of runResponsesLoop('测试任务', {

@@ -254,4 +254,125 @@ describe('runAnthropicAgentLoop', () => {
     }
     expect(contents.some((c) => c.includes('[输出截断'))).toBe(true);
   });
+
+  describe('审批回调缺失时危险工具 fail-closed', () => {
+    const APPROVAL_UNAVAILABLE = '此操作需要用户批准，但当前上下文不支持审批（已拒绝）';
+
+    function toolUseResponse(name: string, input: Record<string, unknown>) {
+      return {
+        id: 'msg-1',
+        type: 'message',
+        role: 'assistant',
+        model: 'custom-model',
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 12, output_tokens: 4 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name, input }],
+      };
+    }
+
+    function endTurnResponse() {
+      return {
+        id: 'msg-2',
+        type: 'message',
+        role: 'assistant',
+        model: 'custom-model',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 6 },
+        content: [{ type: 'text', text: '完成' }],
+      };
+    }
+
+    function lastToolResult(): string {
+      const secondRequest = mockCreate.mock.calls[1]![0];
+      const resultMessage = secondRequest.messages.find((message: { role: string; content: unknown }) =>
+        message.role === 'user' && Array.isArray(message.content)
+          && message.content.some((block: { type?: string }) => block.type === 'tool_result'));
+      return JSON.stringify(resultMessage.content);
+    }
+
+    it('危险工具 + 无审批回调 → 不执行并返回审批不可用错误', async () => {
+      mockCreate
+        .mockResolvedValueOnce(toolUseResponse('write_file', { path: 'blocked.txt', content: 'x' }))
+        .mockResolvedValueOnce(endTurnResponse());
+
+      const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+      for await (const _event of runAnthropicAgentLoop('任务', {
+        model,
+        cwd: workDir,
+        sessionId: 'sub-session',
+        contextHub: hub,
+        allowSubagents: false,
+        client: { create: mockCreate },
+      })) {
+      }
+
+      await expect(fs.stat(path.join(workDir, 'blocked.txt'))).rejects.toThrow();
+      expect(lastToolResult()).toContain(APPROVAL_UNAVAILABLE);
+    });
+
+    it('危险工具 + 审批回调批准 → 正常执行', async () => {
+      mockCreate
+        .mockResolvedValueOnce(toolUseResponse('write_file', { path: 'approved.txt', content: 'ok' }))
+        .mockResolvedValueOnce(endTurnResponse());
+
+      const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+      const onApproval = vi.fn().mockResolvedValue(true);
+      for await (const _event of runAnthropicAgentLoop('任务', {
+        model,
+        cwd: workDir,
+        sessionId: 'sub-session',
+        contextHub: hub,
+        allowSubagents: false,
+        client: { create: mockCreate },
+        onApproval,
+      })) {
+      }
+
+      expect(onApproval).toHaveBeenCalledTimes(1);
+      await expect(fs.readFile(path.join(workDir, 'approved.txt'), 'utf8')).resolves.toBe('ok');
+    });
+
+    it('非危险工具 + 无审批回调 → 正常执行', async () => {
+      mockCreate
+        .mockResolvedValueOnce(toolUseResponse('read_file', { path: 'note.txt' }))
+        .mockResolvedValueOnce(endTurnResponse());
+
+      const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+      const names: string[] = [];
+      for await (const event of runAnthropicAgentLoop('任务', {
+        model,
+        cwd: workDir,
+        sessionId: 'sub-session',
+        contextHub: hub,
+        allowSubagents: false,
+        client: { create: mockCreate },
+      })) {
+        if (event.type === 'tool_result' && event.toolResult) names.push(event.toolResult.name);
+      }
+
+      expect(names).toContain('read_file');
+    });
+
+    it('toolGuard 拒绝时不执行工具', async () => {
+      mockCreate
+        .mockResolvedValueOnce(toolUseResponse('write_file', { path: 'guarded.txt', content: 'x' }))
+        .mockResolvedValueOnce(endTurnResponse());
+
+      const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+      const toolGuard = vi.fn().mockReturnValue('超出 fileScopes（测试）');
+      for await (const _event of runAnthropicAgentLoop('任务', {
+        model,
+        cwd: workDir,
+        sessionId: 'sub-session',
+        contextHub: hub,
+        allowSubagents: false,
+        client: { create: mockCreate },
+        toolGuard,
+      })) {
+      }
+
+      expect(toolGuard).toHaveBeenCalledWith('write_file', { path: 'guarded.txt', content: 'x' });
+      await expect(fs.stat(path.join(workDir, 'guarded.txt'))).rejects.toThrow();
+    });
+  });
 });

@@ -34,6 +34,10 @@ export interface AnthropicLoopOptions {
   memoryProjectId?: string;
   signal?: AbortSignal;
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
+  /**
+   * 子代理执行护栏：返回非空字符串时拒绝执行该工具调用并回传错误。
+   */
+  toolGuard?: (name: string, args: Record<string, unknown>) => string | null;
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
   rolePrompt?: string;
   agentId?: string;
@@ -265,10 +269,24 @@ export async function* runAnthropicAgentLoop(
         }
       }
 
-      // 内置危险工具或 MCP 审批策略要求时，等待用户批准（无 onApproval 时保持现有直通行为）
+      const guardError = options.toolGuard?.(name, args);
+      if (guardError) {
+        const output = JSON.stringify({ ok: false, error: guardError });
+        outputs.push({ type: 'tool_result', tool_use_id: callId, content: output });
+        options.contextHub.addResponseItem({ type: 'function_call_output', call_id: callId, output });
+        continue;
+      }
+
+      // 内置危险工具或 MCP 审批策略要求时等待用户批准；缺少 onApproval 时 fail-closed 拒绝
       const requiresApproval =
         DANGEROUS_TOOLS.has(name) || (name.startsWith('mcp__') && (await mcpManager.requiresApproval(name)));
-      if (requiresApproval && options.onApproval) {
+      if (requiresApproval) {
+        if (!options.onApproval) {
+          const output = JSON.stringify({ ok: false, error: '此操作需要用户批准，但当前上下文不支持审批（已拒绝）' });
+          outputs.push({ type: 'tool_result', tool_use_id: callId, content: output });
+          options.contextHub.addResponseItem({ type: 'function_call_output', call_id: callId, output });
+          continue;
+        }
         const approved = await options.onApproval({ id: callId, type: 'function', function: { name, arguments: argsJson } });
         if (!approved) {
           const output = JSON.stringify({ ok: false, error: '用户拒绝了此操作' });

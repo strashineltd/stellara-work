@@ -65,6 +65,10 @@ export interface ResponsesLoopOptions {
    */
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
   /**
+   * 子代理执行护栏：返回非空字符串时拒绝执行该工具调用并回传错误。
+   */
+  toolGuard?: (name: string, args: Record<string, unknown>) => string | null;
+  /**
    * Plan 批准回调：plan 模式产出计划后暂停，等待用户批准。
    */
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
@@ -436,12 +440,42 @@ export async function* runResponsesLoop(
         }
       }
 
+      let args: Record<string, unknown>;
+      try {
+        args = JSON.parse(fc.arguments) as Record<string, unknown>;
+      } catch {
+        toolResults.push({
+          type: 'function_call_output',
+          call_id: fc.call_id,
+          output: JSON.stringify({ ok: false, error: '工具参数不是有效 JSON' }),
+        });
+        continue;
+      }
+
+      const guardError = options.toolGuard?.(fc.name, args);
+      if (guardError) {
+        toolResults.push({
+          type: 'function_call_output',
+          call_id: fc.call_id,
+          output: JSON.stringify({ ok: false, error: guardError }),
+        });
+        continue;
+      }
+
       // 检查是否需要审批：强制审批模式 / 内置危险工具 / MCP 策略（approval 配置）
       const needsApproval =
         forceApprovalMode ||
         DANGEROUS_TOOLS.has(fc.name) ||
         (fc.name.startsWith('mcp__') && (await mcpManager.requiresApproval(fc.name)));
-      if (needsApproval && onApproval) {
+      if (needsApproval) {
+        if (!onApproval) {
+          toolResults.push({
+            type: 'function_call_output',
+            call_id: fc.call_id,
+            output: JSON.stringify({ ok: false, error: '此操作需要用户批准，但当前上下文不支持审批（已拒绝）' }),
+          });
+          continue;
+        }
         const toolCall: ToolCall = {
           id: fc.call_id,
           type: 'function',
@@ -459,17 +493,6 @@ export async function* runResponsesLoop(
         }
       }
 
-      let args: Record<string, unknown>;
-      try {
-        args = JSON.parse(fc.arguments) as Record<string, unknown>;
-      } catch {
-        toolResults.push({
-          type: 'function_call_output',
-          call_id: fc.call_id,
-          output: JSON.stringify({ ok: false, error: '工具参数不是有效 JSON' }),
-        });
-        continue;
-      }
       const matchedPlanStep = findPlanStepForTool(contextHub.getContext(), fc.name, args);
       if (matchedPlanStep?.status === 'pending') {
         await contextHub.commitEvent('plan_step_changed', {

@@ -7,6 +7,8 @@ import { loadModelsConfig } from './config/models';
 import { runResponsesLoop } from './agent/responses-loop';
 import { runAnthropicAgentLoop } from './agent/anthropic-loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
+import { buildSubagentApprovalId } from './chat/approval-ids';
+import { createSubagentToolGuard } from './agent/subagent-guard';
 import { setSubagentRunner } from './agent/tools/dispatch-subagents';
 import { SubagentCoordinator } from './agent/subagent-coordinator';
 import { ContextHub } from './context/context-hub';
@@ -26,6 +28,7 @@ import type {
   ModelListResponse,
   ChatRequest,
   ChatStreamEvent,
+  ToolCall,
   ToolName,
   ToolArgs,
   ToolResult,
@@ -1540,7 +1543,7 @@ async function runAnthropicLoopForIpc(
     }
 
     coordinator.setRunner(async (definition, packet, signal) => {
-      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal);
+      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal, streamId, request.approvalTimeoutMs);
     });
     setSubagentRunner(request.sessionId, {
       dispatch: (definitions) => coordinator.dispatch(definitions),
@@ -1722,7 +1725,7 @@ async function runResponsesLoopForIpc(
 
     // 设置子代理执行器
     coordinator.setRunner(async (definition, packet, signal) => {
-      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal);
+      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal, streamId, request.approvalTimeoutMs);
     });
     setSubagentRunner(request.sessionId, {
       dispatch: (definitions) => coordinator.dispatch(definitions),
@@ -1853,12 +1856,29 @@ async function runOneSubagent(
   parentSessionId: string,
   parentSend: (event: ChatStreamEvent) => void,
   signal: AbortSignal,
+  parentStreamId: string,
+  approvalTimeoutMs?: number,
 ): Promise<{ summary: string; ok: boolean }> {
   const startedAt = Date.now();
   let summary = '';
   let ok = false;
   const model = await resolveSubagentModel(definition, parentModel, cwd);
   const readOnly = definition.readOnly ?? definition.role !== 'build';
+  const toolGuard = createSubagentToolGuard({ readOnly, cwd, fileScopes: definition.fileScopes });
+  const onApproval = async (toolCall: ToolCall): Promise<boolean> => {
+    const approvalId = buildSubagentApprovalId(definition.id);
+    parentSend({
+      type: 'approval_required',
+      approval: {
+        id: approvalId,
+        toolName: toolCall.function.name,
+        args: toolCall.function.arguments,
+        toolCallId: toolCall.id,
+      },
+    });
+    const requestedTimeout = approvalTimeoutMs ?? 60_000;
+    return chatStreams.requestApproval(parentStreamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
+  };
   const contextHub = new ContextHub(
     `${parentSessionId}:${definition.id}`,
     cwd,
@@ -1908,6 +1928,8 @@ async function runOneSubagent(
           signal,
           maxToolCalls: 100,
           allowSubagents: false,
+          onApproval,
+          toolGuard,
         })
       : runResponsesLoop(definition.task, {
           model,
@@ -1923,6 +1945,8 @@ async function runOneSubagent(
           maxToolCalls: 100,
           requireApprovalAfterLimit: true,
           allowSubagents: false,
+          onApproval,
+          toolGuard,
         });
 
     for await (const event of loop) {
