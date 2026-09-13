@@ -9,6 +9,16 @@ interface CachedConnection {
   tools: McpToolInfo[];
 }
 
+/** C3：用户未确认本地 MCP 命令时的统一错误文案 */
+export const MCP_COMMAND_CANCELED = '已取消：未确认 MCP 命令';
+
+/** C3：stdio 命令确认回调（由 main.ts 接入原生 dialog，测试注入 mock） */
+export type StdioCommandConfirmer = (cfg: McpServerConfig) => Promise<boolean>;
+
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function validationError(cfg: McpServerConfig): string | null {
   if (!cfg.id) return 'id 必填';
   if (!cfg.name) return 'name 必填';
@@ -31,6 +41,18 @@ function errorMessage(e: unknown): string {
 export class McpManager {
   private cache = new Map<string, CachedConnection>();
 
+  // fail-closed：未接入确认器（如主进程漏接线）时一律拒绝 stdio 命令
+  private confirmStdioCommand: StdioCommandConfirmer = async () => false;
+
+  setStdioCommandConfirmer(confirmer: StdioCommandConfirmer): void {
+    this.confirmStdioCommand = confirmer;
+  }
+
+  private async assertStdioCommandConfirmed(cfg: McpServerConfig): Promise<void> {
+    if (cfg.transport !== 'stdio') return;
+    if (!(await this.confirmStdioCommand(cfg))) throw new Error(MCP_COMMAND_CANCELED);
+  }
+
   async listServers(): Promise<McpServerConfig[]> {
     const cfg = await loadConfig();
     return cfg.mcpServers;
@@ -43,6 +65,7 @@ export class McpManager {
     if (current.mcpServers.some((s) => s.id === cfg.id)) {
       throw new Error(`MCP 服务器 id 已存在: ${cfg.id}`);
     }
+    await this.assertStdioCommandConfirmed(cfg);
     current.mcpServers.push(cfg);
     await saveConfig(current);
     this.invalidateCache();
@@ -62,6 +85,9 @@ export class McpManager {
     const merged = { ...current.mcpServers[idx]!, ...patch };
     const err = validationError(merged);
     if (err) throw new Error(err);
+    if (hasOwn(patch, 'command') || hasOwn(patch, 'args')) {
+      await this.assertStdioCommandConfirmed(merged);
+    }
     current.mcpServers[idx] = merged;
     await saveConfig(current);
     this.invalidateCache();
@@ -69,6 +95,7 @@ export class McpManager {
 
   async testConnection(cfg: McpServerConfig): Promise<McpTestResult> {
     try {
+      await this.assertStdioCommandConfirmed(cfg);
       const { client, tools } = await connectMcpServer(cfg);
       await client.close();
       return { ok: true, toolCount: tools.length, tools };
@@ -140,6 +167,13 @@ export class McpManager {
     const { serverId, toolName } = parsed;
     const server = (await this.listServers()).find((s) => s.id === serverId);
     if (!server) return { ok: false, output: '', error: `MCP 服务器不存在: ${serverId}` };
+    // C3：执行入口强制检查启用状态与工具白名单，禁用服务器不得建立连接
+    if (server.enabled !== true) {
+      return { ok: false, output: '', error: 'MCP 服务器未启用' };
+    }
+    if (server.tools && server.tools.length > 0 && !server.tools.includes(toolName)) {
+      return { ok: false, output: '', error: '工具未授权' };
+    }
     let entry: CachedConnection;
     try {
       entry = await this.getEntry(serverId);

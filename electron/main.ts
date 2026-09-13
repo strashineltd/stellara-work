@@ -2204,6 +2204,12 @@ app.whenReady().then(async () => {
     log.error('服务器模块初始化失败', err);
   }
 
+  // C3: stdio MCP 服务器会 spawn 本地进程，add/test/update(command|args)
+  // 前必须在主窗口原生确认；mcp-manager 未接线时 fail-closed 拒绝。
+  const { mcpManager } = await import('./mcp/mcp-manager');
+  const { confirmStdioMcpCommand } = await import('./mcp/mcp-confirm');
+  mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(mainWindow, cfg));
+
   registerIpcHandlers();
   createWindow();
   installAppMenu(() => mainWindow);

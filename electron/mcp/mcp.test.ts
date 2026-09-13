@@ -2,16 +2,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import type { BrowserWindow } from 'electron';
 import { _setConfigDir, saveConfig } from '../config/config-v2';
 import type { McpServerConfig, McpToolInfo } from '../../shared/ipc';
 import { connectMcpServer, callMcpTool } from './mcp-client';
-import { mcpManager } from './mcp-manager';
+import { McpManager, mcpManager } from './mcp-manager';
+import { confirmStdioMcpCommand } from './mcp-confirm';
 import { mcpToolToOpenAITool, parseMcpToolName } from './mcp-tools';
 
-const { mockClient, mockStdioTransport, mockHttpTransport } = vi.hoisted(() => ({
+const { mockClient, mockStdioTransport, mockHttpTransport, mockShowMessageBox } = vi.hoisted(() => ({
   mockClient: vi.fn(),
   mockStdioTransport: vi.fn(),
   mockHttpTransport: vi.fn(),
+  mockShowMessageBox: vi.fn(),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
@@ -22,6 +25,9 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
 }));
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
   StreamableHTTPClientTransport: mockHttpTransport,
+}));
+vi.mock('electron', () => ({
+  dialog: { showMessageBox: mockShowMessageBox },
 }));
 
 const READ_TOOL = { name: 'read', description: 'Read files', inputSchema: { type: 'object', properties: {} } };
@@ -53,6 +59,8 @@ const httpCfg: McpServerConfig = {
   headers: { Authorization: 'Bearer xyz' },
   enabled: true,
 };
+
+const fakeWindow = {} as BrowserWindow;
 
 function setupClientMocks(): void {
   mockClient.mockClear();
@@ -211,6 +219,9 @@ describe('McpManager', () => {
     _setConfigDir(tmpDir);
     mcpManager.invalidateCache();
     setupClientMocks();
+    mockShowMessageBox.mockReset();
+    mockShowMessageBox.mockResolvedValue({ response: 1 });
+    mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(fakeWindow, cfg));
   });
 
   afterEach(async () => {
@@ -527,6 +538,111 @@ describe('McpManager', () => {
       const res = await mcpManager.callTool('mcp__s1__read', {});
       expect(res).toEqual({ ok: false, output: '', error: 'MCP 工具执行错误' });
       expect(mockClient).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('callTool enforcement', () => {
+    it('rejects disabled server without connecting', async () => {
+      await seed({ ...stdioCfg, enabled: false });
+      const res = await mcpManager.callTool('mcp__s1__read', {});
+      expect(res).toEqual({ ok: false, output: '', error: 'MCP 服务器未启用' });
+      expect(mockClient).not.toHaveBeenCalled();
+      expect(mockStdioTransport).not.toHaveBeenCalled();
+    });
+
+    it('rejects tool outside the allowlist without connecting', async () => {
+      await seed({ ...stdioCfg, tools: ['read'] });
+      const res = await mcpManager.callTool('mcp__s1__write', {});
+      expect(res).toEqual({ ok: false, output: '', error: '工具未授权' });
+      expect(mockClient).not.toHaveBeenCalled();
+    });
+
+    it('allows an allowlisted tool', async () => {
+      await seed({ ...stdioCfg, tools: ['read'] });
+      const res = await mcpManager.callTool('mcp__s1__read', {});
+      expect(res).toEqual({ ok: true, output: 'ok' });
+    });
+
+    it('allows any tool when the allowlist is empty', async () => {
+      await seed({ ...stdioCfg, tools: [] });
+      const res = await mcpManager.callTool('mcp__s1__write', {});
+      expect(res).toEqual({ ok: true, output: 'ok' });
+    });
+  });
+
+  describe('stdio command confirmation', () => {
+    it('addServer canceled: throws 已取消 and persists nothing', async () => {
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      await expect(mcpManager.addServer(stdioCfg)).rejects.toThrow('已取消：未确认 MCP 命令');
+      expect(await mcpManager.listServers()).toEqual([]);
+      expect(mockStdioTransport).not.toHaveBeenCalled();
+      expect(mockClient).not.toHaveBeenCalled();
+    });
+
+    it('addServer confirmed: dialog shows exact command and args, then persists', async () => {
+      await mcpManager.addServer(stdioCfg);
+      expect(mockShowMessageBox).toHaveBeenCalledTimes(1);
+      const [, options] = mockShowMessageBox.mock.calls[0] as [unknown, { detail?: string }];
+      expect(options.detail).toBe('npx -y @modelcontextprotocol/server-github');
+      expect(await mcpManager.listServers()).toEqual([stdioCfg]);
+      expect(mockStdioTransport).not.toHaveBeenCalled();
+    });
+
+    it('addServer fails closed when no confirmer is wired', async () => {
+      const bare = new McpManager();
+      await expect(bare.addServer(stdioCfg)).rejects.toThrow('已取消：未确认 MCP 命令');
+      expect(await bare.listServers()).toEqual([]);
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+    });
+
+    it('addServer http is unaffected: no dialog, persists directly', async () => {
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      await mcpManager.addServer(httpCfg);
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+      expect(await mcpManager.listServers()).toEqual([httpCfg]);
+    });
+
+    it('testConnection canceled: returns cancel error and spawns nothing', async () => {
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      const res = await mcpManager.testConnection(stdioCfg);
+      expect(res).toEqual({ ok: false, error: '已取消：未确认 MCP 命令' });
+      expect(mockStdioTransport).not.toHaveBeenCalled();
+      expect(mockClient).not.toHaveBeenCalled();
+    });
+
+    it('testConnection confirmed: connects', async () => {
+      const res = await mcpManager.testConnection(stdioCfg);
+      expect(res.ok).toBe(true);
+      expect(mockStdioTransport).toHaveBeenCalledTimes(1);
+    });
+
+    it('testConnection http is unaffected: no dialog', async () => {
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      const res = await mcpManager.testConnection(httpCfg);
+      expect(res.ok).toBe(true);
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+    });
+
+    it('updateServer command change canceled: config not mutated', async () => {
+      await seed(stdioCfg);
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      await expect(mcpManager.updateServer('s1', { command: 'evil' })).rejects.toThrow('已取消：未确认 MCP 命令');
+      expect((await mcpManager.listServers())[0]?.command).toBe('npx');
+    });
+
+    it('updateServer args change confirmed: mutates and shows merged command', async () => {
+      await seed(stdioCfg);
+      await mcpManager.updateServer('s1', { args: ['--flag'] });
+      expect((await mcpManager.listServers())[0]?.args).toEqual(['--flag']);
+      const [, options] = mockShowMessageBox.mock.calls[0] as [unknown, { detail?: string }];
+      expect(options.detail).toBe('npx --flag');
+    });
+
+    it('updateServer enabled/tools only: no dialog', async () => {
+      await seed({ ...stdioCfg, enabled: false });
+      await mcpManager.updateServer('s1', { enabled: true, tools: ['read'] });
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+      expect((await mcpManager.listServers())[0]).toEqual({ ...stdioCfg, enabled: true, tools: ['read'] });
     });
   });
 });
