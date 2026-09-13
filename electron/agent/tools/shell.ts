@@ -365,6 +365,17 @@ async function validateFileArgs(
   return null;
 }
 
+const URL_SCHEME_RE = /^([a-z][a-z0-9+.-]*):\/+/i;
+const ALLOWED_URL_SCHEMES_RE = /^https?$/i;
+
+function findDisallowedUrlScheme(args: string[]): string | null {
+  for (const arg of args) {
+    const scheme = URL_SCHEME_RE.exec(arg)?.[1];
+    if (scheme && !ALLOWED_URL_SCHEMES_RE.test(scheme)) return arg;
+  }
+  return null;
+}
+
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024; // 5MB
 
 /**
@@ -512,6 +523,11 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
       output: '',
       error: `命令未在白名单：${parsed.exe}。当前仅允许只读/安全的开发命令。`,
     };
+  }
+
+  const badSchemeArg = findDisallowedUrlScheme(parsed.args);
+  if (badSchemeArg !== null) {
+    return { ok: false, output: '', error: `不允许的 URL 协议：${badSchemeArg}。仅允许 http/https。` };
   }
 
   // 路径参数校验（通用：检测含路径分隔符的参数）

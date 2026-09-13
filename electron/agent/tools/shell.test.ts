@@ -505,6 +505,32 @@ describe('runCommand', () => {
     expect(r.output).toContain('inside-content');
   });
 
+  it('rejects non-http(s) URL schemes (security follow-up)', async () => {
+    for (const cmd of [
+      'curl file:///etc/passwd',
+      'curl "file:///etc/passwd"',
+      'curl FILE:///etc/passwd',
+      'curl file:/etc/passwd',
+      'curl ftp://example.com/secret',
+      'curl --url file:///etc/passwd',
+    ]) {
+      const r = await runCommand({ command: cmd }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toContain('不允许的 URL 协议');
+    }
+  });
+
+  it('keeps http(s) URLs and non-URL args allowed', async () => {
+    for (const cmd of [
+      'curl --version https://example.com',
+      'curl --version "HTTP://example.com"',
+      'node --version',
+    ]) {
+      const r = await runCommand({ command: cmd }, tmpDir);
+      expect(r.ok, cmd).toBe(true);
+    }
+  });
+
   it('does not leak STELLARA_* or secret-like vars into spawned commands (H5)', async () => {
     process.env.STELLARA_TEST_LEAK = 'top-secret';
     process.env.LEAKY_TOKEN = 'tok';
