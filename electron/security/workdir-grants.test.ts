@@ -74,7 +74,16 @@ describe('attachment source provenance', () => {
   it('flags absolute paths outside every granted dir', async () => {
     await grantWorkDir(workDir);
     const file = await makeFile(outsideDir, 'secret.txt');
-    await expect(findUngrantedAttachmentSources([file], [])).resolves.toEqual([path.resolve(file)]);
+    await expect(findUngrantedAttachmentSources([file], [])).resolves.toEqual([await fs.realpath(file)]);
+  });
+
+  it('flags a symlink inside a granted dir whose target is outside, showing the real target', async () => {
+    await grantWorkDir(workDir);
+    const target = await makeFile(outsideDir, 'secret.txt');
+    const link = path.join(workDir, 'link.txt');
+    await fs.symlink(target, link);
+    const outside = await findUngrantedAttachmentSources([link], [workDir]);
+    expect(outside).toEqual([await fs.realpath(target)]);
   });
 
   it('treats the current session workDir (already asserted) as frictionless', async () => {

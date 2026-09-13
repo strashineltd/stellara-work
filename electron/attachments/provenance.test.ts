@@ -56,8 +56,20 @@ describe('addAttachmentsWithProvenance', () => {
     await expect(
       addAttachmentsWithProvenance('sess-1', workDir, [secret], deps(confirmOutside)),
     ).rejects.toThrow('已取消添加工作区外的附件');
-    expect(confirmOutside).toHaveBeenCalledWith([path.resolve(secret)]);
+    expect(confirmOutside).toHaveBeenCalledWith([await fs.realpath(secret)]);
     await expect(fs.readdir(path.join(workDir, '.stellara-attachments'))).rejects.toThrow();
+  });
+
+  it('asks before following a symlink that points outside the workspace, showing the real target', async () => {
+    const target = path.join(outsideDir, 'secret.txt');
+    await fs.writeFile(target, 'top secret');
+    const link = path.join(workDir, 'link.txt');
+    await fs.symlink(target, link);
+    const confirmOutside = vi.fn().mockResolvedValue(false);
+    await expect(
+      addAttachmentsWithProvenance('sess-1', workDir, [link], deps(confirmOutside)),
+    ).rejects.toThrow('已取消添加工作区外的附件');
+    expect(confirmOutside).toHaveBeenCalledWith([await fs.realpath(target)]);
   });
 
   it('copies an outside-workspace file after the user confirms', async () => {
@@ -87,6 +99,6 @@ describe('addAttachmentsWithProvenance', () => {
     await fs.writeFile(outside, 'b');
     const confirmOutside = vi.fn().mockResolvedValue(true);
     await addAttachmentsWithProvenance('sess-1', workDir, [inside, outside], deps(confirmOutside));
-    expect(confirmOutside).toHaveBeenCalledWith([path.resolve(outside)]);
+    expect(confirmOutside).toHaveBeenCalledWith([await fs.realpath(outside)]);
   });
 });

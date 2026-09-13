@@ -269,9 +269,9 @@ function registerIpcHandlers(): void {
   });
 
   handle('app:getGitBranch', async (_e, workDir: string) => {
-    const { readGitBranch } = await import('./git-branch');
-    if (typeof workDir !== 'string' || !workDir.trim()) return null;
-    return readGitBranch(workDir);
+    // C2+：只读取已授权/已配置工作区，防止 renderer 借 .git/HEAD 探测任意路径
+    const { readGitBranchIfAllowed } = await import('./git-branch');
+    return readGitBranchIfAllowed(workDir, assertWorkDirAllowed);
   });
 
   handle('app:isFullScreen', async (event): Promise<boolean> => {

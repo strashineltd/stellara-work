@@ -46,3 +46,20 @@ export async function readGitBranch(workDir: string): Promise<string | null> {
   }
   return null;
 }
+
+/**
+ * IPC 入口用：workDir 必须是字符串且通过授权校验（assertWorkDirAllowed）
+ * 才能读取 .git/HEAD；未授权/非法输入一律返回 null（不抛错，UI 侧无分支可显）。
+ */
+export async function readGitBranchIfAllowed(
+  workDir: unknown,
+  assertAllowed: (workDir: string) => Promise<void>,
+): Promise<string | null> {
+  if (typeof workDir !== 'string' || !workDir.trim()) return null;
+  try {
+    await assertAllowed(workDir);
+  } catch {
+    return null;
+  }
+  return readGitBranch(workDir);
+}

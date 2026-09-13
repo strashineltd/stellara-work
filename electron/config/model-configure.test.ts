@@ -75,6 +75,16 @@ describe('configureModel', () => {
     expect(mockSetKey).not.toHaveBeenCalled();
   });
 
+  it('rejects a non-string workDir before checking grants or persisting', async () => {
+    mockTestConnection.mockResolvedValue({ ok: true });
+    const r = await configureModel(cfg({ workDir: { evil: true } as unknown as string }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('workDir');
+    expect(mockTestConnection).not.toHaveBeenCalled();
+    expect(mockUpsertModel).not.toHaveBeenCalled();
+    expect(mockSetKey).not.toHaveBeenCalled();
+  });
+
   it('accepts a workDir granted by the native picker', async () => {
     await grantWorkDir(GRANTED_DIR);
     mockTestConnection.mockResolvedValue({ ok: true });

@@ -16,6 +16,10 @@ export interface ConfigureResult {
  * - 提供 workDir 时：必须已由原生选择器授权，防止渲染层借配置种子化工作区白名单。
  */
 export async function configureModel(config: ModelConfig): Promise<ConfigureResult> {
+  // C2+：非字符串 workDir（如对象/数字）会绕过 typeof 授权检查并被原样落库，先拒绝。
+  if (config.workDir !== undefined && typeof config.workDir !== 'string') {
+    return { ok: false, error: 'workDir 必须是字符串路径' };
+  }
   if (typeof config.workDir === 'string' && config.workDir.trim()) {
     try {
       await assertWorkDirGranted(config.workDir);

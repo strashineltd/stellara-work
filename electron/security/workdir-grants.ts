@@ -14,16 +14,18 @@ const grantedWorkDirs = new Set<string>();
 const grantedAttachmentSources = new Set<string>();
 
 /**
- * 归一化授权路径：win32 统一小写；其他平台解析 realpath
- * （macOS /tmp、/var 是符号链接，词法比较会把同一目录判成两个）。
+ * 归一化授权路径：先解析 realpath（穿透 symlink / Windows junction），
+ * win32 再统一小写。realpath 失败时才退回词法路径。
+ * 注意顺序：win32 若先小写再 realpath，junction 指向目录外的路径会被
+ * 当成授权目录前缀命中，从而绕过授权；必须先 realpath 再小写。
  */
 export async function normalizeWorkDir(workDir: string): Promise<string> {
   const resolved = path.resolve(workDir);
-  if (process.platform === 'win32') return resolved.toLowerCase();
   try {
-    return await fs.realpath(resolved);
+    const real = await fs.realpath(resolved);
+    return process.platform === 'win32' ? real.toLowerCase() : real;
   } catch {
-    return resolved;
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
   }
 }
 
@@ -69,6 +71,8 @@ export async function findUngrantedAttachmentSources(
   const outside: string[] = [];
   for (const filePath of filePaths) {
     if (typeof filePath !== 'string' || !filePath.trim()) continue;
+    // normalized 即 realpath（win32 另作小写）：确认框展示真实目标，
+    // 否则“工作区内 symlink → 工作区外文件”会显示成区内路径而实际读取区外。
     const normalized = await normalizeWorkDir(filePath);
     if (grantedAttachmentSources.has(normalized)) continue;
     let within = false;
@@ -78,7 +82,7 @@ export async function findUngrantedAttachmentSources(
         break;
       }
     }
-    if (!within) outside.push(path.resolve(filePath));
+    if (!within) outside.push(normalized);
   }
   return outside;
 }

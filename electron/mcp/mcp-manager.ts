@@ -19,6 +19,18 @@ function hasOwn(obj: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+/**
+ * C3+：http 传输不得携带 spawn 字段。
+ * 防止“先以 http 存下 command/args（无需确认），再翻转 transport=stdio”绕过确认。
+ */
+function withoutSpawnFields(cfg: McpServerConfig): McpServerConfig {
+  if (cfg.transport === 'stdio') return cfg;
+  const sanitized = { ...cfg };
+  delete sanitized.command;
+  delete sanitized.args;
+  return sanitized;
+}
+
 function validationError(cfg: McpServerConfig): string | null {
   if (!cfg.id) return 'id 必填';
   if (!cfg.name) return 'name 必填';
@@ -59,14 +71,15 @@ export class McpManager {
   }
 
   async addServer(cfg: McpServerConfig): Promise<void> {
-    const err = validationError(cfg);
+    const sanitized = withoutSpawnFields(cfg);
+    const err = validationError(sanitized);
     if (err) throw new Error(err);
     const current = await loadConfig();
-    if (current.mcpServers.some((s) => s.id === cfg.id)) {
-      throw new Error(`MCP 服务器 id 已存在: ${cfg.id}`);
+    if (current.mcpServers.some((s) => s.id === sanitized.id)) {
+      throw new Error(`MCP 服务器 id 已存在: ${sanitized.id}`);
     }
-    await this.assertStdioCommandConfirmed(cfg);
-    current.mcpServers.push(cfg);
+    await this.assertStdioCommandConfirmed(sanitized);
+    current.mcpServers.push(sanitized);
     await saveConfig(current);
     this.invalidateCache();
   }
@@ -85,10 +98,15 @@ export class McpManager {
     const merged = { ...current.mcpServers[idx]!, ...patch };
     const err = validationError(merged);
     if (err) throw new Error(err);
-    if (hasOwn(patch, 'command') || hasOwn(patch, 'args')) {
+    // C3+：确认只看合并后的最终形态，而非 patch 里恰好出现的键。
+    // 任何会改变 spawn 形态的补丁（transport/command/args）且最终是带命令的
+    // stdio，都必须确认；http 不允许携带 spawn 字段（防止先存后翻）。
+    const touchesSpawnConfig =
+      hasOwn(patch, 'transport') || hasOwn(patch, 'command') || hasOwn(patch, 'args');
+    if (touchesSpawnConfig && merged.transport === 'stdio' && merged.command) {
       await this.assertStdioCommandConfirmed(merged);
     }
-    current.mcpServers[idx] = merged;
+    current.mcpServers[idx] = withoutSpawnFields(merged);
     await saveConfig(current);
     this.invalidateCache();
   }

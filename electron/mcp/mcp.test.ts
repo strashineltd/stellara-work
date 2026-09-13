@@ -645,4 +645,76 @@ describe('McpManager', () => {
       expect((await mcpManager.listServers())[0]).toEqual({ ...stdioCfg, enabled: true, tools: ['read'] });
     });
   });
+
+  describe('transport flip confirmation', () => {
+    it('addServer http with spawn fields: no dialog and fields stripped before persist', async () => {
+      await mcpManager.addServer({ ...httpCfg, command: 'evil', args: ['-x'] });
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+      const stored = (await mcpManager.listServers())[0];
+      expect(stored?.transport).toBe('http');
+      expect(stored?.command).toBeUndefined();
+      expect(stored?.args).toBeUndefined();
+    });
+
+    it('updateServer setting command/args while http: no dialog, fields stripped', async () => {
+      await seed(httpCfg);
+      await mcpManager.updateServer('h1', { command: 'evil', args: ['-x'] });
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+      const stored = (await mcpManager.listServers())[0];
+      expect(stored?.command).toBeUndefined();
+      expect(stored?.args).toBeUndefined();
+    });
+
+    it('updateServer {transport:stdio} with stored command: cancel keeps config unmutated and spawns nothing', async () => {
+      await seed({ ...httpCfg, command: 'evil' });
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      await expect(mcpManager.updateServer('h1', { transport: 'stdio' })).rejects.toThrow('已取消：未确认 MCP 命令');
+      expect((await mcpManager.listServers())[0]).toEqual({ ...httpCfg, command: 'evil' });
+      expect(mockStdioTransport).not.toHaveBeenCalled();
+      expect(mockClient).not.toHaveBeenCalled();
+    });
+
+    it('updateServer {transport:stdio} with stored command: confirm shows the command and persists stdio', async () => {
+      await seed({ ...httpCfg, command: 'evil' });
+      await mcpManager.updateServer('h1', { transport: 'stdio' });
+      expect(mockShowMessageBox).toHaveBeenCalledTimes(1);
+      const [, options] = mockShowMessageBox.mock.calls[0] as [unknown, { detail?: string }];
+      expect(options.detail).toBe('evil');
+      const stored = (await mcpManager.listServers())[0];
+      expect(stored?.transport).toBe('stdio');
+      expect(stored?.command).toBe('evil');
+    });
+
+    it('updateServer flip with command in the patch: cancel keeps http, confirm persists', async () => {
+      await seed(httpCfg);
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      await expect(mcpManager.updateServer('h1', { transport: 'stdio', command: 'node' })).rejects.toThrow('已取消：未确认 MCP 命令');
+      expect((await mcpManager.listServers())[0]?.transport).toBe('http');
+      mockShowMessageBox.mockResolvedValue({ response: 1 });
+      await mcpManager.updateServer('h1', { transport: 'stdio', command: 'node' });
+      expect(mockShowMessageBox).toHaveBeenCalledTimes(2);
+      expect((await mcpManager.listServers())[0]).toMatchObject({ transport: 'stdio', command: 'node' });
+    });
+
+    it('updateServer stdio→http: no dialog and spawn fields stripped', async () => {
+      await seed(stdioCfg);
+      await mcpManager.updateServer('s1', { transport: 'http', url: 'http://localhost:3000/mcp' });
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+      const stored = (await mcpManager.listServers())[0];
+      expect(stored?.transport).toBe('http');
+      expect(stored).not.toHaveProperty('command');
+      expect(stored).not.toHaveProperty('args');
+    });
+
+    it('updateServer command edited while http then flip: stripped command cannot be silently spawned', async () => {
+      await seed({ ...httpCfg, command: 'old' });
+      await mcpManager.updateServer('h1', { command: 'new' });
+      expect(mockShowMessageBox).not.toHaveBeenCalled();
+      expect((await mcpManager.listServers())[0]?.command).toBeUndefined();
+      mockShowMessageBox.mockResolvedValue({ response: 0 });
+      await expect(mcpManager.updateServer('h1', { transport: 'stdio' })).rejects.toThrow();
+      expect((await mcpManager.listServers())[0]?.transport).toBe('http');
+      expect(mockStdioTransport).not.toHaveBeenCalled();
+    });
+  });
 });

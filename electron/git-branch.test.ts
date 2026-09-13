@@ -1,8 +1,8 @@
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { readGitBranch } from './git-branch';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readGitBranch, readGitBranchIfAllowed } from './git-branch';
 
 const dirs: string[] = [];
 
@@ -55,5 +55,30 @@ describe('readGitBranch', () => {
     await writeFile(path.join(realGitDir, 'HEAD'), 'ref: refs/heads/worktree-feature\n');
     await writeFile(path.join(repo, '.git'), `gitdir: ${path.relative(repo, realGitDir)}\n`);
     expect(await readGitBranch(repo)).toBe('worktree-feature');
+  });
+});
+
+describe('readGitBranchIfAllowed', () => {
+  it('returns null for non-string or blank workDir without invoking the guard', async () => {
+    const guard = vi.fn();
+    expect(await readGitBranchIfAllowed(undefined, guard)).toBeNull();
+    expect(await readGitBranchIfAllowed('   ', guard)).toBeNull();
+    expect(guard).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the guard rejects an ungranted workDir', async () => {
+    const dir = await fixture();
+    await mkdir(path.join(dir, '.git'));
+    await writeFile(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    const guard = vi.fn().mockRejectedValue(new Error('未授权'));
+    expect(await readGitBranchIfAllowed(dir, guard)).toBeNull();
+    expect(guard).toHaveBeenCalledWith(dir);
+  });
+
+  it('reads the branch when the guard allows the workDir', async () => {
+    const dir = await fixture();
+    await mkdir(path.join(dir, '.git'));
+    await writeFile(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    expect(await readGitBranchIfAllowed(dir, async () => {})).toBe('main');
   });
 });
