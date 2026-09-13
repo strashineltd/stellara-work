@@ -1,9 +1,20 @@
 import { execFile } from 'node:child_process';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 
+// 只读 git 命令的加固参数：core.pager 可为任意命令，core.fsmonitor 可指向外部程序，
+// 恶意仓库配置会借这些配置在"只读"工具中执行代码，因此统一强制禁用。
+const GIT_HARDENING_ARGS = ['-c', 'core.pager=cat', '-c', 'core.fsmonitor=false'];
+
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_PAGER: 'cat' };
+  // GIT_EXTERNAL_DIFF 也能指定外部 diff 程序，一并清除（--no-ext-diff 已禁用配置来源）
+  delete env.GIT_EXTERNAL_DIFF;
+  return env;
+}
+
 function runGit(args: string[], cwd: string, timeoutMs = 15000): Promise<ToolResult> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: timeoutMs, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('git', [...GIT_HARDENING_ARGS, ...args], { cwd, timeout: timeoutMs, maxBuffer: 5 * 1024 * 1024, env: gitEnv() }, (err, stdout, stderr) => {
       if (err) {
         resolve({ ok: false, output: stdout || '', error: stderr || err.message });
       } else {
@@ -18,7 +29,8 @@ export async function gitStatus(_args: Record<string, unknown>, cwd: string): Pr
 }
 
 export async function gitDiff(args: Record<string, unknown>, cwd: string): Promise<ToolResult> {
-  const gitArgs = ['diff'];
+  // --no-textconv / --no-ext-diff：禁用 diff 驱动指定的 textconv 转换器与外部 diff 程序
+  const gitArgs = ['diff', '--no-textconv', '--no-ext-diff'];
   if (args.staged) gitArgs.push('--staged');
   if (args.file && typeof args.file === 'string') gitArgs.push('--', args.file);
   return runGit(gitArgs, cwd, 30000);

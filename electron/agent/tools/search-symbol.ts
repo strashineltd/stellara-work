@@ -2,7 +2,7 @@ import fg from 'fast-glob';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
-import { isWithinDir } from '../../fs/path-security';
+import { isWithinDir, verifyExistingPath } from '../../fs/path-security';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const DEFAULT_INCLUDE = '**/*.{ts,tsx,js,jsx,py,swift,go,rs,java}';
@@ -39,6 +39,8 @@ export async function searchSymbol(args: SearchSymbolArgs, cwd: string): Promise
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
+      // 不跟随符号链接：fast-glob 默认跟随，配合词法前缀检查会让 evil -> ~/.ssh 之类的链接越界读取
+      followSymbolicLinks: false,
     })).filter((file) => isWithinDir(path.resolve(cwd, file), cwd));
 
     const esc = escapeRegExp(symbol);
@@ -53,9 +55,12 @@ export async function searchSymbol(args: SearchSymbolArgs, cwd: string): Promise
       if (totalMatches >= limit) break;
 
       const absPath = path.join(cwd, file);
+      // 读前再按真实路径复核（防目录级链接/竞态绕过），只读取通过校验的 realPath
+      const verified = await verifyExistingPath(absPath, cwd);
+      if (!verified.ok) continue;
       let stat;
       try {
-        stat = await fs.stat(absPath);
+        stat = await fs.stat(verified.realPath);
       } catch {
         continue;
       }
@@ -63,7 +68,7 @@ export async function searchSymbol(args: SearchSymbolArgs, cwd: string): Promise
 
       let content: string;
       try {
-        content = await fs.readFile(absPath, 'utf-8');
+        content = await fs.readFile(verified.realPath, 'utf-8');
       } catch {
         continue;
       }

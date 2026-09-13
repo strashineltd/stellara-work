@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 import type { SearchContentArgs } from '../../../shared/ipc';
-import { isWithinDir, canonicalCwd } from '../../fs/path-security';
+import { isWithinDir, canonicalCwd, verifyExistingPath } from '../../fs/path-security';
 import { isAbsolutePathArg } from './shell';
 
 const MAX_MATCHES = 200;
@@ -44,6 +44,8 @@ export async function searchContent(args: SearchContentArgs, cwd: string): Promi
       ignore: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/release/**'],
       onlyFiles: true,
       dot: false,
+      // 不跟随符号链接：fast-glob 默认跟随，配合词法前缀检查会让 evil -> ~/.ssh 之类的链接越界读取
+      followSymbolicLinks: false,
     })).filter((file) => isWithinDir(path.resolve(searchRoot, file), searchRoot));
 
     const query = args.query;
@@ -75,9 +77,12 @@ export async function searchContent(args: SearchContentArgs, cwd: string): Promi
       if (totalMatches >= MAX_MATCHES) break;
 
       const absPath = path.join(searchRoot, file);
+      // 读前再按真实路径复核（防目录级链接/竞态绕过），只读取通过校验的 realPath
+      const verified = await verifyExistingPath(absPath, searchRoot);
+      if (!verified.ok) continue;
       let stat;
       try {
-        stat = await fs.stat(absPath);
+        stat = await fs.stat(verified.realPath);
       } catch {
         continue;
       }
@@ -85,7 +90,7 @@ export async function searchContent(args: SearchContentArgs, cwd: string): Promi
 
       let content: string;
       try {
-        content = await fs.readFile(absPath, 'utf-8');
+        content = await fs.readFile(verified.realPath, 'utf-8');
       } catch {
         continue;
       }

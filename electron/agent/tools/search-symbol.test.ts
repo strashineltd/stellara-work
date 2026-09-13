@@ -12,6 +12,14 @@ async function write(rel: string, content: string) {
   await fs.mkdir(path.dirname(p), { recursive: true });
   await fs.writeFile(p, content, 'utf-8');
 }
+async function trySymlink(target: string, linkPath: string, type?: 'file' | 'dir'): Promise<boolean> {
+  try {
+    await fs.symlink(target, linkPath, type);
+    return true;
+  } catch {
+    return false; // 平台不允许创建 symlink 时跳过
+  }
+}
 
 describe('searchSymbol', () => {
   it('finds function definition with context lines', async () => {
@@ -57,5 +65,34 @@ describe('searchSymbol', () => {
     expect(r.ok).toBe(true);
     expect(r.output).not.toContain('secretFunc');
     expect(r.output).toContain('未找到');
+  });
+
+  it('does not read files outside the workdir through a symlinked file (H6)', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'symbol-outside-'));
+    try {
+      await fs.writeFile(path.join(outsideDir, 'secret.js'), 'function secretFunc() {}\n');
+      await write('src/ok.js', 'function secretFunc() {}\n');
+      if (!(await trySymlink(path.join(outsideDir, 'secret.js'), path.join(tmpDir, 'evil.js')))) return;
+      const r = await searchSymbol({ symbol: 'secretFunc' }, tmpDir);
+      expect(r.ok).toBe(true);
+      expect(r.output).toContain('src/ok.js');
+      expect(r.output).not.toContain('evil.js');
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips symlinked directories escaping the workdir (H6)', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'symbol-outside-'));
+    try {
+      await fs.writeFile(path.join(outsideDir, 'secret.js'), 'function secretFunc() {}\n');
+      if (!(await trySymlink(outsideDir, path.join(tmpDir, 'evil-dir'), 'dir'))) return;
+      const r = await searchSymbol({ symbol: 'secretFunc' }, tmpDir);
+      expect(r.ok).toBe(true);
+      expect(r.output).not.toContain('secretFunc');
+      expect(r.output).toContain('未找到');
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
   });
 });
