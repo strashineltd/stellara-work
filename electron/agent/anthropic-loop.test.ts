@@ -255,6 +255,78 @@ describe('runAnthropicAgentLoop', () => {
     expect(contents.some((c) => c.includes('[输出截断'))).toBe(true);
   });
 
+  describe('敏感工具审批分类', () => {
+    function toolUseResponse(name: string) {
+      return {
+        id: 'msg-1',
+        type: 'message',
+        role: 'assistant',
+        model: 'custom-model',
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 12, output_tokens: 4 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name, input: { tabId: 't1' } }],
+      };
+    }
+
+    async function runAndCollectApprovals(
+      name: string,
+      opts: { planMode?: boolean } = {},
+    ): Promise<ReturnType<typeof vi.fn>> {
+      mockCreate
+        .mockResolvedValueOnce(toolUseResponse(name))
+        .mockResolvedValueOnce({
+          id: 'msg-2',
+          type: 'message',
+          role: 'assistant',
+          model: 'custom-model',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 20, output_tokens: 6 },
+          content: [{ type: 'text', text: '1. 步骤一\n2. 完成' }],
+        });
+
+      const hub = new ContextHub('sub-session', workDir, 256000, 16384, { persist: false });
+      const onApproval = vi.fn().mockResolvedValue(false);
+      for await (const _event of runAnthropicAgentLoop('任务', {
+        model,
+        cwd: workDir,
+        sessionId: 'sub-session',
+        contextHub: hub,
+        allowSubagents: false,
+        client: { create: mockCreate },
+        onApproval,
+        ...(opts.planMode ? { planMode: true } : {}),
+      })) {
+        // 消费事件
+      }
+      return onApproval;
+    }
+
+    it.each(['browser_screenshot', 'memory_save'])(
+      '%s 未批准时先征求用户批准，拒绝后不执行',
+      async (name) => {
+        const onApproval = await runAndCollectApprovals(name);
+
+        expect(mockRequiresApproval).not.toHaveBeenCalled();
+        expect(onApproval).toHaveBeenCalledTimes(1);
+        expect(onApproval).toHaveBeenCalledWith(
+          expect.objectContaining({ function: expect.objectContaining({ name }) }),
+        );
+      },
+    );
+
+    it.each(['browser_snapshot', 'browser_extract'])(
+      'plan 模式下 %s 也需要审批（不再静默放行）',
+      async (name) => {
+        const onApproval = await runAndCollectApprovals(name, { planMode: true });
+
+        expect(onApproval).toHaveBeenCalledTimes(1);
+        expect(onApproval).toHaveBeenCalledWith(
+          expect.objectContaining({ function: expect.objectContaining({ name }) }),
+        );
+      },
+    );
+  });
+
   describe('审批回调缺失时危险工具 fail-closed', () => {
     const APPROVAL_UNAVAILABLE = '此操作需要用户批准，但当前上下文不支持审批（已拒绝）';
 

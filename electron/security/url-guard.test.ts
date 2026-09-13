@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSafeBrowserUrl, isSafeExternalUrl } from './url-guard';
+import { isMainWindowWebContents, isSafeBrowserUrl, isSafeExternalUrl, isSameOrigin } from './url-guard';
 
 describe('isSafeExternalUrl', () => {
   it('允许 https 链接', () => {
@@ -57,5 +57,51 @@ describe('isSafeBrowserUrl', () => {
     expect(isSafeBrowserUrl('https://ex.com')).toBe(true);
     expect(isSafeBrowserUrl('file:///x')).toBe(false);
     expect(isSafeBrowserUrl('javascript:alert(1)')).toBe(false);
+  });
+});
+
+describe('isSameOrigin', () => {
+  const origin = 'http://localhost:5173';
+
+  it('允许同源路径、查询与哈希', () => {
+    expect(isSameOrigin('http://localhost:5173/', origin)).toBe(true);
+    expect(isSameOrigin('http://localhost:5173/index.html?x=1#h', origin)).toBe(true);
+  });
+
+  it('拒绝前缀欺骗域名', () => {
+    expect(isSameOrigin('http://localhost:5173.evil.com/', origin)).toBe(false);
+  });
+
+  it('拒绝 userinfo 欺骗', () => {
+    expect(isSameOrigin('http://localhost:5173@evil.com/', origin)).toBe(false);
+  });
+
+  it('拒绝不同端口或协议', () => {
+    expect(isSameOrigin('http://localhost:5174/', origin)).toBe(false);
+    expect(isSameOrigin('https://localhost:5173/', origin)).toBe(false);
+  });
+
+  it('拒绝畸形 URL', () => {
+    expect(isSameOrigin('not a url at all', origin)).toBe(false);
+    expect(isSameOrigin('', origin)).toBe(false);
+  });
+});
+
+describe('isMainWindowWebContents', () => {
+  const mainContents = { id: 'main' };
+  const browserViewContents = { id: 'browser-view' };
+
+  it('接受与主窗口相同的 webContents', () => {
+    expect(isMainWindowWebContents(mainContents, mainContents)).toBe(true);
+  });
+
+  it('拒绝浏览器视图等其他 webContents', () => {
+    expect(isMainWindowWebContents(browserViewContents, mainContents)).toBe(false);
+  });
+
+  it('拒绝主窗口缺失或两者皆空', () => {
+    expect(isMainWindowWebContents(mainContents, undefined)).toBe(false);
+    expect(isMainWindowWebContents(null, null)).toBe(false);
+    expect(isMainWindowWebContents(undefined, undefined)).toBe(false);
   });
 });

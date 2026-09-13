@@ -49,7 +49,9 @@ export interface AnthropicLoopOptions {
   client?: Pick<AnthropicClient, 'create'>;
 }
 
-const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents', 'browser_act', 'browser_exec_js']);
+const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents', 'browser_act', 'browser_exec_js', 'browser_screenshot', 'memory_save']);
+/** plan（只读）模式下也必须逐次审批的敏感工具：可能读到已登录页面的内容 */
+const PLAN_MODE_SENSITIVE_TOOLS = new Set(['browser_snapshot', 'browser_extract']);
 
 export async function* runAnthropicAgentLoop(
   userMessage: string,
@@ -277,9 +279,11 @@ export async function* runAnthropicAgentLoop(
         continue;
       }
 
-      // 内置危险工具或 MCP 审批策略要求时等待用户批准；缺少 onApproval 时 fail-closed 拒绝
+      // 内置危险工具 / plan 模式敏感工具 / MCP 审批策略要求时等待用户批准；缺少 onApproval 时 fail-closed 拒绝
       const requiresApproval =
-        DANGEROUS_TOOLS.has(name) || (name.startsWith('mcp__') && (await mcpManager.requiresApproval(name)));
+        DANGEROUS_TOOLS.has(name) ||
+        (planMode && PLAN_MODE_SENSITIVE_TOOLS.has(name)) ||
+        (name.startsWith('mcp__') && (await mcpManager.requiresApproval(name)));
       if (requiresApproval) {
         if (!options.onApproval) {
           const output = JSON.stringify({ ok: false, error: '此操作需要用户批准，但当前上下文不支持审批（已拒绝）' });

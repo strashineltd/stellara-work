@@ -24,3 +24,24 @@ export function isSafeBrowserUrl(raw: string): boolean {
     return u.protocol === 'http:' || u.protocol === 'https:';
   } catch { return false; }
 }
+
+/**
+ * 严格同源校验（origin 全等）。
+ * 不能使用 startsWith：`http://localhost:5173.evil.com` 与
+ * `http://localhost:5173@evil.com` 都能通过前缀匹配但 origin 不同。
+ */
+export function isSameOrigin(raw: string, origin: string): boolean {
+  try {
+    return new URL(raw).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 仅主窗口 webContents 的页面导航允许外部化到系统浏览器；
+ * 浏览器视图（WebContentsView）由 BrowserService 自身的导航策略处理。
+ */
+export function isMainWindowWebContents(contents: unknown, mainContents: unknown): boolean {
+  return contents != null && mainContents != null && contents === mainContents;
+}

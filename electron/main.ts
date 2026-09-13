@@ -19,7 +19,7 @@ import { SessionBridge, type RemoteSessionUpdate } from './server/session-bridge
 import { ServerChatBridge } from './server/chat-bridge';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
-import { isSafeExternalUrl } from './security/url-guard';
+import { isMainWindowWebContents, isSafeExternalUrl, isSameOrigin } from './security/url-guard';
 import { isTrustedIpcSender } from './security/ipc-guard';
 import {
   findUngrantedAttachmentSources,
@@ -57,6 +57,7 @@ import type {
 
 const isDev = process.env.NODE_ENV === 'development';
 const RENDERER_DEV_URL = 'http://localhost:5173';
+const RENDERER_DEV_ORIGIN = new URL(RENDERER_DEV_URL).origin;
 
 log.initialize();
 log.info('Stellara Work 启动中...');
@@ -237,7 +238,7 @@ function registerIpcHandlers(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handle = (channel: string, listener: (...args: any[]) => any): void => {
     rawHandle(channel, (event: Electron.IpcMainInvokeEvent, ...args: unknown[]) => {
-      if (!isTrustedIpcSender(event.sender, mainWindow?.webContents)) {
+      if (!isTrustedIpcSender(event.sender, mainWindow?.webContents, event.senderFrame)) {
         log.warn(`blocked ipc from untrusted sender: ${channel}`);
         throw new Error('IPC 请求来源不受信任，已拒绝');
       }
@@ -248,7 +249,7 @@ function registerIpcHandlers(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const on = (channel: string, listener: (...args: any[]) => void): void => {
     rawOn(channel, (event: Electron.IpcMainEvent, ...args: unknown[]) => {
-      if (!isTrustedIpcSender(event.sender, mainWindow?.webContents)) {
+      if (!isTrustedIpcSender(event.sender, mainWindow?.webContents, event.senderFrame)) {
         log.warn(`blocked ipc event from untrusted sender: ${channel}`);
         return;
       }
@@ -2342,7 +2343,11 @@ app.on('will-quit', () => {
 // 安全：阻止新窗口创建
 app.on('web-contents-created', (_e, contents) => {
   contents.on('will-navigate', (event, url) => {
-    if (isDev && url.startsWith(RENDERER_DEV_URL)) return;
+    // M8: 仅主窗口导航允许外部化；浏览器视图的页面内导航由 BrowserService 策略处理
+    const mainContents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : undefined;
+    if (!isMainWindowWebContents(contents, mainContents)) return;
+    // M7: origin 全等，防止 localhost:5173.evil.com / localhost:5173@evil.com 前缀绕过
+    if (isDev && isSameOrigin(url, RENDERER_DEV_ORIGIN)) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) {
       shell.openExternal(url);

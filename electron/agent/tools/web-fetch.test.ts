@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { webFetch, validateUrl, UNTRUSTED_MARKER } from './web-fetch';
+import { webFetch, validateUrl, UNTRUSTED_MARKER, resolveMaxBytes } from './web-fetch';
 
 // Mock dns/promises
 vi.mock('node:dns/promises', () => ({
@@ -203,5 +203,47 @@ describe('webFetch', () => {
     const v = await validateUrl('https://example.com');
     expect(v.ok).toBe(true);
     expect(UNTRUSTED_MARKER).toContain('未可信');
+  });
+});
+
+describe('resolveMaxBytes (M11)', () => {
+  it('缺省时使用默认 500000', () => {
+    expect(resolveMaxBytes(undefined)).toBe(500_000);
+  });
+
+  it('非正数 / NaN / Infinity 回退默认', () => {
+    expect(resolveMaxBytes(0)).toBe(500_000);
+    expect(resolveMaxBytes(-1)).toBe(500_000);
+    expect(resolveMaxBytes(Number.NaN)).toBe(500_000);
+    expect(resolveMaxBytes(Number.POSITIVE_INFINITY)).toBe(500_000);
+  });
+
+  it('合法值原样返回', () => {
+    expect(resolveMaxBytes(100)).toBe(100);
+    expect(resolveMaxBytes(500_000)).toBe(500_000);
+    expect(resolveMaxBytes(2_000_000)).toBe(2_000_000);
+  });
+
+  it('超过硬上限 2000000 时截断', () => {
+    expect(resolveMaxBytes(2_000_001)).toBe(2_000_000);
+    expect(resolveMaxBytes(Number.MAX_SAFE_INTEGER)).toBe(2_000_000);
+  });
+
+  it('maxBytes 为负时按默认值抓取，而非返回空内容', async () => {
+    mockDns.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    mockFetch('hello world', { headers: { 'content-type': 'text/plain' } });
+    const result = await webFetch({ url: 'https://example.com', maxBytes: -1 }, '/tmp');
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('hello world');
+  });
+
+  it('maxBytes 超过硬上限时响应体按 2000000 字节截断', async () => {
+    mockDns.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    const body = 'x'.repeat(2_100_000);
+    mockFetch(body, { headers: { 'content-type': 'text/plain' } });
+    const result = await webFetch({ url: 'https://example.com', maxBytes: 5_000_000 }, '/tmp');
+    expect(result.ok).toBe(true);
+    expect(result.output.length).toBeLessThanOrEqual(UNTRUSTED_MARKER.length + 2_000_000);
+    expect(result.output.length).toBeGreaterThan(UNTRUSTED_MARKER.length + 1_500_000);
   });
 });

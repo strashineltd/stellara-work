@@ -429,6 +429,79 @@ describe('runResponsesLoop', () => {
     });
   });
 
+  describe('敏感工具审批分类', () => {
+    function toolCallStream(name: string): Array<Record<string, unknown>> {
+      return [
+        {
+          type: 'response.output_item.done',
+          output_index: 0,
+          item: { type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: '{"tabId":"t1"}', status: 'in_progress' },
+        },
+        {
+          type: 'response.function_call_arguments.done',
+          output_index: 0,
+          item_id: 'fc-1',
+          arguments: '{"tabId":"t1"}',
+        },
+        {
+          type: 'response.completed',
+          response: {
+            id: 'resp-001',
+            object: 'response',
+            model: 'test',
+            status: 'completed',
+            output: [{ type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: '{"tabId":"t1"}', status: 'completed' }],
+          },
+        },
+      ];
+    }
+
+    async function runAndCollectApprovals(
+      name: string,
+      opts: { planMode?: boolean } = {},
+    ): Promise<ReturnType<typeof vi.fn>> {
+      streamQueue.push(() => toolCallStream(name));
+      const hub = new ContextHub('sess-001', tmpDir);
+      const onApproval = vi.fn().mockResolvedValue(false);
+      for await (const _event of runResponsesLoop('test', {
+        model: DEFAULT_MODEL,
+        cwd: tmpDir,
+        sessionId: 'sess-001',
+        contextHub: hub,
+        onApproval,
+        ...(opts.planMode ? { planMode: true } : {}),
+      })) {
+        // 消费事件
+      }
+      return onApproval;
+    }
+
+    it.each(['browser_screenshot', 'memory_save'])(
+      '%s 未批准时先征求用户批准，拒绝后不执行',
+      async (name) => {
+        const onApproval = await runAndCollectApprovals(name);
+
+        expect(mockRequiresApproval).not.toHaveBeenCalled();
+        expect(onApproval).toHaveBeenCalledTimes(1);
+        expect(onApproval).toHaveBeenCalledWith(
+          expect.objectContaining({ function: expect.objectContaining({ name }) }),
+        );
+      },
+    );
+
+    it.each(['browser_snapshot', 'browser_extract'])(
+      'plan 模式下 %s 也需要审批（不再静默放行）',
+      async (name) => {
+        const onApproval = await runAndCollectApprovals(name, { planMode: true });
+
+        expect(onApproval).toHaveBeenCalledTimes(1);
+        expect(onApproval).toHaveBeenCalledWith(
+          expect.objectContaining({ function: expect.objectContaining({ name }) }),
+        );
+      },
+    );
+  });
+
   it('记忆注入携带会话所属项目 id（按项目检索项目记忆）', async () => {
     const hub = new ContextHub('sess-001', tmpDir);
     for await (const _ev of runResponsesLoop('测试任务', {
