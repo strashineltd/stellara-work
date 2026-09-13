@@ -54,6 +54,7 @@ function isPrivateOrReservedIpv4(ip: string): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
   if (a === 192 && b === 168) return true; // 192.168.0.0/16
   if (a === 192 && b === 0 && (c === 0 || c === 2)) return true; // 192.0.0.0/24 IETF + 192.0.2.0/24 TEST-NET-1
+  if (a === 192 && b === 88 && c === 99) return true; // 192.88.99.0/24 6to4 relay anycast (RFC 7526)
   if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
   if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
   if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
@@ -165,6 +166,17 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0 && bytes[3] === 0) return true;
   // documentation 2001:db8::/32
   if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true;
+  // discard-only 100::/64 (RFC 6666)
+  if (bytes[0] === 0x01 && bytes[1] === 0x00 && isAllZero(bytes.subarray(2, 8))) return true;
+  // benchmarking 2001:2::/48 (RFC 5180)
+  if (
+    bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 &&
+    bytes[3] === 0x02 && bytes[4] === 0x00 && bytes[5] === 0x00
+  ) {
+    return true;
+  }
+  // documentation 3fff::/20 (RFC 9637)
+  if (bytes[0] === 0x3f && bytes[1] === 0xff && (bytes[2]! & 0xf0) === 0) return true;
 
   return false;
 }

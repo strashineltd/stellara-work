@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { RunCommandArgs, ToolResult, OpenAITool, ToolResultMeta } from '../../../shared/ipc';
 import { isWithinDir, canonicalCwd, verifyExistingPath, verifyWritePath } from '../../fs/path-security';
+import { checkUrlDestination } from '../../security/net-policy';
 
 /**
  * 命令白名单（安全子集）。
@@ -84,6 +85,7 @@ const PATH_FLAGS: Record<string, Set<string>> = {
     '-T', '--upload-file', '-o', '--output', '-K', '--config', '-b', '--cookie',
     '-c', '--cookie-jar', '-D', '--dump-header', '--data', '--data-binary',
     '--data-ascii', '--data-raw', '--json', '-F', '--form',
+    '-d', '--data-urlencode', '--url-query', '-w', '--write-out',
   ]),
   make: new Set(['-C', '--directory', '-f', '--file', '--makefile', '-I', '--include-dir']),
   cmake: new Set(['-S', '-B', '-C', '--source', '--build', '--install']),
@@ -117,6 +119,59 @@ const PATH_FLAGS: Record<string, Set<string>> = {
   plutil: new Set(['-o', '--output']),
   diff: new Set(['--from-file', '--to-file']),
 };
+
+/**
+ * 已知“取值不是文件路径”的旗标白名单（按命令）。
+ * 这些旗标的取值常含 `/`、`..` 或 `@`（如 header/referer/glob/format），
+ * 但语义上是字符串/正则/构建变量，不应按路径 fail-closed 拒绝。
+ * attached: 允许 `--flag=value` / 短选项贴值 `-Xvalue` 形式。
+ * 注意：与 PATH_FLAGS 冲突时以 PATH_FLAGS 为准（先匹配路径旗标）。
+ */
+interface NonPathFlagSpec {
+  flag: string;
+  attached?: boolean;
+}
+
+const NON_PATH_FLAGS: Record<string, NonPathFlagSpec[]> = {
+  curl: [
+    { flag: '--header', attached: true },
+    { flag: '-H', attached: true },
+    { flag: '--referer', attached: true },
+    { flag: '-e', attached: true },
+    { flag: '--user-agent', attached: true },
+    { flag: '-A', attached: true },
+    { flag: '-S' },
+    { flag: '-s' },
+  ],
+  git: [
+    { flag: '--grep', attached: true },
+    { flag: '-S', attached: true },
+    { flag: '--pretty', attached: true },
+    { flag: '--format', attached: true },
+  ],
+  rg: [
+    { flag: '--glob', attached: true },
+    { flag: '--iglob', attached: true },
+  ],
+  grep: [
+    { flag: '--exclude', attached: true },
+    { flag: '--include', attached: true },
+  ],
+  cmake: [{ flag: '-D', attached: true }],
+};
+
+function matchesNonPathFlag(arg: string, specs: NonPathFlagSpec[] | undefined): boolean {
+  if (!specs) return false;
+  for (const spec of specs) {
+    if (arg === spec.flag) return true;
+    if (!spec.attached) continue;
+    if (arg.startsWith(spec.flag + '=')) return true;
+    if (!spec.flag.startsWith('--') && arg.startsWith(spec.flag) && arg.length > spec.flag.length) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * 单条命令解析：
@@ -219,13 +274,35 @@ async function validateContainedPath(
 }
 
 /**
+ * 提取 token 中 `@` 之后的候选路径（`@/abs`、`name@/abs`、`-d@/abs` 等）。
+ * 编译器 response file、curl `name@file` 都以 @ 引入路径，需按路径语义复核。
+ */
+function atPathCandidates(token: string): string[] {
+  const out: string[] = [];
+  let idx = token.indexOf('@');
+  while (idx !== -1 && idx < token.length - 1) {
+    out.push(token.slice(idx + 1));
+    idx = token.indexOf('@', idx + 1);
+  }
+  return out;
+}
+
+/**
  * 校验路径参数是否在工作目录内。
  * 拒绝盘符相对/绝对路径、`..` 越界、symlink 逃逸与原前缀同名的兄弟路径。
  * 返回 null 表示 OK，返回字符串表示错误。
  */
 async function validatePathArg(arg: string, baseDir: string, root: string): Promise<string | null> {
-  // 跳过 flag（--xxx, -x）—— 除非它是带路径语义的 flag，由 validatePathFlags 处理
+  // 跳过 flag（--xxx, -x）—— 除非它是带路径语义的 flag，由 validatePathFlags 处理；
+  // flag 中内嵌的 `@`/路径由 flagTokenLooksLikePath 兜底。
   if (arg.startsWith('-')) return null;
+
+  // @ 之后的候选（@/etc、name@/etc）一律按路径复核，防止 response file / 数据文件读取。
+  for (const candidate of atPathCandidates(arg)) {
+    const err = await validateContainedPath(candidate, baseDir, root, '路径参数');
+    if (err) return err;
+  }
+
   // 跳过不含路径分隔符且不含 .. 的纯文本参数（如 commit message）
   if (
     !arg.includes('/') &&
@@ -258,21 +335,27 @@ async function validatePathArg(arg: string, baseDir: string, root: string): Prom
  */
 function pathValueCandidates(value: string): string[] {
   const candidates = [value];
-  if (value.startsWith('@')) candidates.push(value.slice(1));
-  const atIndex = value.indexOf('=@');
-  if (atIndex !== -1) candidates.push(value.slice(atIndex + 2));
+  candidates.push(...atPathCandidates(value));
   const eqIndex = value.indexOf('=');
   if (eqIndex !== -1) candidates.push(value.slice(eqIndex + 1));
   return candidates;
 }
 
-/** 未知旗标自身携带路径的判定（fail-closed）：含分隔符 / 上级引用 / 绝对路径。 */
+/** 未知旗标自身携带路径的判定（fail-closed）：含分隔符 / 上级引用 / 绝对路径 / @ 路径。 */
 function flagTokenLooksLikePath(token: string): boolean {
-  return (
+  if (
     token.includes('/') ||
     token.includes('\\') ||
     token.includes('..') ||
     isAbsolutePathArg(token)
+  ) {
+    return true;
+  }
+  return atPathCandidates(token).some(
+    (candidate) =>
+      isAbsolutePathArg(candidate) ||
+      isDriveRelativePathArg(candidate) ||
+      candidate.includes('..'),
   );
 }
 
@@ -291,6 +374,7 @@ async function validatePathFlags(
 ): Promise<string | null> {
   const exeBase = path.basename(exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   const pathFlags = PATH_FLAGS[exeBase];
+  const nonPathFlags = NON_PATH_FLAGS[exeBase];
 
   const check = async (flag: string, value: string): Promise<string | null> =>
     validateContainedPath(value, baseDir, root, `命令 ${exeBase} 的 ${flag} 参数`);
@@ -332,6 +416,8 @@ async function validatePathFlags(
       continue;
     }
 
+    if (matchesNonPathFlag(arg, nonPathFlags)) continue;
+
     if (flagTokenLooksLikePath(arg)) {
       return `命令 ${exeBase} 的参数 "${arg}" 含路径，已按超出工作目录拒绝。`;
     }
@@ -372,6 +458,61 @@ function findDisallowedUrlScheme(args: string[]): string | null {
   for (const arg of args) {
     const scheme = URL_SCHEME_RE.exec(arg)?.[1];
     if (scheme && !ALLOWED_URL_SCHEMES_RE.test(scheme)) return arg;
+  }
+  return null;
+}
+
+/**
+ * 工具级显式拒绝（fail-closed）：无法安全解析其内容、且会读取任意文件或注入可执行配置的旗标。
+ * - curl -K/--config：从任意路径读取配置（可再指向其他文件/输出路径）
+ * - git -c/--config-env：注入 core.fsmonitor / credential.helper 等可执行配置
+ * - sqlite3 .read/.import：读取任意文件
+ * 返回错误文案，null 表示通过。
+ */
+function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
+  if (exeBase === 'curl') {
+    for (const arg of args) {
+      if (arg.startsWith('-K') || arg === '--config' || arg.startsWith('--config=')) {
+        return '不允许：-K/--config 可读取任意配置';
+      }
+    }
+  }
+  if (exeBase === 'git') {
+    for (const arg of args) {
+      if (arg === '-c' || (arg.startsWith('-c') && !arg.startsWith('--'))) {
+        return '不允许：git -c 可注入可执行配置（请使用专用 git 工具）。';
+      }
+      if (arg === '--config-env' || arg.startsWith('--config-env=')) {
+        return '不允许：git --config-env 可注入可执行配置（请使用专用 git 工具）。';
+      }
+    }
+  }
+  if (exeBase === 'sqlite3') {
+    for (const arg of args) {
+      const re = /\.(read|import)\s+(\S+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(arg)) !== null) {
+        const target = m[2]!;
+        if (isAbsolutePathArg(target) || isDriveRelativePathArg(target) || target.includes('..')) {
+          return `不允许：sqlite3 .${m[1]} 指向工作目录外路径（${target}）。`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+const HTTP_URL_RE = /^https?:\/\//i;
+
+/** 从参数中提取 http(s) URL（本身是 URL，或 `--flag=http://...` 形式的取值）。 */
+function httpUrlCandidate(arg: string): string | null {
+  if (HTTP_URL_RE.test(arg)) return arg;
+  if (arg.startsWith('-')) {
+    const eq = arg.indexOf('=');
+    if (eq !== -1) {
+      const value = arg.slice(eq + 1);
+      if (HTTP_URL_RE.test(value)) return value;
+    }
   }
   return null;
 }
@@ -525,9 +666,24 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
     };
   }
 
+  const forbiddenArg = findForbiddenToolArg(exeBase, parsed.args);
+  if (forbiddenArg !== null) {
+    return { ok: false, output: '', error: forbiddenArg };
+  }
+
   const badSchemeArg = findDisallowedUrlScheme(parsed.args);
   if (badSchemeArg !== null) {
     return { ok: false, output: '', error: `不允许的 URL 协议：${badSchemeArg}。仅允许 http/https。` };
+  }
+
+  // URL 目标 SSRF 校验：http(s) URL 参数（含 --url= 形式）统一走共享私网/保留地址判定
+  for (const arg of parsed.args) {
+    const url = httpUrlCandidate(arg);
+    if (url === null) continue;
+    const destination = await checkUrlDestination(url);
+    if (!destination.ok) {
+      return { ok: false, output: '', error: `不允许访问私网/保留地址：${url}` };
+    }
   }
 
   // 路径参数校验（通用：检测含路径分隔符的参数）

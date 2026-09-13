@@ -109,6 +109,42 @@ describe('isPrivateOrReservedIp (IPv6 canonicalization)', () => {
   });
 });
 
+describe('additional reserved ranges (final re-review D)', () => {
+  it('blocks 192.88.99.0/24, 2001:2::/48, 100::/64 and 3fff::/20', () => {
+    for (const ip of [
+      '192.88.99.0',
+      '192.88.99.1',
+      '192.88.99.255',
+      '2001:2::',
+      '2001:2::1',
+      '2001:2:0:ffff::1',
+      '100::',
+      '100::1',
+      '100::dead:beef',
+      '3fff::',
+      '3fff::1',
+      '3fff:fff:ffff::1',
+    ]) {
+      expect(isPrivateOrReservedIp(ip), ip).toBe(true);
+    }
+  });
+
+  it('keeps addresses adjacent to the new ranges allowed', () => {
+    for (const ip of [
+      '192.88.98.255',
+      '192.88.100.0',
+      '2001:1::1',
+      '2001:3::1',
+      '100:0:0:1::1',
+      '4000::1',
+      '3f00::1',
+      '3fff:1000::1',
+    ]) {
+      expect(isPrivateOrReservedIp(ip), ip).toBe(false);
+    }
+  });
+});
+
 describe('isRestrictedHostname', () => {
   it('blocks localhost variants, 0.0.0.0/[::], .local and metadata names', () => {
     for (const host of [
