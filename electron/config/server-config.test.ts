@@ -27,6 +27,26 @@ describe('server config', () => {
     expect(config.normalizeServerUrl('not a url')).toBeNull();
   });
 
+  it('allows http only for loopback hosts', () => {
+    expect(config.normalizeServerUrl('http://localhost:4096/')).toBe('http://localhost:4096');
+    expect(config.normalizeServerUrl('http://127.0.0.1:4096/')).toBe('http://127.0.0.1:4096');
+    expect(config.normalizeServerUrl('http://127.8.8.8:4096')).toBe('http://127.8.8.8:4096');
+    expect(config.normalizeServerUrl('http://[::1]:4096/')).toBe('http://[::1]:4096');
+  });
+
+  it('rejects cleartext http to remote hosts', () => {
+    expect(config.normalizeServerUrl('http://10.0.0.5:4096')).toBeNull();
+    expect(config.normalizeServerUrl('http://example.com/base')).toBeNull();
+    expect(config.normalizeServerUrl('http://127.0.0.1.evil.com')).toBeNull();
+    expect(config.normalizeServerUrl('http://[::ffff:127.0.0.1]')).toBeNull();
+    expect(config.validateServerUrl('http://10.0.0.5:4096')).toEqual({ error: 'https-required' });
+  });
+
+  it('accepts https to remote hosts', () => {
+    expect(config.normalizeServerUrl('https://10.0.0.5:4096/')).toBe('https://10.0.0.5:4096');
+    expect(config.normalizeServerUrl('https://example.com')).toBe('https://example.com');
+  });
+
   it('adds, updates and removes server entries', async () => {
     const entry = { id: 'srv-1', name: '本地服务器', url: 'http://localhost:4096', username: 'opencode', createdAt: '2026-09-10T00:00:00Z' };
     await config.addServerEntry(entry);

@@ -12,10 +12,11 @@ interface ServerDialogProps {
 export const DEFAULT_SERVER_URL = 'http://localhost:4096';
 const DEFAULT_USERNAME = 'opencode';
 
-/** 主进程错误 → 中文可读提示：401 鉴权 / 非法协议 / 其余透传 */
+/** 主进程错误 → 中文可读提示：401 鉴权 / 非本机 http / 非法协议 / 其余透传 */
 export function mapServerError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/401|unauthorized/i.test(message)) return '鉴权失败，请检查用户名或密码';
+  if (/非本机|https-required/i.test(message)) return '非本机服务器必须使用 https';
   if (/http/i.test(message)) return '服务器 URL 仅支持 http/https';
   return `连接失败：${message}`;
 }
@@ -94,7 +95,7 @@ export function ServerDialog({ mode, entry, onCancel, onSaved }: ServerDialogPro
               onChange={(e) => setUrl(e.target.value)}
               autoFocus
             />
-            <div className="form-hint">仅支持 http:// 或 https:// 地址</div>
+            <div className="form-hint">本机地址可用 http://，非本机地址必须使用 https://</div>
           </div>
           <div className="form-row">
             <label htmlFor="server-name">名称</label>

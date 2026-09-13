@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockTestConnection, mockUpsertModel, mockSetKey, mockLoadConfig, mockSaveConfig } = vi.hoisted(() => ({
+const { mockTestConnection, mockUpsertModel, mockSetKey, mockGetKey, mockLoadConfig, mockSaveConfig } = vi.hoisted(() => ({
   mockTestConnection: vi.fn(),
   mockUpsertModel: vi.fn(),
   mockSetKey: vi.fn(),
+  mockGetKey: vi.fn(),
   mockLoadConfig: vi.fn(),
   mockSaveConfig: vi.fn(),
 }));
@@ -17,9 +18,9 @@ vi.mock('./config-v2', () => ({
   loadConfig: mockLoadConfig,
   saveConfig: mockSaveConfig,
 }));
-vi.mock('./secrets', () => ({ setKey: mockSetKey }));
+vi.mock('./secrets', () => ({ setKey: mockSetKey, getKey: mockGetKey }));
 
-import { configureModel, updateModelWorkDir } from './model-configure';
+import { configureModel, normalizeBaseUrl, updateModelWorkDir } from './model-configure';
 import { grantWorkDir, _resetGrantedForTests } from '../security/workdir-grants';
 import type { ModelConfig } from '../../shared/ipc';
 
@@ -30,12 +31,23 @@ function cfg(over: Partial<ModelConfig> = {}): ModelConfig {
   return { id: 'custom', label: 'Custom', baseUrl: 'https://x', model: 'm', wireApi: 'responses', isCustom: true, apiKey: 'sk-new', ...over };
 }
 
+function storedConfig(baseUrl: string) {
+  return {
+    activeModelId: 'custom',
+    models: [{ id: 'custom', label: 'Custom', baseUrl, model: 'm', createdAt: 't' }],
+    app: {},
+    mcpServers: [],
+    schemaVersion: 1,
+  };
+}
+
 describe('configureModel', () => {
   beforeEach(() => {
     mockTestConnection.mockReset();
     mockUpsertModel.mockReset();
     mockSetKey.mockReset();
-    mockLoadConfig.mockReset();
+    mockGetKey.mockReset().mockReturnValue(null);
+    mockLoadConfig.mockReset().mockResolvedValue(storedConfig(''));
     mockSaveConfig.mockReset();
     _resetGrantedForTests();
   });
@@ -63,6 +75,47 @@ describe('configureModel', () => {
     expect(r.ok).toBe(true);
     expect(mockUpsertModel).toHaveBeenCalled();
     expect(mockSetKey).not.toHaveBeenCalled();
+  });
+
+  it('rejects a baseUrl change without a new apiKey (stored key must not be re-pointed)', async () => {
+    mockGetKey.mockReturnValue('sk-old');
+    mockLoadConfig.mockResolvedValue(storedConfig('https://api.deepseek.com'));
+    const r = await configureModel(cfg({ apiKey: '', baseUrl: 'https://evil.example' }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('更改服务器地址需要重新输入 API Key');
+    expect(r.errorKind).toBe('key_required');
+    expect(mockUpsertModel).not.toHaveBeenCalled();
+    expect(mockSetKey).not.toHaveBeenCalled();
+    expect(mockTestConnection).not.toHaveBeenCalled();
+  });
+
+  it('accepts a baseUrl change when a new apiKey is provided', async () => {
+    mockGetKey.mockReturnValue('sk-old');
+    mockLoadConfig.mockResolvedValue(storedConfig('https://api.deepseek.com'));
+    mockTestConnection.mockResolvedValue({ ok: true });
+    const r = await configureModel(cfg({ apiKey: 'sk-new', baseUrl: 'https://new.example' }));
+    expect(r.ok).toBe(true);
+    expect(mockSetKey).toHaveBeenCalledWith('custom', 'sk-new');
+    expect(mockUpsertModel).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: 'https://new.example' }));
+  });
+
+  it('allows same-baseUrl edits without a key (normalized comparison)', async () => {
+    mockGetKey.mockReturnValue('sk-old');
+    mockLoadConfig.mockResolvedValue(storedConfig('https://API.deepseek.com/v1/'));
+    const r = await configureModel(cfg({ apiKey: '', baseUrl: 'https://api.deepseek.com/v1' }));
+    expect(r.ok).toBe(true);
+    expect(mockTestConnection).not.toHaveBeenCalled();
+    expect(mockSetKey).not.toHaveBeenCalled();
+    expect(mockUpsertModel).toHaveBeenCalled();
+  });
+
+  it('normalizeBaseUrl ignores case, trailing slashes and default ports', () => {
+    expect(normalizeBaseUrl('https://API.Example.com/v1/')).toBe('https://api.example.com/v1');
+    expect(normalizeBaseUrl('https://api.example.com:443/v1')).toBe('https://api.example.com/v1');
+    expect(normalizeBaseUrl('  https://api.example.com/v1  ')).toBe('https://api.example.com/v1');
+    expect(normalizeBaseUrl('')).toBe('');
+    expect(normalizeBaseUrl(undefined)).toBe('');
+    expect(normalizeBaseUrl('not a url/')).toBe('not a url');
   });
 
   it('rejects an ungranted workDir without testing or saving', async () => {

@@ -171,16 +171,43 @@ export async function saveConfig(cfg: AppConfig): Promise<void> {
   await fs.rename(tmpPath, configPath());
 }
 
-/** 服务器 URL 规范化：仅 http/https、去尾斜杠、保留 origin+pathname；非法返回 null。 */
-export function normalizeServerUrl(raw: string): string | null {
+/**
+ * 服务器主机是否为本机回环地址。
+ * 仅这些主机允许 `http:`（Basic 凭据不离开本机）；其余一律要求 `https:`。
+ * WHATWG URL 会把合法 IPv4（含 127.1 / 十进制 / 十六进制写法）规范化为点分十进制。
+ */
+export function isLoopbackServerHost(hostname: string): boolean {
+  const host = (hostname ?? '').toLowerCase();
+  if (host === 'localhost' || host === 'localhost.') return true;
+  if (host === '::1' || host === '[::1]') return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!ipv4) return false;
+  return ipv4[1] === '127' && ipv4.slice(2).every((part) => Number(part) <= 255);
+}
+
+export type ServerUrlError = 'invalid' | 'https-required';
+
+/**
+ * 服务器 URL 校验：仅 http/https、去尾斜杠、保留 origin+pathname。
+ * H9：非回环主机禁止 `http:`（返回 https-required），避免 Basic 凭据明文外发。
+ */
+export function validateServerUrl(raw: string): { url: string } | { error: ServerUrlError } {
+  let url: URL;
   try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    const pathname = url.pathname.replace(/\/+$/, '');
-    return `${url.origin}${pathname}`;
+    url = new URL((raw ?? '').trim());
   } catch {
-    return null;
+    return { error: 'invalid' };
   }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { error: 'invalid' };
+  if (url.protocol === 'http:' && !isLoopbackServerHost(url.hostname)) return { error: 'https-required' };
+  const pathname = url.pathname.replace(/\/+$/, '');
+  return { url: `${url.origin}${pathname}` };
+}
+
+/** 服务器 URL 规范化：非法或非回环 http 返回 null；合法返回规范化 URL。 */
+export function normalizeServerUrl(raw: string): string | null {
+  const result = validateServerUrl(raw);
+  return 'url' in result ? result.url : null;
 }
 
 export function listServerEntries(): ServerConfigEntry[] {

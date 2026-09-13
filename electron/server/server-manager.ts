@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { ServerEntry, ServerInput, ServerRuntimeStatus, ServerStatusEntry, ServerTestResult } from '@shared/ipc';
-import { normalizeServerUrl, type ServerConfigEntry } from '../config/config-v2';
+import { validateServerUrl, type ServerConfigEntry } from '../config/config-v2';
 import type { HealthInfo, OpencodeClient } from './opencode-client';
 import type { RemoteEvent } from './types';
 
@@ -44,9 +44,17 @@ interface RuntimeState {
 }
 
 const URL_ERROR = '服务器 URL 必须是 http:// 或 https:// 地址';
+const HTTPS_REQUIRED_ERROR = '非本机服务器必须使用 https';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** H9：校验并规范化服务器 URL；非回环 http 给出明确的中文错误。 */
+function requireServerUrl(raw: string): string {
+  const result = validateServerUrl(raw);
+  if ('url' in result) return result.url;
+  throw new Error(result.error === 'https-required' ? HTTPS_REQUIRED_ERROR : URL_ERROR);
 }
 
 function describeConnectError(error: unknown): string {
@@ -73,8 +81,7 @@ export class ServerManager {
   }
 
   async add(input: ServerInput): Promise<ServerEntry> {
-    const url = normalizeServerUrl(input.url);
-    if (!url) throw new Error(URL_ERROR);
+    const url = requireServerUrl(input.url);
     const password = input.password ? input.password : null;
     const entry: ServerConfigEntry = {
       id: randomUUID(),
@@ -99,9 +106,7 @@ export class ServerManager {
     const entry = await this.requireEntry(id);
     const changes: Partial<ServerConfigEntry> = {};
     if (patch.url !== undefined) {
-      const url = normalizeServerUrl(patch.url);
-      if (!url) throw new Error(URL_ERROR);
-      changes.url = url;
+      changes.url = requireServerUrl(patch.url);
     }
     if (patch.name !== undefined) changes.name = patch.name.trim() || entry.name;
     if (patch.username !== undefined) changes.username = patch.username;

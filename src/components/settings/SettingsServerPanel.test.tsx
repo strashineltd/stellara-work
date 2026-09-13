@@ -336,6 +336,15 @@ describe('SettingsServerPanel', () => {
     await fireClick(dialog.querySelector('.server-dialog__save'));
 
     expect(byText(dialog, '服务器 URL 仅支持 http/https')).toBeTruthy();
+
+    mocks.add.mockRejectedValueOnce(new Error('非本机服务器必须使用 https'));
+    await fireClick(dialog.querySelector('.server-dialog__cancel'));
+    await fireClick(container.querySelector('.settings-server-add'));
+    dialog = document.querySelector('.server-dialog') as HTMLElement;
+    fireChange(dialog.querySelector('#server-url') as HTMLInputElement, 'http://10.0.0.5:4096');
+    await fireClick(dialog.querySelector('.server-dialog__save'));
+
+    expect(byText(dialog, '非本机服务器必须使用 https')).toBeTruthy();
   });
 
   it('disables the save button while the save is in flight', async () => {

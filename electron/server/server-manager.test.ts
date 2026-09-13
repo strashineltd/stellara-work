@@ -59,6 +59,19 @@ describe('ServerManager', () => {
     expect(addEntry).not.toHaveBeenCalled();
   });
 
+  it('rejects cleartext http to remote hosts with a clear message', async () => {
+    const addEntry = vi.fn();
+    const { manager } = makeManager({ addEntry });
+    await expect(manager.add({ url: 'http://10.0.0.5:4096' })).rejects.toThrow('非本机服务器必须使用 https');
+    expect(addEntry).not.toHaveBeenCalled();
+  });
+
+  it('accepts https to remote hosts', async () => {
+    const { manager } = makeManager();
+    const added = await manager.add({ url: 'https://10.0.0.5:4096', name: 'remote' });
+    expect(added.url).toBe('https://10.0.0.5:4096');
+  });
+
   it('adds a valid server, stores password and hides it from list()', async () => {
     const setPassword = vi.fn(async () => {});
     const { manager } = makeManager({ setPassword });
@@ -143,6 +156,7 @@ describe('ServerManager', () => {
     expect(updated).toMatchObject({ id: 'srv-1', name: 'Renamed', url: 'http://127.0.0.1:5000' });
     expect(updateEntry).toHaveBeenCalledWith('srv-1', { url: 'http://127.0.0.1:5000', name: 'Renamed' });
     await expect(manager.update('srv-1', { url: 'file:///etc/passwd' })).rejects.toThrow(/http/);
+    await expect(manager.update('srv-1', { url: 'http://10.0.0.5:4096' })).rejects.toThrow('非本机服务器必须使用 https');
     expect(updateEntry).toHaveBeenCalledTimes(1);
     await expect(manager.update('ghost', { name: 'x' })).rejects.toThrow(/不存在/);
   });

@@ -1118,7 +1118,12 @@ function registerIpcHandlers(): void {
 
   handle('auth:local:switch', async (_e, id: string) => {
     const { localAuth } = await import('./auth/local-auth-manager');
-    return localAuth.switch(id);
+    const user = localAuth.switch(id);
+    // H10：身份切换后若云会话主体与新身份绑定不一致 → 登出并广播账号状态
+    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    const cleared = await cloudAuth.reconcileLocalIdentitySwitch(user.id);
+    if (cleared) broadcastSettingsChanged();
+    return user;
   });
 
   // 云账号体系（Phase 3 · 腾讯云 CloudBase）

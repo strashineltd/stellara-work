@@ -37,6 +37,8 @@ import { toCloudAccount, type RawCloudUser } from './cloud-user';
 
 const ACCESS_TOKEN_KEY = 'ACCESS_TOKEN';
 const REFRESH_TOKEN_KEY = 'REFRESH_TOKEN';
+/** 当前云会话所属的 CloudBase uid（用于本地身份切换时的一致性校验，防止账号显示与 token 主体不一致） */
+const SESSION_CLOUD_UID_KEY = 'SESSION_CLOUD_UID';
 
 /** 注册会话暂存有效期（验证码 10 分钟过期，略短一点保守处理） */
 const PENDING_TTL_MS = 9 * 60 * 1000;
@@ -115,6 +117,7 @@ async function persistSession(session: { access_token?: string; refresh_token?: 
 async function clearSession(): Promise<void> {
   await deleteCloudSecret(ACCESS_TOKEN_KEY);
   await deleteCloudSecret(REFRESH_TOKEN_KEY);
+  await deleteCloudSecret(SESSION_CLOUD_UID_KEY);
 }
 
 /** 当前本地身份（绑定操作的主体） */
@@ -124,12 +127,13 @@ function requireLocalUserId(): string {
   return user.id;
 }
 
-/** 登录成功后的统一收尾：落盘 token + 写绑定表 */
+/** 登录成功后的统一收尾：落盘 token + 记录会话主体 uid + 写绑定表 */
 async function onAuthenticated(
   account: CloudAccount,
   session: { access_token?: string; refresh_token?: string } | null | undefined,
 ): Promise<void> {
   await persistSession(session);
+  await setCloudSecret(SESSION_CLOUD_UID_KEY, account.uid);
   upsertCloudLink({
     localUserId: requireLocalUserId(),
     cloudUid: account.uid,
@@ -158,6 +162,18 @@ function buildState(): CloudAuthState {
     signedIn: hasToken,
     account: linkToAccount(linked),
   };
+}
+
+/** 登出实现（signOut 与身份切换守卫共用）：尽量通知 SDK 吊销，随后清本地会话 */
+async function performSignOut(): Promise<void> {
+  try {
+    await getCloudAuth().signOut();
+  } catch (err) {
+    // 网络失败也要把本地会话清干净，否则用户无法切账号
+    log.warn('云账号 signOut 调用失败，仍清除本地会话', err);
+  }
+  await clearSession();
+  resetCloudClient();
 }
 
 export const cloudAuth = {
@@ -310,15 +326,27 @@ export const cloudAuth = {
 
   /** 登出：清会话，但**保留绑定**（下次可用同一账号登录） */
   async signOut(): Promise<CloudResult<CloudAuthState>> {
-    try {
-      await getCloudAuth().signOut();
-    } catch (err) {
-      // 网络失败也要把本地会话清干净，否则用户无法切账号
-      log.warn('云账号 signOut 调用失败，仍清除本地会话', err);
-    }
-    await clearSession();
-    resetCloudClient();
+    await performSignOut();
     return { ok: true, data: buildState() };
+  },
+
+  /**
+   * 本地身份切换一致性守卫（H10）：
+   * 若存在云会话，且会话所属云账号与切换后本地身份的绑定不一致，则走登出路径清理会话
+   * （保留绑定表），返回是否发生了清理。调用方据此广播账号状态变更。
+   */
+  async reconcileLocalIdentitySwitch(localUserId: string): Promise<boolean> {
+    const hasSession =
+      getCloudSecret(ACCESS_TOKEN_KEY) !== null || getCloudSecret(REFRESH_TOKEN_KEY) !== null;
+    if (!hasSession) return false;
+
+    const sessionUid = getCloudSecret(SESSION_CLOUD_UID_KEY);
+    const link = getLinkForLocalUser(localUserId);
+    if (sessionUid !== null && link !== null && link.cloudUid === sessionUid) return false;
+
+    log.info('本地身份切换：云会话与当前身份不一致，已登出');
+    await performSignOut();
+    return true;
   },
 
   /** 解绑：清会话 + 删绑定（local-first：本地身份与数据不受影响） */
