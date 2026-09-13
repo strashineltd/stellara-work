@@ -515,28 +515,34 @@ function findDisallowedUrlScheme(args: string[]): string | null {
 }
 
 /**
- * sqlite3 dot-command 的文件目标（.read/.import/.output/.once）：
- * CLI 会再次解析引号，故先去引号再判定；含 `/`、`\`、`..` 或盘符相对即失败关闭。
+ * sqlite3 dot-command token（`\.\w+`），含 .read/.import/.output/.once 的唯一前缀
+ * 缩写（.rea/.imp/.onc/.out，大小写不敏感；CLI 命令名扫描到首个非字母数字即结束）。
  */
-function sqlite3DotCommandReadsOutside(arg: string): boolean {
+const SQLITE3_DOT_COMMAND_TOKEN_RE = /\.\w+/;
+
+/**
+ * 参数中任意位置的绝对路径/越级特征：
+ * - `/`、`\\` 位于 token 边界（行首/空白/`=`/`(`/`,`/`;`/`:` 或紧跟 dot-command）
+ * - 盘符绝对路径（C:\ / C:/）与 UNC（\\\\）
+ * - 任意位置的 `..`
+ */
+const SQLITE3_ABS_PATH_RE = /(^|[\s=(,;:'"])[\\/]|\.\w+["']?[\\/]|[a-zA-Z]:[\\/]|\\\\/;
+const SQLITE3_DRIVE_RELATIVE_RE = /(^|[\s=(,;:'"])[a-zA-Z]:(?![\\/])/;
+
+/**
+ * sqlite3 参数风险判定（fail-closed）：
+ * 只要参数内出现 dot-command token，且同一参数内任意位置出现绝对路径（含盘符）
+ * 或 `..`，即拒绝。不枚举命令名，避免被唯一前缀缩写/大小写/引号包裹绕过。
+ * 引号会被 sqlite3 CLI 再次解析，故先去掉引号再判定。
+ */
+function sqlite3ArgHasDotCommandWithEscape(arg: string): boolean {
   const unquoted = arg.replace(/["']/g, '');
-  const re = /\.(read|import|output|once)\b/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(unquoted)) !== null) {
-    const rest = unquoted.slice(m.index + m[0].length).trim();
-    const target = rest.split(/\s+/)[0] ?? '';
-    if (!target) continue;
-    if (
-      target.includes('/') ||
-      target.includes('\\') ||
-      target.includes('..') ||
-      isAbsolutePathArg(target) ||
-      isDriveRelativePathArg(target)
-    ) {
-      return true;
-    }
-  }
-  return false;
+  if (!SQLITE3_DOT_COMMAND_TOKEN_RE.test(unquoted)) return false;
+  return (
+    unquoted.includes('..') ||
+    SQLITE3_ABS_PATH_RE.test(unquoted) ||
+    SQLITE3_DRIVE_RELATIVE_RE.test(unquoted)
+  );
 }
 
 /**
@@ -550,7 +556,9 @@ function sqlite3DotCommandReadsOutside(arg: string): boolean {
 function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   if (exeBase === 'curl') {
     for (const arg of args) {
-      if (arg.startsWith('--config') || /^-[A-Za-z]*K/.test(arg)) {
+      // 任意单横线选项簇（字母/数字/#/. 等）中出现 K 都可能是 -K：
+      // /^-[A-Za-z]*K/ 会漏掉 -s1K、-#K。
+      if (arg.startsWith('--config') || /^-[^\s]*K/.test(arg)) {
         return '不允许：-K/--config 可读取任意配置';
       }
     }
@@ -567,8 +575,8 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   }
   if (exeBase === 'sqlite3') {
     for (const arg of args) {
-      if (sqlite3DotCommandReadsOutside(arg)) {
-        return '不允许：sqlite3 .read/.import/.output/.once 可读写工作目录外文件。';
+      if (sqlite3ArgHasDotCommandWithEscape(arg)) {
+        return '不允许：sqlite3 .read/.import/.output/.once 等 dot-command 可读写工作目录外文件。';
       }
     }
   }
@@ -707,39 +715,46 @@ async function validateNetworkDestinations(
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024; // 5MB
 
 /**
+ * git 子进程会按其取值执行外部程序的变量（精确名）：
+ * SSH/askpass/proxy/diff/editor 均可指向任意程序，等价于任意命令执行。
+ */
+const GIT_EXEC_ENV_KEYS = new Set([
+  'GIT_SSH_COMMAND', 'GIT_SSH', 'GIT_ASKPASS', 'SSH_ASKPASS', 'GIT_PROXY_COMMAND',
+  'GIT_EXTERNAL_DIFF', 'GIT_SEQUENCE_EDITOR', 'GIT_EDITOR', 'GIT_MERGE_AUTOEDIT', 'GIT_PAGER',
+]);
+
+/**
  * 不允许被模型覆盖的关键环境变量：
  * 这些变量影响命令查找、语言环境、身份等，覆盖可能导致越权或提权。
+ * GIT_EXEC_ENV_KEYS 指定的变量会让 git 执行任意程序。
  */
 const FORBIDDEN_ENV_KEYS = new Set([
   'PATH', 'HOME', 'HOST', 'OSTYPE', 'TERM', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR',
   'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PWD', 'LOGNAME',
-  'GIT_EXTERNAL_DIFF', 'GIT_PAGER',
+  ...GIT_EXEC_ENV_KEYS,
 ]);
 
 /**
  * 禁止下传/覆盖的环境变量：
  * - FORBIDDEN_ENV_KEYS 固定名单；
  * - 所有 `GIT_CONFIG*`（COUNT/KEY_0/VALUE_0/PARAMETERS/GLOBAL/SYSTEM…）——
- *   均可注入 core.fsmonitor / credential.helper 等可执行配置，等价于 git -c。
+ *   均可注入 core.fsmonitor / credential.helper 等可执行配置，等价于 git -c；
+ * - 所有 `GIT_SSH*`（COMMAND/VARIANT…）。
  */
 export function isForbiddenEnvKey(key: string): boolean {
-  if (key.startsWith('GIT_CONFIG')) return true;
+  if (key.startsWith('GIT_CONFIG') || key.startsWith('GIT_SSH')) return true;
   return FORBIDDEN_ENV_KEYS.has(key);
 }
 
 /**
  * buildChildEnv 从宿主环境（base）额外屏蔽的 git 注入键：
  * PATH/HOME 等只是“禁止模型覆盖”，仍需从宿主环境下传；而 GIT_CONFIG* /
- * GIT_EXTERNAL_DIFF / GIT_PAGER 是注入可执行配置的通道，宿主环境也不下传。
+ * GIT_SSH* / GIT_EXTERNAL_DIFF / GIT_PAGER 等是注入可执行配置的通道，宿主环境也不下传。
  * 注意：仅用于 base（宿主）循环；受信任的内部调用方可通过 extra 显式设置
  * `GIT_PAGER=cat` 等加固值（git 工具），模型侧 extra 已被 sanitizeEnv 拒绝。
  */
 function isChildEnvDeniedKey(key: string): boolean {
-  return (
-    key.startsWith('GIT_CONFIG') ||
-    key === 'GIT_EXTERNAL_DIFF' ||
-    key === 'GIT_PAGER'
-  );
+  return key.startsWith('GIT_CONFIG') || key.startsWith('GIT_SSH') || GIT_EXEC_ENV_KEYS.has(key);
 }
 
 /** 环境变量键名：仅允许 C 风格标识符（不能以数字开头） */

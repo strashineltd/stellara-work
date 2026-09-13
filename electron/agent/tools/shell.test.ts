@@ -368,16 +368,17 @@ describe('runCommand', () => {
   });
 
   it('rejects curl upload/output path flags pointing outside cwd (P1 review)', async () => {
-    const secret = path.join(tmpDir, 'secret.txt');
-    await fs.writeFile(secret, 'top-secret');
+    // 固定根目录下的绝对路径：mkdtemp 随机后缀可能含 "K"，会让 -T/-o 贴值路径
+    // 先被 -K 簇检测拒绝（错误文案不同），使测试不确定。根路径保证无大写 K。
+    const outsidePath = path.join(path.parse(os.tmpdir()).root, 'stellara-curl-secret.txt');
     for (const cmd of [
-      `curl -T${secret} https://example.com`,
-      `curl -T "${secret}" https://example.com`,
-      `curl --upload-file=${secret} https://example.com`,
-      `curl --upload-file "${secret}" https://example.com`,
-      `curl -o${secret} https://example.com`,
-      `curl --output=${secret} https://example.com`,
-      `curl --output "${secret}" https://example.com`,
+      `curl -T${outsidePath} https://example.com`,
+      `curl -T "${outsidePath}" https://example.com`,
+      `curl --upload-file=${outsidePath} https://example.com`,
+      `curl --upload-file "${outsidePath}" https://example.com`,
+      `curl -o${outsidePath} https://example.com`,
+      `curl --output=${outsidePath} https://example.com`,
+      `curl --output "${outsidePath}" https://example.com`,
     ]) {
       const r = await runCommand({ command: cmd }, tmpDir);
       expect(r.ok, cmd).toBe(false);
@@ -703,6 +704,39 @@ describe('runCommand', () => {
     }
   });
 
+  it('rejects abbreviated sqlite3 dot-commands targeting outside paths (abbreviation bypass)', async () => {
+    const absSql = path.join(os.tmpdir(), 'evil-abbrev.sql');
+    const absCsv = path.join(os.tmpdir(), 'evil-abbrev.csv');
+    const marker = path.join(os.tmpdir(), `stellara-sqlite-abbrev-${Date.now()}.out`);
+    try {
+      for (const cmd of [
+        `sqlite3 :memory: ".rea '${absSql}'"`,
+        `sqlite3 :memory: '.rea "${absSql}"'`,
+        `sqlite3 :memory: ".imp '${absCsv}' t"`,
+        `sqlite3 :memory: ".onc '${marker}'"`,
+        `sqlite3 :memory: ".out ${marker}"`,
+        'sqlite3 :memory: ".rea \'../outside.sql\'"',
+        `sqlite3 :memory: ".REA '${absSql}'"`,
+      ]) {
+        const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+        expect(r.ok, cmd).toBe(false);
+        expect(r.meta, cmd).toBeUndefined();
+        expect(r.error ?? '', cmd).toContain('sqlite3 .read/.import/.output/.once');
+      }
+      // .out 若被执行会写文件；验证拒绝后 marker 不存在
+      expect(await fs.stat(marker).catch(() => null)).toBeNull();
+    } finally {
+      await fs.rm(marker, { force: true });
+    }
+
+    const benign = await runCommand(
+      { command: 'sqlite3 :memory: "select 1"', timeoutMs: 2000 },
+      tmpDir,
+    );
+    expect(benign.ok).toBe(true);
+    expect(benign.output.trim()).toBe('1');
+  });
+
   it('rejects curl header/referer @file forms and allows plain header values (bypass round)', async () => {
     for (const cmd of [
       'curl --version -H@/etc/passwd',
@@ -738,6 +772,60 @@ describe('runCommand', () => {
     }
     const ok = await runCommand({ command: 'curl --version -sS https://example.com' }, tmpDir);
     expect(ok.ok).toBe(true);
+  });
+
+  it('rejects curl -K hidden in digit/# short-option clusters (abbreviation bypass)', async () => {
+    for (const cmd of [
+      'curl -s1K cfg',
+      'curl -#K cfg',
+      'curl -sOK cfg',
+      'curl --version -s1K cfg https://example.com',
+      'curl --version -#K cfg https://example.com',
+    ]) {
+      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.meta, cmd).toBeUndefined();
+      expect(r.error ?? '', cmd).toContain('不允许：-K/--config 可读取任意配置');
+    }
+    const ok = await runCommand({ command: 'curl --version -sS https://example.com' }, tmpDir);
+    expect(ok.ok).toBe(true);
+  });
+
+  it('rejects GIT_SSH_COMMAND and other git exec env overrides (env injection)', async () => {
+    const marker = path.join(os.tmpdir(), `stellara-git-ssh-marker-${Date.now()}`);
+    try {
+      for (const key of [
+        'GIT_SSH_COMMAND',
+        'GIT_SSH',
+        'GIT_ASKPASS',
+        'SSH_ASKPASS',
+        'GIT_PROXY_COMMAND',
+        'GIT_SEQUENCE_EDITOR',
+        'GIT_EDITOR',
+        'GIT_MERGE_AUTOEDIT',
+        'GIT_CONFIG_NOSYSTEM',
+        'GIT_CONFIG_PARAMETERS',
+        'GIT_CONFIG_COUNT',
+        'GIT_CONFIG_KEY_0',
+        'GIT_CONFIG_VALUE_0',
+      ]) {
+        const r = await runCommand(
+          {
+            command: 'git ls-remote git@example.invalid:repo',
+            env: { [key]: `sh -c "touch ${marker}"` },
+            timeoutMs: 1000,
+          },
+          tmpDir,
+        );
+        expect(r.ok, key).toBe(false);
+        expect(r.meta, key).toBeUndefined();
+        expect(r.error ?? '', key).toContain(key);
+        expect(r.error ?? '', key).toContain('不允许覆盖关键环境变量');
+      }
+      expect(await fs.stat(marker).catch(() => null)).toBeNull();
+    } finally {
+      await fs.rm(marker, { force: true });
+    }
   });
 
   it('rejects GIT_CONFIG* / diff / pager env overrides (bypass round)', async () => {
@@ -888,6 +976,47 @@ describe('buildChildEnv (H5)', () => {
       'GIT_CONFIG_PARAMETERS',
       'GIT_CONFIG_GLOBAL',
       'GIT_CONFIG_SYSTEM',
+      'GIT_EXTERNAL_DIFF',
+      'GIT_PAGER',
+    ]) {
+      expect(env[key], key).toBeUndefined();
+    }
+  });
+
+  it('never forwards GIT_SSH* / askpass / editor / config keys from host env (env injection)', () => {
+    const env = buildChildEnv(
+      { MY_FLAG: 'ok' },
+      {
+        PATH: '/usr/bin',
+        GIT_SSH_COMMAND: 'sh -c evil',
+        GIT_SSH: 'evil',
+        GIT_SSH_VARIANT: 'ssh',
+        GIT_ASKPASS: 'evil',
+        SSH_ASKPASS: 'evil',
+        GIT_PROXY_COMMAND: 'evil',
+        GIT_SEQUENCE_EDITOR: 'evil',
+        GIT_EDITOR: 'evil',
+        GIT_MERGE_AUTOEDIT: 'no',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_GLOBAL: '/tmp/evil',
+        GIT_EXTERNAL_DIFF: 'evil',
+        GIT_PAGER: 'evil',
+      } as NodeJS.ProcessEnv,
+    );
+    expect(env.MY_FLAG).toBe('ok');
+    expect(env.PATH).toBe('/usr/bin');
+    for (const key of [
+      'GIT_SSH_COMMAND',
+      'GIT_SSH',
+      'GIT_SSH_VARIANT',
+      'GIT_ASKPASS',
+      'SSH_ASKPASS',
+      'GIT_PROXY_COMMAND',
+      'GIT_SEQUENCE_EDITOR',
+      'GIT_EDITOR',
+      'GIT_MERGE_AUTOEDIT',
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_GLOBAL',
       'GIT_EXTERNAL_DIFF',
       'GIT_PAGER',
     ]) {
