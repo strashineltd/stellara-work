@@ -10,6 +10,12 @@
 /** 邮箱 */
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 
+/**
+ * 裸长数字串（uid / 手机号等，7 位起）。
+ * 端口（4 位）、行号、`YYYY-MM-DD HH:mm:ss` 时间戳的数字段均短于 7 位，不受影响。
+ */
+const BARE_DIGITS_RE = /\b\d{7,}\b/g;
+
 /** JWT（header.payload.signature，常见 eyJ 开头） */
 const JWT_RE = /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b/g;
 
@@ -34,7 +40,19 @@ export function redactSensitiveText(text: string): string {
     .replace(AUTH_HEADER_RE, '$1 <redacted>')
     .replace(JWT_RE, '<redacted-token>')
     .replace(API_KEY_RE, '<redacted-key>')
-    .replace(EMAIL_RE, '<redacted-email>');
+    .replace(EMAIL_RE, '<redacted-email>')
+    // 放最后：邮箱/令牌/赋值先整体替换，避免长数字规则先拆散它们的形态
+    .replace(BARE_DIGITS_RE, '<redacted-number>');
+}
+
+/**
+ * 诊断日志尾：**先脱敏再截断**。
+ *
+ * 顺序不可颠倒：先 `slice` 可能把密钥/令牌的前缀截掉，使其不再匹配脱敏模式，
+ * 从而在返回渲染层的日志尾中泄露剩余片段。
+ */
+export function redactLogTail(raw: string, limit = 2000): string {
+  return redactSensitiveText(raw).slice(-limit);
 }
 
 /** 账号标识 → 固定占位（不泄露 email / username / uid / phone） */

@@ -18,7 +18,16 @@ const loadedKeys = new Set<string>();
 const SECRET_ENV_PREFIXES = ['STELLARA_KEY_', 'STELLARA_SERVER_', 'STELLARA_CLOUD_'];
 
 /** 明显的密钥型键名模式 */
-const SECRET_ENV_PATTERNS = [/_TOKEN$/i, /_SECRET$/i, /_PASSWORD$/i, /_API_KEY$/i];
+const SECRET_ENV_PATTERNS = [
+  /_TOKEN$/i,
+  /_SECRET$/i,
+  /_PASSWORD$/i,
+  /_API_KEY$/i,
+  /_SECRET_KEY$/i,
+  /_ACCESS_KEY$/i,
+  /_PRIVATE_KEY$/i,
+  /_CREDENTIALS$/i,
+];
 
 /** 判定键名是否携带密钥/凭据（与 shell 子进程清洗口径一致） */
 export function isSecretEnvKey(key: string): boolean {

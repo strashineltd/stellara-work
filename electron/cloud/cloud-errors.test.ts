@@ -62,3 +62,17 @@ describe('describeCloudError mapped branches stay intact', () => {
     ).toBe('network');
   });
 });
+
+describe('describeCloudError prototype-key safety (P2)', () => {
+  it.each(['constructor', 'toString', '__proto__'])(
+    'returns the generic failure for %s instead of a function/prototype',
+    (key) => {
+      const result = describeCloudError({ category: key, code: key, message: 'boom' });
+
+      expect(result.message).toBe('操作失败，请稍后重试');
+      expect(result.code).toBe(key);
+      expect(typeof result.hint).toBe('string');
+      expect(result.hint).not.toBe('');
+    },
+  );
+});

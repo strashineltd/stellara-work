@@ -963,9 +963,9 @@ function registerIpcHandlers(): void {
     try {
       const logFile = path.join(app.getPath('logs'), 'main.log');
       const raw = await fs.readFile(logFile, 'utf8');
-      // M5：返回渲染层前先过滤邮箱/令牌/STELLARA_* 等敏感值，保留其余排障上下文
-      const { redactSensitiveText } = await import('./security/redact');
-      logTail = redactSensitiveText(raw.slice(-2000));
+      // M5：先过滤邮箱/令牌/STELLARA_* 等敏感值再截断日志尾，避免截断破坏脱敏模式
+      const { redactLogTail } = await import('./security/redact');
+      logTail = redactLogTail(raw);
     } catch {
       // 日志不存在时保持空
     }

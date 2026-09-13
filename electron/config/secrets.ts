@@ -78,9 +78,11 @@ function envKeyName(modelId: string): string {
 //
 // 写入规则：
 // - 值为安全字符（不含空白 / `#` / 引号）时原样写；
-// - 否则用双引号包裹并转义 `\` `"` `\r` `\n`，保证一个值永远只占一行。
+// - 否则用双引号包裹并转义 `\` `"`，换行/回车编码为 `\u000a` / `\u000d`
+//   （不用 `\n` / `\r`，避免与历史字面反斜杠序列歧义），保证一个值永远只占一行。
 // 读取规则（兼容历史格式）：
-// - 双引号值按上述转义反解（未知转义按字面量保留）；
+// - 双引号值只反解 `\\`、`\"` 与换行编码 `\u000a` / `\u000d`；
+//   历史字面 `\n` / `\r`（如 Windows 路径 `C:\new folder`）按字面量保留；
 // - 单引号值只去引号（旧实现即如此）；
 // - 其余原样。
 
@@ -92,34 +94,38 @@ function quoteValue(value: string): string {
   const escaped = value
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n');
+    .replace(/\r/g, '\\u000d')
+    .replace(/\n/g, '\\u000a');
   return `"${escaped}"`;
 }
+
+const NEWLINE_ESCAPE = '\\u000a';
+const CARRIAGE_RETURN_ESCAPE = '\\u000d';
 
 function unquoteValue(quoted: string): string {
   const inner = quoted.slice(1, -1);
   let out = '';
   for (let i = 0; i < inner.length; i++) {
     const ch = inner[i]!;
-    if (ch === '\\' && i + 1 < inner.length) {
-      const next = inner[i + 1]!;
+    if (ch === '\\') {
+      const next = inner[i + 1];
       if (next === '\\' || next === '"') {
         out += next;
         i++;
         continue;
       }
-      if (next === 'n') {
+      if (inner.startsWith(NEWLINE_ESCAPE, i)) {
         out += '\n';
-        i++;
+        i += NEWLINE_ESCAPE.length - 1;
         continue;
       }
-      if (next === 'r') {
+      if (inner.startsWith(CARRIAGE_RETURN_ESCAPE, i)) {
         out += '\r';
-        i++;
+        i += CARRIAGE_RETURN_ESCAPE.length - 1;
         continue;
       }
     }
+    // 未知转义（含历史字面 \n / \r，如 C:\new folder）按字面量保留
     out += ch;
   }
   return out;

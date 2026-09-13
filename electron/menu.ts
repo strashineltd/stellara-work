@@ -2,15 +2,31 @@ import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions }
 import { buildAppMenuTemplate } from './menu-template';
 import type { MenuAction } from '../shared/ipc';
 
+export interface InstallAppMenuOptions {
+  platform?: NodeJS.Platform;
+  isDev?: boolean;
+}
+
 /**
- * macOS 原生菜单栏（仅 darwin）。
+ * macOS 原生菜单栏（仅 darwin）；Windows / Linux 生产环境清空默认菜单。
  *
- * Windows / Linux 保持现状（autoHideMenuBar + 无自定义菜单）。
+ * - macOS：自定义菜单，生产环境不暴露 reload / forceReload / toggleDevTools 及其默认快捷键。
+ * - Windows / Linux 生产：`Menu.setApplicationMenu(null)`，避免 Electron 自动生成的默认菜单
+ *   暴露 reload / toggleDevTools 及其快捷键；开发环境保留默认菜单便于调试。
+ *
  * 菜单项通过 'menu:action' 事件驱动渲染层 UI，与渲染层快捷键系统复用同一动作语义。
- * 生产环境不暴露 reload / forceReload / toggleDevTools 及其默认快捷键。
  */
-export function installAppMenu(getWindow: () => BrowserWindow | null): void {
-  if (process.platform !== 'darwin') return;
+export function installAppMenu(
+  getWindow: () => BrowserWindow | null,
+  options: InstallAppMenuOptions = {},
+): void {
+  const platform = options.platform ?? process.platform;
+  const isDev = options.isDev ?? process.env.NODE_ENV === 'development';
+
+  if (platform !== 'darwin') {
+    if (!isDev) Menu.setApplicationMenu(null);
+    return;
+  }
 
   // M2.5: 原生关于面板（应用菜单 → 关于）
   app.setAboutPanelOptions({
@@ -28,7 +44,7 @@ export function installAppMenu(getWindow: () => BrowserWindow | null): void {
 
   const template: MenuItemConstructorOptions[] = buildAppMenuTemplate({
     appName: app.name,
-    isDev: process.env.NODE_ENV === 'development',
+    isDev,
     onAction: send,
     openHomepage: () => void shell.openExternal('https://strashineltd.github.io'),
   });

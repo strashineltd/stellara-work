@@ -204,7 +204,9 @@ export function describeCloudError(err: unknown): CloudFailure {
     return { code: 'field_rule', message: fieldRule.message, hint: fieldRule.hint };
   }
 
-  const mapped = CATEGORY_MAP[readString(rawAuth?.category)];
+  // 原型链安全：`constructor` / `toString` / `__proto__` 等键名不得命中 Object.prototype
+  const category = readString(rawAuth?.category);
+  const mapped = Object.hasOwn(CATEGORY_MAP, category) ? CATEGORY_MAP[category] : undefined;
   if (mapped) {
     // RATE_LIMITED 会带 retryAfter，直接把还要等多久说出来
     const seconds = typeof rawAuth?.retryAfter === 'number' ? Math.ceil(rawAuth.retryAfter) : 0;
@@ -216,12 +218,12 @@ export function describeCloudError(err: unknown): CloudFailure {
   const rawCode = extractCode(err);
   const code = SAFE_CODE_RE.test(rawCode) ? rawCode : 'unknown';
   log.warn(
-    `未映射的云服务错误: code=${code} category=${readString(rawAuth?.category) || '-'} ` +
+    `未映射的云服务错误: code=${code} category=${category || '-'} ` +
       `message=${redactSensitiveText(raw)} help=${redactSensitiveText(readString(rawAuth?.helpMessage)) || '-'}`,
   );
   return {
     code,
     message: '操作失败，请稍后重试',
-    hint: CODE_HINTS[code] ?? '请稍后重试，或查看应用日志',
+    hint: Object.hasOwn(CODE_HINTS, code) ? CODE_HINTS[code] : '请稍后重试，或查看应用日志',
   };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactSensitiveText, redactAccountRef } from './redact';
+import { redactSensitiveText, redactAccountRef, redactLogTail } from './redact';
 
 describe('redactSensitiveText (M5)', () => {
   it('redacts email addresses but keeps the surrounding message', () => {
@@ -45,6 +45,19 @@ describe('redactSensitiveText (M5)', () => {
     const line = '2026-09-13 10:00:00 [info] window ready in 123ms';
     expect(redactSensitiveText(line)).toBe(line);
   });
+
+  it('redacts bare long digit runs (uid / phone) without touching the rest of the line', () => {
+    const out = redactSensitiveText('user uid=1234567890123 logged in from 13800138000');
+    expect(out).not.toContain('1234567890123');
+    expect(out).not.toContain('13800138000');
+    expect(out).toContain('user uid=');
+    expect(out).toContain('logged in from');
+  });
+
+  it('keeps short numbers, ports, line numbers and timestamps usable', () => {
+    const line = '2026-09-13 10:00:00 [info] port=5173 line 12345 code 1234 ready';
+    expect(redactSensitiveText(line)).toBe(line);
+  });
 });
 
 describe('redactAccountRef (M5)', () => {
@@ -53,5 +66,18 @@ describe('redactAccountRef (M5)', () => {
     expect(redactAccountRef({ username: 'alice', uid: 'u1' })).toBe('username=<redacted>');
     expect(redactAccountRef({ uid: 'u1' })).toBe('uid=<redacted>');
     expect(redactAccountRef({})).toBe('uid=<redacted>');
+  });
+});
+
+describe('redactLogTail (M5)', () => {
+  it('redacts before slicing so a secret crossing the slice boundary cannot leak a fragment', () => {
+    // "Bearer " 会被 slice(-2000) 截掉，若先截断再脱敏，2000 个 A 将原样返回
+    const raw = `prefix Bearer ${'A'.repeat(2100)}`;
+
+    const out = redactLogTail(raw, 2000);
+
+    expect(out.length).toBeLessThanOrEqual(2000);
+    expect(out).not.toContain('AAAA');
+    expect(out).toContain('<redacted>');
   });
 });

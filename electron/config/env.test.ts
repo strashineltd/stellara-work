@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { setAppDataDir } from './data-dir';
-import { loadEnv, resetEnvCache } from './env';
+import { loadEnv, resetEnvCache, isSecretEnvKey } from './env';
 
 const TEST_KEYS = [
   'STELLARA_KEY_openai',
@@ -15,6 +15,21 @@ const TEST_KEYS = [
   'SOME_TOKEN',
   'NORMAL_FLAG',
 ];
+
+describe('isSecretEnvKey pattern coverage (P2)', () => {
+  it('treats *_SECRET_KEY / *_ACCESS_KEY / *_PRIVATE_KEY / *_CREDENTIALS as secrets', () => {
+    expect(isSecretEnvKey('APP_SECRET_KEY')).toBe(true);
+    expect(isSecretEnvKey('AWS_ACCESS_KEY')).toBe(true);
+    expect(isSecretEnvKey('DEPLOY_PRIVATE_KEY')).toBe(true);
+    expect(isSecretEnvKey('GOOGLE_APPLICATION_CREDENTIALS')).toBe(true);
+  });
+
+  it('keeps non-secret keys and the public publishable key out of the secret set', () => {
+    expect(isSecretEnvKey('NORMAL_FLAG')).toBe(false);
+    expect(isSecretEnvKey('PUBLIC_KEY')).toBe(false);
+    expect(isSecretEnvKey('STELLARA_CLOUDBASE_PUBLISHABLE_KEY')).toBe(false);
+  });
+});
 
 describe('loadEnv secret filtering (H5)', () => {
   let tmpDir: string;

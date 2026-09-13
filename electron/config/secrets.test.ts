@@ -104,6 +104,20 @@ describe('secrets', () => {
     expect(getKey('legacy')).toBe('old value');
   });
 
+  it('keeps literal backslash-n / backslash-r in legacy quoted values (P2 Windows paths)', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, '.env'),
+      'STELLARA_KEY_winpath="C:\\new folder"\nSTELLARA_KEY_winrepo="D:\\repo\\new"\n',
+    );
+    expect(getKey('winpath')).toBe('C:\\new folder');
+    expect(getKey('winrepo')).toBe('D:\\repo\\new');
+  });
+
+  it('still decodes escaped quotes and backslashes in legacy quoted values (P2)', async () => {
+    await fs.writeFile(path.join(tmpDir, '.env'), 'STELLARA_KEY_legacy="a\\\\b\\"c"\n');
+    expect(getKey('legacy')).toBe('a\\b"c');
+  });
+
   it('rejects model ids outside [A-Za-z0-9._-] before writing (M1)', async () => {
     await expect(setKey('bad id', 'sk-x')).rejects.toThrow();
     await expect(setKey('bad\nid', 'sk-x')).rejects.toThrow();
