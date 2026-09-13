@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { loadConfig, saveConfig, addModel, migrateFromV1, _setConfigDir } from './config-v2';
-import { normalizeAllowlistDomain, normalizeAllowlist } from './config-v2';
-import type { McpServerConfig } from '../../shared/ipc';
+import { normalizeAllowlistDomain, normalizeAllowlist, sanitizeSettingsPatch } from './config-v2';
+import type { AppSettings, McpServerConfig } from '../../shared/ipc';
 import { _setSecretsDir, _setCipher, getKey, setKey } from './secrets';
 
 let tmpDir: string;
@@ -226,6 +226,24 @@ describe('config-v2', () => {
     await saveConfig(legacy);
     const loaded = await loadConfig();
     expect(loaded.app.browser).toBeUndefined();
+  });
+
+  describe('sanitizeSettingsPatch', () => {
+    it('rejects workDirDefault so work-dir trust stays picker-grant based', () => {
+      const { patch, rejected } = sanitizeSettingsPatch({ workDirDefault: '/etc' } as Partial<AppSettings>);
+      expect(patch).toEqual({});
+      expect(rejected).toContain('workDirDefault');
+    });
+
+    it('keeps whitelisted keys and rejects everything else', () => {
+      const { patch, rejected } = sanitizeSettingsPatch({
+        theme: 'dark',
+        workDirDefault: '/etc',
+        servers: [],
+      } as Partial<AppSettings>);
+      expect(patch).toEqual({ theme: 'dark' });
+      expect(rejected.sort()).toEqual(['servers', 'workDirDefault']);
+    });
   });
 
   describe('login allowlist normalization', () => {

@@ -108,7 +108,8 @@ function defaultConfig(): AppConfig {
   };
 }
 
-const SETTINGS_PATCH_WHITELIST: readonly string[] = ['workDirDefault', 'shortcuts', 'theme', 'workspaceMode', 'browser'];
+// workDirDefault 不带入白名单：工作目录信任只来自原生选择器授权（C2）
+const SETTINGS_PATCH_WHITELIST: readonly string[] = ['shortcuts', 'theme', 'workspaceMode', 'browser'];
 
 /**
  * 过滤 settings:update 的越权字段：仅保留白名单键。

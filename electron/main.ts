@@ -21,6 +21,13 @@ import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
 import { isSafeExternalUrl } from './security/url-guard';
 import { isTrustedIpcSender } from './security/ipc-guard';
+import {
+  findUngrantedAttachmentSources,
+  grantAttachmentSources,
+  grantWorkDir,
+  isWorkDirGranted,
+  normalizeWorkDir,
+} from './security/workdir-grants';
 import type {
   AppInfo,
   ModelConfig,
@@ -61,7 +68,6 @@ let pendingOpenFile: string | null = null;
 
 // P0-1 + P0-2: 审批流和取消任务的状态管理
 const chatStreams = new ChatStreamRegistry();
-const grantedWorkDirs = new Set<string>();
 
 // BrowserService 的服务端审批（browser_navigate 新域）需要路由到具体 stream 的审批通道。
 const browserSessionStreams = new Map<string, string>();
@@ -80,22 +86,6 @@ let serverRuntime: ServerRuntime | null = null;
 function requireServerRuntime(): ServerRuntime {
   if (!serverRuntime) throw new Error('服务器功能未初始化');
   return serverRuntime;
-}
-
-async function normalizeWorkDir(workDir: string): Promise<string> {
-  const resolved = path.resolve(workDir);
-  if (process.platform === 'win32') return resolved.toLowerCase();
-  try {
-    return await fs.realpath(resolved);
-  } catch {
-    return resolved;
-  }
-}
-
-async function grantWorkDir(workDir: string): Promise<string> {
-  const resolved = path.resolve(workDir);
-  grantedWorkDirs.add(await normalizeWorkDir(workDir));
-  return resolved;
 }
 
 /** 向所有窗口广播设置已变更（渲染层据此刷新本地状态） */
@@ -374,12 +364,10 @@ function registerIpcHandlers(): void {
   });
 
   handle('models:updateWorkDir', async (_e, modelId: string, workDir: string) => {
-    const { loadConfig, saveConfig } = await import('./config/config-v2');
-    const cfg = await loadConfig();
-    const idx = cfg.models.findIndex((m) => m.id === modelId);
-    if (idx < 0) throw new Error(`Model 不存在: ${modelId}`);
-    cfg.models[idx] = { ...cfg.models[idx]!, workDir };
-    await saveConfig(cfg);
+    if (typeof modelId !== 'string' || !modelId.trim()) throw new Error('Model 无效');
+    if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
+    const { updateModelWorkDir } = await import('./config/model-configure');
+    await updateModelWorkDir(modelId.trim(), workDir);
   });
 
   handle('models:updateKey', async (_e, modelId: string, newKey: string) => {
@@ -495,7 +483,7 @@ function registerIpcHandlers(): void {
     });
   }
 
-  // Dialog: 选工作目录
+  // Dialog: 选工作目录（原生选择即授权）
   handle('dialog:openDirectory', async (): Promise<string | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -503,10 +491,10 @@ function registerIpcHandlers(): void {
       properties: ['openDirectory'],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+    return await grantWorkDir(result.filePaths[0]!);
   });
 
-  // Dialog: 多选附件（路径校验交给 attachments:add）
+  // Dialog: 多选附件；选择器返回的源文件记为已授权来源，其余由 attachments:add 校验
   handle('dialog:openAttachmentFiles', async (): Promise<string[] | null> => {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -514,6 +502,7 @@ function registerIpcHandlers(): void {
       properties: ['openFile', 'multiSelections'],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
+    await grantAttachmentSources(result.filePaths);
     return result.filePaths;
   });
 
@@ -622,7 +611,24 @@ function registerIpcHandlers(): void {
     }
     await assertWorkDirAllowed(workDir);
     const { addAttachments } = await import('./attachments/attachments');
-    const attachments = await addAttachments(sessionId, workDir, filePaths);
+    const { addAttachmentsWithProvenance } = await import('./attachments/provenance');
+    const attachments = await addAttachmentsWithProvenance(sessionId, workDir, filePaths, {
+      findUngranted: findUngrantedAttachmentSources,
+      confirmOutside: async (outsidePaths) => {
+        if (!mainWindow) return false;
+        const { response } = await dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: '添加工作区外的附件',
+          message: '以下文件位于已授权工作区之外，是否仍要添加到当前会话？',
+          detail: outsidePaths.join('\n'),
+          buttons: ['取消', '仍然添加'],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        return response === 1;
+      },
+      add: addAttachments,
+    });
     return { attachments };
   });
 
@@ -664,20 +670,13 @@ function registerIpcHandlers(): void {
   });
 
   handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile?: string }) => {
-    if (typeof args?.name !== 'string' || !args.name.trim()) throw new Error('项目名称不能为空');
-    if (typeof args?.workDir !== 'string' || !args.workDir.trim()) throw new Error('请选择项目文件夹');
+    const { createProjectGuarded } = await import('./projects/create');
     const { v4: uuid } = await import('uuid');
     const { createProject } = await import('./store/db');
-    let entryFile: string | undefined;
-    if (typeof args.entryFile === 'string' && args.entryFile.trim()) {
-      const selection = await verifyProjectSelection(args.workDir, args.entryFile.trim());
-      entryFile = selection.path;
-    }
-    const project = createProject({
-      id: uuid(),
-      name: args.name.trim().slice(0, 50),
-      workDir: args.workDir.trim(),
-      entryFile,
+    const project = await createProjectGuarded(args, {
+      newId: () => uuid(),
+      verifySelection: verifyProjectSelection,
+      persist: createProject,
     });
     // 新项目自动初始化内置技能模板（幂等；失败不影响项目创建）
     try {
@@ -1355,11 +1354,9 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
     .filter((d): d is string => !!d);
   allowed.push(...listProjects().map((project) => project.workDir).filter((d): d is string => !!d));
   allowed.push(...listSessions().map((session) => session.workDir).filter((d): d is string => !!d));
-  // 兼容旧版 app 设置中的默认工作目录
-  if (cfg.app.workDirDefault) allowed.push(cfg.app.workDirDefault);
 
   const resolved = await normalizeWorkDir(workDir);
-  if (grantedWorkDirs.has(resolved)) return;
+  if (await isWorkDirGranted(workDir)) return;
   for (const dir of allowed) {
     if ((await normalizeWorkDir(dir)) === resolved) return;
   }

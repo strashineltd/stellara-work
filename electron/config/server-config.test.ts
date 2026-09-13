@@ -67,7 +67,6 @@ describe('server config', () => {
 
   it('keeps every whitelisted settings key', () => {
     const patch = {
-      workDirDefault: '/tmp/work',
       shortcuts: { 'session.new': 'Mod+N' },
       theme: 'light' as const,
       workspaceMode: 'tabs' as const,
@@ -76,6 +75,12 @@ describe('server config', () => {
     const result = config.sanitizeSettingsPatch(patch as never);
     expect(result.rejected).toEqual([]);
     expect(result.patch).toEqual(patch);
+  });
+
+  it('rejects workDirDefault (work-dir trust only via native picker)', () => {
+    const result = config.sanitizeSettingsPatch({ workDirDefault: '/tmp/work' } as never);
+    expect(result.patch).toEqual({});
+    expect(result.rejected).toEqual(['workDirDefault']);
   });
 
   it('stores the password encrypted and readable only by main', async () => {
