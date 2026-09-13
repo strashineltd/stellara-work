@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell, safeStorage, nativeTheme, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, nativeTheme, powerSaveBlocker } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import log from 'electron-log/main';
@@ -2055,6 +2055,10 @@ async function resolveSessionExecutionContext(sessionId: string): Promise<ModelC
 // ============================================
 
 app.whenReady().then(async () => {
+  // H1: 应用默认 session 拒绝一切系统权限请求（Electron 默认自动放行）。
+  // 浏览器分区的权限+SSRF 加固由 BrowserService.getOrCreateWindow 调 hardenSession 完成。
+  const { hardenSessionPermissions } = await import('./security/session-hardening');
+  hardenSessionPermissions(session.defaultSession);
   // M2.3: Windows toast 通知需要 AppUserModelID
   if (process.platform === 'win32') app.setAppUserModelId('work.stellara.app');
   // macOS：Dock 图标跟随 assets（开发模式显示 Electron 默认图标，需显式设置）

@@ -1,7 +1,6 @@
-import { isIPv4 } from 'node:net';
-import dns from 'node:dns/promises';
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 import type { WebFetchArgs } from '../../../shared/ipc';
+import { checkUrlDestination } from '../../security/net-policy';
 
 const VALID_PROTOCOLS = ['https:', 'http:'];
 
@@ -22,65 +21,10 @@ const ALLOWED_CONTENT_TYPES = [
   'application/x-javascript',
 ];
 
-/** 受限 IP 范围（SSRF 防护） */
-function isPrivateOrReservedIp(ip: string): boolean {
-  if (isIPv4(ip)) {
-    const parts = ip.split('.').map(Number);
-    // 127.0.0.0/8 (loopback)
-    if (parts[0] === 127) return true;
-    // 10.0.0.0/8 (private)
-    if (parts[0] === 10) return true;
-    // 172.16.0.0/12 (private)
-    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-    // 192.168.0.0/16 (private)
-    if (parts[0] === 192 && parts[1] === 168) return true;
-    // 169.254.0.0/16 (link-local / cloud metadata)
-    if (parts[0] === 169 && parts[1] === 254) return true;
-    // 0.0.0.0
-    if (ip === '0.0.0.0') return true;
-    return false;
-  }
-  // IPv6
-  const lower = ip.toLowerCase();
-  if (lower === '::1') return true; // loopback
-  if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true; // unspecified
-  if (lower.startsWith('fd') || lower.startsWith('fc')) return true; // ULA (private)
-  if (lower.startsWith('fe80')) return true; // link-local
-  // 映射地址
-  if (lower.startsWith('::ffff:')) {
-    // ::ffff:127.0.0.1 等
-    const mapped = lower.slice(7);
-    if (isIPv4(mapped)) return isPrivateOrReservedIp(mapped);
-  }
-  return false;
-}
-
-/** 受限 hostnames */
-function isRestrictedHostname(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === 'localhost') return true;
-  if (h === '0.0.0.0') return true;
-  if (h.endsWith('.local')) return true;
-  if (h.endsWith('.localhost')) return true;
-  // 云元数据地址
-  if (h === '169.254.169.254') return true;
-  if (h === 'metadata.google.internal') return true;
-  if (h === 'instance-data') return true;
-  return false;
-}
-
-/** DNS 解析后检查所有 IP */
-async function resolvesToPrivateIp(hostname: string): Promise<boolean> {
-  try {
-    const addresses = await dns.lookup(hostname, { all: true, family: 0 });
-    return addresses.some((a) => isPrivateOrReservedIp(a.address));
-  } catch {
-    // DNS 解析失败 → 拒绝（安全默认）
-    return true;
-  }
-}
-
-/** 校验 URL 是否安全（hostname + DNS） */
+/**
+ * 校验 URL 是否安全（hostname + DNS）。
+ * IP/主机名判定统一走 security/net-policy（含 IPv6 规范化，见 H3）。
+ */
 export async function validateUrl(urlStr: string): Promise<{ ok: boolean; error?: string }> {
   let parsed: URL;
   try {
@@ -93,26 +37,7 @@ export async function validateUrl(urlStr: string): Promise<{ ok: boolean; error?
     return { ok: false, error: `不支持的协议: ${parsed.protocol}（只允许 http/https）` };
   }
 
-  // Node.js URL 保留 IPv6 的方括号，需要去掉后再检查
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
-
-  if (isRestrictedHostname(hostname)) {
-    return { ok: false, error: `不允许访问受限地址: ${hostname}` };
-  }
-
-  // 如果 hostname 本身是 IP，直接检查
-  if (isIPv4(hostname) || hostname.includes(':')) {
-    if (isPrivateOrReservedIp(hostname)) {
-      return { ok: false, error: `不允许访问私网/保留 IP: ${hostname}` };
-    }
-  } else {
-    // DNS 解析后检查
-    if (await resolvesToPrivateIp(hostname)) {
-      return { ok: false, error: `域名 ${hostname} 解析到受限 IP，已拒绝` };
-    }
-  }
-
-  return { ok: true };
+  return checkUrlDestination(parsed);
 }
 
 /** 检查 Content-Type 是否为可读文本 */

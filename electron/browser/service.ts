@@ -7,6 +7,7 @@ import { htmlToSnapshot, htmlToTables } from './snapshot';
 import { isAllowedBrowserUrl } from './url-policy';
 import { UNTRUSTED_MARKER, validateUrl } from '../agent/tools/web-fetch';
 import { validateActArgs } from '../agent/tools/browser-tools';
+import { hardenSession } from '../security/session-hardening';
 import type {
   BrowserActArgs,
   BrowserExecJsArgs,
@@ -369,7 +370,12 @@ export class BrowserService {
     }
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     const sess = win.webContents?.session;
-    if (sess) this.partitionSessions.set(partition, sess);
+    if (sess) {
+      // H1+H2：分区 session 必须先加固（拒绝系统权限 + 请求级 SSRF 过滤），
+      // 再有任何加载/子资源请求发生。放在窗口创建后、事件注册与导航前。
+      hardenSession(sess);
+      this.partitionSessions.set(partition, sess);
+    }
     // 禁用下载
     try {
       win.webContents.session.on('will-download', (e: any) => e.preventDefault());
@@ -745,6 +751,10 @@ export class BrowserService {
           if (url !== 'about:blank') {
             const gate = isAllowedBrowserUrl(url);
             if (!gate.ok) return { ok: false, output: '', error: gate.error ?? 'URL 不允许' };
+            // H2：与 browser_navigate 同一异步校验链（字面量私网 IP + DNS），
+            // 同步主机名列表不足以拦住 127.0.0.1/RFC1918 字面量。
+            const validation = await validateUrl(url);
+            if (!validation.ok) return { ok: false, output: '', error: validation.error ?? 'URL 不允许' };
           }
           const { tabId } = this.ensureTab(sessionId, undefined, url);
           const tab = this.tabPool.select(sessionId, tabId);

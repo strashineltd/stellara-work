@@ -64,6 +64,24 @@ describe('webFetch', () => {
     expect(result.error).toContain('私网');
   });
 
+  it('rejects hex-encoded IPv4-mapped IPv6 (H3)', async () => {
+    const result = await webFetch({ url: 'http://[::ffff:7f00:1]/' }, '/tmp');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('私网');
+  });
+
+  it('rejects hex-encoded IPv4-mapped cloud metadata address (H3)', async () => {
+    const result = await webFetch({ url: 'http://[::ffff:a9fe:a9fe]/' }, '/tmp');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('私网');
+  });
+
+  it('rejects hex-encoded IPv4-compatible IPv6 (H3)', async () => {
+    const result = await webFetch({ url: 'http://[::7f00:1]/' }, '/tmp');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('私网');
+  });
+
   it('rejects private IP 10.x.x.x', async () => {
     const result = await webFetch({ url: 'http://10.0.0.1' }, '/tmp');
     expect(result.ok).toBe(false);

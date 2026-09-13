@@ -161,11 +161,11 @@ describe('SSRF chain in browser path (validateUrl)', () => {
   });
 
   it('doNavigate blocks DNS name resolving to private IP', async () => {
-    mockDns.lookup.mockResolvedValue([{ address: '192.168.1.100', family: 4 }]);
     const pool = new TabPool();
     const { wc } = makeWebContents();
     const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
     const tabId = await createTab(svc, 's', 'https://a.com/');
+    mockDns.lookup.mockResolvedValue([{ address: '192.168.1.100', family: 4 }]);
     const r = await svc.get('s').navigate({ tabId, url: 'https://evil.example.com/' });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('受限');
@@ -429,6 +429,87 @@ describe('browser window hardening', () => {
     const ev = { preventDefault: vi.fn() };
     handler(ev);
     expect(ev.preventDefault).toHaveBeenCalled();
+  });
+});
+
+describe('session hardening (H1/H2)', () => {
+  function makeHardened() {
+    const webRequest = { onBeforeRequest: vi.fn() };
+    const session = {
+      on: vi.fn(),
+      setPermissionRequestHandler: vi.fn(),
+      setPermissionCheckHandler: vi.fn(),
+      webRequest,
+    };
+    const { wc } = makeWebContents({ session });
+    const svc = new BrowserService(new TabPool(), { createWindow: () => makeWindow(wc) });
+    return { session, webRequest, svc };
+  }
+
+  it('hardens each partition session: deny permissions + SSRF request filter', async () => {
+    const { session, webRequest, svc } = makeHardened();
+    await createTab(svc, 'sess-1', 'https://a.com/');
+    expect(session.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
+    expect(session.setPermissionCheckHandler).toHaveBeenCalledTimes(1);
+    const reqHandler = session.setPermissionRequestHandler.mock.calls[0]![0] as (
+      wc: unknown,
+      permission: string,
+      cb: (granted: boolean) => void,
+    ) => void;
+    const cb = vi.fn();
+    reqHandler({}, 'media', cb);
+    expect(cb).toHaveBeenCalledWith(false);
+    const checkHandler = session.setPermissionCheckHandler.mock.calls[0]![0] as () => boolean;
+    expect(checkHandler()).toBe(false);
+    expect(webRequest.onBeforeRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('request filter cancels SSRF destinations (params/redirects/subresources) and allows public', async () => {
+    const { webRequest, svc } = makeHardened();
+    await createTab(svc, 'sess-1', 'https://a.com/');
+    const listener = webRequest.onBeforeRequest.mock.calls[0]![1] as (
+      details: { url: string },
+      cb: (r: { cancel: boolean }) => void,
+    ) => void;
+    const call = (url: string) =>
+      new Promise<{ cancel: boolean }>((resolve) => listener({ url }, resolve));
+    expect(await call('http://169.254.169.254/latest/meta-data')).toEqual({ cancel: true });
+    expect(await call('http://[::ffff:7f00:1]/')).toEqual({ cancel: true });
+    expect(await call('http://localhost:3000/')).toEqual({ cancel: true });
+    expect(await call('https://example.com/subresource.js')).toEqual({ cancel: false });
+  });
+});
+
+describe('browser_tabs create SSRF validation (H2)', () => {
+  it('rejects literal private IPs through the async validation chain without creating a window', async () => {
+    const wins: any[] = [];
+    const svc = new BrowserService(new TabPool(), {
+      createWindow: () => {
+        const w = makeWindow(makeWebContents().wc);
+        wins.push(w);
+        return w;
+      },
+    });
+    const r = await svc.get('s').tabs({ op: 'create', url: 'http://127.0.0.1/' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('私网');
+    expect(wins).toHaveLength(0);
+    expect(svc.list('s')).toHaveLength(0);
+  });
+
+  it('rejects hostnames resolving to private IPs', async () => {
+    mockDns.lookup.mockResolvedValue([{ address: '10.1.2.3', family: 4 }]);
+    const svc = new BrowserService(new TabPool(), { createWindow: () => makeWindow(makeWebContents().wc) });
+    const r = await svc.get('s').tabs({ op: 'create', url: 'https://evil.example.com/' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('受限');
+    expect(svc.list('s')).toHaveLength(0);
+  });
+
+  it('still allows about:blank without DNS validation', async () => {
+    const svc = new BrowserService(new TabPool(), { createWindow: () => makeWindow(makeWebContents().wc) });
+    const r = await svc.get('s').tabs({ op: 'create' });
+    expect(r.ok).toBe(true);
   });
 });
 
