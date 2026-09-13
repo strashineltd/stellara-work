@@ -14,6 +14,7 @@ import {
   resetCloudClient,
 } from '../cloud/cloudbase-client';
 import { deleteCloudSecret, getCloudSecret, setCloudSecret } from '../config/secrets';
+import { redactAccountRef, redactSensitiveText } from '../security/redact';
 import { deleteLinkForLocalUser, getLinkForLocalUser, upsertCloudLink, type CloudLink } from '../store/cloud-links';
 import { getCurrentLocalUser } from '../store/local-users';
 import { toCloudAccount, type RawCloudUser } from './cloud-user';
@@ -64,7 +65,8 @@ function sweepPending(): void {
 /** SDK 抛错时统一包成 CloudResult */
 function fail(err: unknown): { ok: false; error: ReturnType<typeof describeCloudError> } {
   if (!(err instanceof Error) || err.name !== 'CloudNotConfiguredError') {
-    log.warn('cloudAuth 操作失败', err);
+    // M5：只记录脱敏后的 message，避免服务端原文里的邮箱/uid 进日志
+    log.warn('cloudAuth 操作失败', redactSensitiveText(err instanceof Error ? err.message : String(err)));
   }
   return { ok: false, error: describeCloudError(err) };
 }
@@ -170,7 +172,7 @@ async function performSignOut(): Promise<void> {
     await getCloudAuth().signOut();
   } catch (err) {
     // 网络失败也要把本地会话清干净，否则用户无法切账号
-    log.warn('云账号 signOut 调用失败，仍清除本地会话', err);
+    log.warn('云账号 signOut 调用失败，仍清除本地会话', redactSensitiveText(err instanceof Error ? err.message : String(err)));
   }
   await clearSession();
   resetCloudClient();
@@ -227,7 +229,7 @@ export const cloudAuth = {
       const callVerifyOtp: VerifyOtpFn = (params) =>
         (res.data.verifyOtp as VerifyOtpFn)(params);
       pendingSignUps.set(pendingId, { verifyOtp: callVerifyOtp, email, createdAt: Date.now() });
-      log.info(`云注册验证码已发送: ${email}（pendingId=${pendingId}）`);
+      log.info(`云注册验证码已发送: ${redactAccountRef({ email })}（pendingId=${pendingId}）`);
       return { ok: true, data: { pendingId, email } };
     } catch (err) {
       return fail(err);
@@ -275,7 +277,7 @@ export const cloudAuth = {
         error?: unknown;
       };
       if (res.error) {
-        log.warn(`verifySignUp 校验被拒绝: ${JSON.stringify(res.error).slice(0, 300)}`);
+        log.warn(`verifySignUp 校验被拒绝: ${redactSensitiveText(JSON.stringify(res.error).slice(0, 300))}`);
         return { ok: false, error: describeCloudError(res.error) };
       }
 
@@ -289,7 +291,7 @@ export const cloudAuth = {
       }
 
       await onAuthenticated(account, session);
-      log.info(`云账号注册并绑定成功: ${account.email ?? account.uid}`);
+      log.info(`云账号注册并绑定成功: ${redactAccountRef(account)}`);
       return { ok: true, data: buildState() };
     } catch (err) {
       return fail(err);
@@ -317,7 +319,7 @@ export const cloudAuth = {
       }
 
       await onAuthenticated(account, res.data?.session as never);
-      log.info(`云账号登录成功: ${account.email ?? account.username ?? account.uid}`);
+      log.info(`云账号登录成功: ${redactAccountRef(account)}`);
       return { ok: true, data: buildState() };
     } catch (err) {
       return fail(err);
@@ -396,9 +398,9 @@ export const cloudAuth = {
       if (!account) throw new Error('会话恢复后未取到用户信息');
 
       await onAuthenticated(account, res.data?.session as never);
-      log.info(`云账号会话已恢复: ${account.email ?? account.uid}`);
+      log.info(`云账号会话已恢复: ${redactAccountRef(account)}`);
     } catch (err) {
-      log.warn('云账号会话恢复失败，已登出', err);
+      log.warn('云账号会话恢复失败，已登出', redactSensitiveText(err instanceof Error ? err.message : String(err)));
       await clearSession();
       resetCloudClient();
     }

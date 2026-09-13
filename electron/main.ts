@@ -962,7 +962,9 @@ function registerIpcHandlers(): void {
     try {
       const logFile = path.join(app.getPath('logs'), 'main.log');
       const raw = await fs.readFile(logFile, 'utf8');
-      logTail = raw.slice(-2000);
+      // M5：返回渲染层前先过滤邮箱/令牌/STELLARA_* 等敏感值，保留其余排障上下文
+      const { redactSensitiveText } = await import('./security/redact');
+      logTail = redactSensitiveText(raw.slice(-2000));
     } catch {
       // 日志不存在时保持空
     }
@@ -2088,11 +2090,25 @@ app.whenReady().then(async () => {
   // API key 加密：Windows 上用 safeStorage（DPAPI）加密存储；不可用时降级明文并警告
   try {
     const { _setCipher, migrateLegacyKeys } = await import('./config/secrets');
-    if (safeStorage.isEncryptionAvailable()) {
+    const { decideSafeStorage } = await import('./security/safe-storage');
+    const decision = decideSafeStorage({
+      platform: process.platform,
+      encryptionAvailable: safeStorage.isEncryptionAvailable(),
+      // getSelectedStorageBackend 仅 Linux 有意义，且旧版本 Electron 可能没有该 API
+      backend:
+        process.platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function'
+          ? safeStorage.getSelectedStorageBackend()
+          : undefined,
+    });
+    if (decision.usable) {
       _setCipher({
         encrypt: (s) => safeStorage.encryptString(s).toString('base64'),
         decrypt: (b) => safeStorage.decryptString(Buffer.from(b, 'base64')),
       });
+    } else if (decision.reason === 'linux-basic-text') {
+      log.warn(
+        'Linux safeStorage 选中 basic_text 后端（不做加密），API key 将以明文存储；建议安装 gnome-keyring / kwallet 等系统密钥环',
+      );
     } else {
       log.warn('safeStorage 不可用，API key 将以明文存储（当前环境不支持加密）');
     }

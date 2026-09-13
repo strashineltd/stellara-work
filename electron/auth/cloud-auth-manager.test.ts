@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const { sdkAuth, resetCloudClientMock } = vi.hoisted(() => ({
+const { sdkAuth, resetCloudClientMock, logInfoMock, logWarnMock } = vi.hoisted(() => ({
   sdkAuth: {
     signOut: vi.fn(async () => ({ error: null })),
     signInWithPassword: vi.fn(),
@@ -11,6 +11,12 @@ const { sdkAuth, resetCloudClientMock } = vi.hoisted(() => ({
     getUser: vi.fn(),
   },
   resetCloudClientMock: vi.fn(),
+  logInfoMock: vi.fn(),
+  logWarnMock: vi.fn(),
+}));
+
+vi.mock('electron-log/main', () => ({
+  default: { info: logInfoMock, warn: logWarnMock, error: vi.fn() },
 }));
 
 vi.mock('../cloud/cloudbase-client', () => ({
@@ -154,5 +160,25 @@ describe('cloudAuth session bookkeeping', () => {
     expect(getCloudSecret('ACCESS_TOKEN')).toBeNull();
     expect(getCloudSecret('SESSION_CLOUD_UID')).toBeNull();
     expect(getLinkForLocalUser(user.id)?.cloudUid).toBe('uid-A');
+  });
+
+  it('never logs the raw account identifier (M5)', async () => {
+    logInfoMock.mockClear();
+    logWarnMock.mockClear();
+    sdkAuth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: { id: 'uid-signin', user_metadata: {} },
+        session: { access_token: 'a', refresh_token: 'r' },
+      },
+    });
+
+    await cloudAuth.signInWithPassword({ identifier: 'alice@example.com', password: 'pw' });
+
+    const logged = [...logInfoMock.mock.calls, ...logWarnMock.mock.calls]
+      .map((call) => call.map(String).join(' '))
+      .join('\n');
+    expect(logged).not.toContain('alice@example.com');
+    expect(logged).not.toContain('uid-signin');
+    expect(logged).toContain('云账号登录成功');
   });
 });

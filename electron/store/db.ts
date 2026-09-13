@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import { getAppDataDir } from '../config/data-dir';
+import { bestEffortChmodSync } from '../security/file-permissions';
 
 let dbPathOverride: string | null = null;
 let _db: Database.Database | null = null;
@@ -25,7 +26,10 @@ export function getDb(): Database.Database {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const fsSync = require('node:fs') as typeof import('node:fs');
   fsSync.mkdirSync(dir, { recursive: true });
+  // M4：数据目录 0700（PII 库文件不应被同机其他用户读取）
+  bestEffortChmodSync(dir, 0o700);
   _db = new Database(dbPath);
+  bestEffortChmodSync(dbPath, 0o600);
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
   _db.exec(`
@@ -168,6 +172,11 @@ export function getDb(): Database.Database {
       // 忽略
     }
   }
+
+  // M4：schema/首次写入后 WAL/SHM 已创建，统一收紧权限（best-effort；Windows 上无效但不报错）
+  bestEffortChmodSync(dbPath, 0o600);
+  bestEffortChmodSync(`${dbPath}-wal`, 0o600);
+  bestEffortChmodSync(`${dbPath}-shm`, 0o600);
 
   return _db;
 }

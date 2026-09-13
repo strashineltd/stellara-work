@@ -3,13 +3,15 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { setAppDataDir } from './data-dir';
-import { loadEnv } from './env';
+import { loadEnv, resetEnvCache } from './env';
 
 const TEST_KEYS = [
   'STELLARA_KEY_openai',
   'STELLARA_SERVER_srv',
   'STELLARA_CLOUD_session',
   'STELLARA_CLOUDBASE_PUBLISHABLE_KEY',
+  'STELLARA_SERVER_stale',
+  'STELLARA_CLOUD_TOKEN',
   'SOME_TOKEN',
   'NORMAL_FLAG',
 ];
@@ -20,11 +22,13 @@ describe('loadEnv secret filtering (H5)', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-env-'));
     setAppDataDir(tmpDir);
+    resetEnvCache();
     for (const key of TEST_KEYS) delete process.env[key];
   });
 
   afterEach(async () => {
     setAppDataDir(null);
+    resetEnvCache();
     for (const key of TEST_KEYS) delete process.env[key];
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -50,5 +54,44 @@ describe('loadEnv secret filtering (H5)', () => {
     expect(process.env.SOME_TOKEN).toBeUndefined();
     expect(process.env.STELLARA_CLOUDBASE_PUBLISHABLE_KEY).toBe('pk-public');
     expect(process.env.NORMAL_FLAG).toBe('1');
+  });
+
+  it('resetEnvCache removes loaded vars and every stale STELLARA secret (M2)', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, '.env'),
+      ['STELLARA_CLOUDBASE_PUBLISHABLE_KEY=pk-public', 'NORMAL_FLAG=1'].join('\n'),
+    );
+    await loadEnv();
+    process.env.STELLARA_SERVER_stale = 'server-pw';
+    process.env.STELLARA_CLOUD_TOKEN = 'cloud-token';
+
+    resetEnvCache();
+
+    expect(process.env.STELLARA_CLOUDBASE_PUBLISHABLE_KEY).toBeUndefined();
+    expect(process.env.NORMAL_FLAG).toBeUndefined();
+    expect(process.env.STELLARA_SERVER_stale).toBeUndefined();
+    expect(process.env.STELLARA_CLOUD_TOKEN).toBeUndefined();
+  });
+
+  it('reload after reset picks up new .env values (M2)', async () => {
+    await fs.writeFile(path.join(tmpDir, '.env'), 'NORMAL_FLAG=old\n');
+    await loadEnv();
+    expect(process.env.NORMAL_FLAG).toBe('old');
+
+    resetEnvCache();
+    await fs.writeFile(path.join(tmpDir, '.env'), 'NORMAL_FLAG=new\n');
+    await loadEnv();
+
+    expect(process.env.NORMAL_FLAG).toBe('new');
+  });
+
+  it.skipIf(process.platform === 'win32')('tightens .env permissions to 0600 on load (M4)', async () => {
+    const envPath = path.join(tmpDir, '.env');
+    await fs.writeFile(envPath, 'NORMAL_FLAG=1\n');
+    await fs.chmod(envPath, 0o644);
+
+    await loadEnv();
+
+    expect((await fs.stat(envPath)).mode & 0o777).toBe(0o600);
   });
 });

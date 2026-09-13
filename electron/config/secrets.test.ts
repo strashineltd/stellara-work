@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { getKey, setKey, deleteKey, listKeys, migrateLegacyKeys, _setSecretsDir, _setCipher, type KeyCipher } from './secrets';
+import {
+  getKey, setKey, deleteKey, listKeys, migrateLegacyKeys,
+  getServerPassword, setServerPassword, getCloudSecret, setCloudSecret,
+  _setSecretsDir, _setCipher, type KeyCipher,
+} from './secrets';
 
 /** 可逆的 fake cipher：前缀 X + base64（仅测试用，生产用 safeStorage） */
 const fakeCipher: KeyCipher = {
@@ -66,6 +70,63 @@ describe('secrets', () => {
     const stat = await fs.stat(envPath);
     expect(stat.isFile()).toBe(true);
   });
+
+  it('encodes newlines so values cannot inject extra .env entries (M1)', async () => {
+    await setKey('m1', 'line1\nSTELLARA_KEY_injected=evil');
+    const raw = await fs.readFile(path.join(tmpDir, '.env'), 'utf-8');
+    const lines = raw.split('\n').filter((line) => line.trim() !== '');
+    expect(lines).toHaveLength(1);
+    expect(getKey('m1')).toBe('line1\nSTELLARA_KEY_injected=evil');
+    expect(getKey('injected')).toBeNull();
+  });
+
+  it('round-trips values containing quotes, backslashes, spaces and hashes (M1)', async () => {
+    const value = 'a"b\\c d#e\'f';
+    await setKey('m1', value);
+    expect(getKey('m1')).toBe(value);
+    expect(await listKeys()).toEqual({ m1: value });
+  });
+
+  it('round-trips server passwords and cloud secrets with special characters (M1)', async () => {
+    await setServerPassword('srv-1', 'p"w\\d #1');
+    await setCloudSecret('ACCESS_TOKEN', 'tok\nen');
+    expect(getServerPassword('srv-1')).toBe('p"w\\d #1');
+    expect(getCloudSecret('ACCESS_TOKEN')).toBe('tok\nen');
+  });
+
+  it('reads legacy quoted values with escaped quotes (M1)', async () => {
+    await fs.writeFile(path.join(tmpDir, '.env'), 'STELLARA_KEY_legacy="old\\"quote"\n');
+    expect(getKey('legacy')).toBe('old"quote');
+  });
+
+  it('reads legacy single-quoted values (M1)', async () => {
+    await fs.writeFile(path.join(tmpDir, '.env'), "STELLARA_KEY_legacy='old value'\n");
+    expect(getKey('legacy')).toBe('old value');
+  });
+
+  it('rejects model ids outside [A-Za-z0-9._-] before writing (M1)', async () => {
+    await expect(setKey('bad id', 'sk-x')).rejects.toThrow();
+    await expect(setKey('bad\nid', 'sk-x')).rejects.toThrow();
+    await expect(fs.readFile(path.join(tmpDir, '.env'), 'utf-8')).rejects.toThrow();
+  });
+
+  it('rejects invalid server ids and cloud secret names before writing (M1)', async () => {
+    await expect(setServerPassword('bad id', 'pw')).rejects.toThrow();
+    await expect(setCloudSecret('BAD NAME', 'tok')).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === 'win32')('tightens .env permissions to 0600 on rewrite (M4)', async () => {
+    const envPath = path.join(tmpDir, '.env');
+    await fs.writeFile(envPath, 'STELLARA_KEY_old=sk-old\n');
+    await fs.chmod(envPath, 0o644);
+    await setKey('m1', 'sk-new');
+    expect((await fs.stat(envPath)).mode & 0o777).toBe(0o600);
+  });
+
+  it('leaves no temp file behind after writing (M4)', async () => {
+    await setKey('m1', 'sk-new');
+    expect(await fs.readdir(tmpDir)).toEqual(['.env']);
+  });
 });
 
 describe('secrets with cipher (safeStorage mode)', () => {
@@ -118,5 +179,36 @@ describe('secrets with cipher (safeStorage mode)', () => {
     await setKey('a', 'k-a');
     const migrated = await migrateLegacyKeys();
     expect(migrated).toBe(0);
+  });
+
+  it('migrateLegacyKeys encrypts KEY/SERVER/CLOUD values but not the publishable key (M2)', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, '.env'),
+      [
+        'STELLARA_KEY_openai=sk-legacy',
+        'STELLARA_SERVER_srv=server-legacy',
+        'STELLARA_CLOUD_ACCESS_TOKEN=cloud-legacy',
+        'STELLARA_CLOUDBASE_PUBLISHABLE_KEY=pk-public',
+      ].join('\n') + '\n',
+    );
+
+    expect(await migrateLegacyKeys()).toBe(3);
+
+    expect(getKey('openai')).toBe('sk-legacy');
+    expect(getServerPassword('srv')).toBe('server-legacy');
+    expect(getCloudSecret('ACCESS_TOKEN')).toBe('cloud-legacy');
+    const raw = await fs.readFile(path.join(tmpDir, '.env'), 'utf-8');
+    expect(raw).not.toContain('sk-legacy');
+    expect(raw).not.toContain('server-legacy');
+    expect(raw).not.toContain('cloud-legacy');
+    expect(raw).toContain('pk-public');
+    expect(await migrateLegacyKeys()).toBe(0);
+  });
+
+  it('round-trips encrypted values containing newlines on a single line (M1)', async () => {
+    await setKey('m1', 'line1\nline2');
+    expect(getKey('m1')).toBe('line1\nline2');
+    const raw = await fs.readFile(path.join(tmpDir, '.env'), 'utf-8');
+    expect(raw.split('\n').filter((line) => line.trim() !== '')).toHaveLength(1);
   });
 });

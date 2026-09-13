@@ -383,4 +383,18 @@ describe('db', () => {
     appendMessage({ sessionId: 'b', position: 0, role: 'user', content: 'x', createdAt: Date.now() });
     expect(countAllMessages()).toBe(3);
   });
+
+  it.skipIf(process.platform === 'win32')('hardens the data dir to 0700 and db files to 0600 (M4)', async () => {
+    await fs.chmod(tmpDir, 0o755);
+    initDb();
+    createSession({ id: 's1', title: 'T', modelId: 'm1' });
+    appendMessage({ sessionId: 's1', position: 0, role: 'user', content: 'x', createdAt: Date.now() });
+
+    expect((await fs.stat(tmpDir)).mode & 0o777).toBe(0o700);
+    for (const file of [dbFile, `${dbFile}-wal`, `${dbFile}-shm`]) {
+      const exists = await fs.access(file).then(() => true, () => false);
+      if (!exists) continue;
+      expect((await fs.stat(file)).mode & 0o777, file).toBe(0o600);
+    }
+  });
 });
