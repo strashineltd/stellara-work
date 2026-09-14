@@ -29,10 +29,18 @@ export function estimateTextTokens(text: string): number {
   }
 }
 
+// 每条 item 的 token 成本缓存：items 入库后不再改写，缓存安全且避免重复 tiktoken 编码
+const itemTokensCache = new WeakMap<object, number>();
+
 export function estimateItemsTokens(items: ResponseItem[]): number {
   let total = 0;
   for (const item of items) {
-    total += estimateTextTokens(JSON.stringify(item)) + 4;
+    let cost = itemTokensCache.get(item);
+    if (cost === undefined) {
+      cost = estimateTextTokens(JSON.stringify(item)) + 4;
+      itemTokensCache.set(item, cost);
+    }
+    total += cost;
   }
   return total;
 }

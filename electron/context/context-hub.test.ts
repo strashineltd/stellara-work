@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ContextHub } from './context-hub';
-import { _setDbPath, getDb, createSession, initContextTables } from '../store/db';
+import { _setDbPath, getDb, createSession, initContextTables, getContextEventsBySession } from '../store/db';
 
 let tmpDir: string;
 
@@ -265,5 +265,93 @@ describe('ContextHub', () => {
 
     await hub.commitEvent('user_message_added', { content: 'test' });
     expect(received).toHaveLength(0);
+  });
+});
+
+describe('上下文压缩与恢复', () => {
+  function addItems(hub: ContextHub, count: number, size = 2000): void {
+    for (let i = 0; i < count; i++) {
+      hub.addResponseItem({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `${i}:${'x'.repeat(size)}` }],
+      });
+    }
+  }
+
+  it('低于软阈值不压缩', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 100_000, 1_000);
+    addItems(hub, 2);
+    const result = await hub.ensureContextBudget({});
+    expect(result.compacted).toBe(false);
+  });
+
+  it('达到软阈值压缩并落事件', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    const result = await hub.ensureContextBudget({});
+    expect(result.compacted).toBe(true);
+    expect(result.tokensAfter!).toBeLessThan(result.tokensBefore!);
+    expect(hub.getResponseItems().length).toBeLessThan(60);
+    const events = getContextEventsBySession('sess-001').filter((e) => e.event === 'context_compacted');
+    expect(events).toHaveLength(1);
+  });
+
+  it('重开 hub 按指针恢复活跃窗口', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    await hub.ensureContextBudget({});
+    const activeCount = hub.getResponseItems().length;
+
+    const reopened = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    expect(reopened.getResponseItems()).toHaveLength(activeCount);
+    expect(reopened.getContext().compactionWindowStartIndex).toBeGreaterThan(0);
+  });
+
+  it('digest 不匹配时忽略指针', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    await hub.ensureContextBudget({});
+    await hub.commitEvent('context_compacted', {
+      windowStartIndex: 5,
+      droppedCount: 5,
+      windowDigest: 'deadbeef',
+      checkpointId: 'missing',
+      tokensBefore: 0,
+      tokensAfter: 0,
+      compressedCount: 5,
+      reason: 'soft_threshold',
+    });
+    const reopened = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    expect(reopened.getResponseItems()).toHaveLength(60);
+  });
+
+  it('摘要成功写入、失败不阻塞压缩', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    const ok = await hub.ensureContextBudget({ summarize: async () => '这是一段摘要' });
+    expect(ok.summary).toBe('这是一段摘要');
+    expect(hub.getCompactionSummary()).toBe('这是一段摘要');
+
+    addItems(hub, 60);
+    const failed = await hub.ensureContextBudget({
+      summarize: async () => {
+        throw new Error('boom');
+      },
+    });
+    expect(failed.compacted).toBe(true);
+    expect(failed.summary).toBeUndefined();
+    expect(hub.getCompactionSummary()).toBe('这是一段摘要');
+  });
+
+  it('recordReportedInputTokens 校准系数并 clamp', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 100_000, 1_000);
+    addItems(hub, 1);
+    await hub.ensureContextBudget({});
+    const before = hub.getContext().usage.currentInputTokens;
+    hub.recordReportedInputTokens(before * 10);
+    const after = hub.getContext().usage.currentInputTokens;
+    expect(after / before).toBeGreaterThan(1);
+    expect(after / before).toBeLessThanOrEqual(2);
   });
 });
