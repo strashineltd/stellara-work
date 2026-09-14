@@ -244,6 +244,12 @@ describe('config-v2', () => {
       expect(patch).toEqual({ theme: 'dark' });
       expect(rejected.sort()).toEqual(['servers', 'workDirDefault']);
     });
+
+    it('允许 contextCompactionSummaryEnabled', () => {
+      const { patch, rejected } = sanitizeSettingsPatch({ contextCompactionSummaryEnabled: false } as Partial<AppSettings>);
+      expect(patch.contextCompactionSummaryEnabled).toBe(false);
+      expect(rejected).toEqual([]);
+    });
   });
 
   describe('login allowlist normalization', () => {

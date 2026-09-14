@@ -1703,6 +1703,9 @@ async function runResponsesLoopForIpc(
   try {
     const cwd = model.workDir!;
 
+    const { loadConfig } = await import('./config/config-v2');
+    const appConfig = await loadConfig();
+
     // 加载 skills + /skill 精确调用目标
     let skills: import('../shared/ipc').SkillDef[] = [];
     let activeSkill: import('../shared/ipc').SkillDef | undefined;
@@ -1750,6 +1753,7 @@ async function runResponsesLoopForIpc(
       extraTools: extraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
       planExtraTools: planExtraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
       memoryProjectId,
+      compactionSummaryEnabled: appConfig.app.contextCompactionSummaryEnabled !== false,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

@@ -666,6 +666,8 @@ export interface AppSettings {
   theme?: ThemeName;
   /** 工作区模式：sidebar（紧凑 sidebar）或 tabs（Tab 栏） */
   workspaceMode?: 'sidebar' | 'tabs';
+  /** 上下文压缩时是否调用模型生成对话摘要（默认开；false = 仅确定性剪枝） */
+  contextCompactionSummaryEnabled?: boolean;
   /** 默认服务器 id（只读：仅能经 servers:setDefault 修改） */
   defaultServerId?: string | null;
   // 预留：language

@@ -86,6 +86,8 @@ export interface AppConfig {
     shortcuts?: Partial<Record<string, string>>;
     theme?: ThemeName;
     workspaceMode?: 'sidebar' | 'tabs';
+    /** 上下文压缩时是否调用模型生成对话摘要（默认开；false = 仅确定性剪枝） */
+    contextCompactionSummaryEnabled?: boolean;
     browser?: {
       searchProvider?: 'auto' | 'duck' | 'tavily' | 'brave';
       execJsEnabled?: boolean;
@@ -109,7 +111,13 @@ function defaultConfig(): AppConfig {
 }
 
 // workDirDefault 不带入白名单：工作目录信任只来自原生选择器授权（C2）
-const SETTINGS_PATCH_WHITELIST: readonly string[] = ['shortcuts', 'theme', 'workspaceMode', 'browser'];
+const SETTINGS_PATCH_WHITELIST: readonly string[] = [
+  'shortcuts',
+  'theme',
+  'workspaceMode',
+  'browser',
+  'contextCompactionSummaryEnabled',
+];
 
 /**
  * 过滤 settings:update 的越权字段：仅保留白名单键。
