@@ -2,6 +2,12 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added · 新增
+
+- 本地身份数据隔离：项目/会话/记忆按身份隔离，默认档与多用户切换（运行中切换需确认）
+
 ## [0.9.2.1] - 2026-09-10
 
 ### Fixed · 修复

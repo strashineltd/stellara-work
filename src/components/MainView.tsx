@@ -333,6 +333,8 @@ export function MainView(props: MainViewProps) {
 
   // ---- Session lifecycle ----
   const entriesSessionRef = useRef<string | null>(null);
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 切换会话时清空上一个会话残留的浏览器面板状态（发送新任务时也会重置）
@@ -421,6 +423,17 @@ export function MainView(props: MainViewProps) {
         .catch((e) => console.error('Auto-save failed:', e));
     }, 300);
   }, [entries, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => {
+      if (!saveTimer.current || !entriesSessionRef.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      const sessionId = entriesSessionRef.current;
+      void window.electronAPI.sessions.saveMessages(sessionId, entriesToMessages(entriesRef.current, sessionId))
+        .catch((e) => console.error('Flush save failed:', e));
+    };
+  }, []);
 
   // Auto-scroll
   const chatRef = useRef<HTMLElement | null>(null);
