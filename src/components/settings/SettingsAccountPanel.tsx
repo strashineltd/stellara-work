@@ -290,7 +290,11 @@ export function SettingsAccountPanel({ onChanged, refreshKey = 0 }: SettingsAcco
             </div>
           </div>
 
-          <SettingsCloudAccountSection refreshKey={refreshKey} onChanged={onChanged} />
+          <SettingsCloudAccountSection
+            refreshKey={refreshKey}
+            onChanged={onChanged}
+            disabled={current?.id === 'default'}
+          />
         </>
       )}
     </div>

@@ -15,6 +15,7 @@ import { browserOpenAITools, browserPlanTools } from './browser-tools';
 import { browserService } from '../../browser/service';
 import { mcpManager } from '../../mcp/mcp-manager';
 import { getActiveUserId } from '../../auth/local-auth-manager';
+import { getSession } from '../../store/db';
 
 function toBrowserError(e: unknown, fallback: string): ToolResult {
   const msg = e instanceof Error ? e.message : String(e ?? fallback);
@@ -56,6 +57,17 @@ export const planModeTools: OpenAITool[] = [
   webSearchTools[0], // web_search（只读联网搜索）
   // memory_search 也不进 plan mode
 ];
+
+
+/** H10：记忆工具按「执行会话的归属身份」读写，避免强制切换期间错归属。 */
+function resolveMemoryOwnerId(context?: ToolExecutionContext): string {
+  const sessionId = context?.sessionId;
+  if (sessionId) {
+    const session = getSession(sessionId);
+    if (session?.userId) return session.userId;
+  }
+  return getActiveUserId();
+}
 
 export async function invokeTool(
   name: ToolName,
@@ -112,9 +124,9 @@ async function invokeToolInternal(
     case 'git_log':
       return gitLog(args as Record<string, unknown>, cwd);
     case 'memory_search':
-      return memorySearch(args as { query: string; limit?: number }, cwd, getActiveUserId());
+      return memorySearch(args as { query: string; limit?: number }, cwd, resolveMemoryOwnerId(context));
     case 'memory_save':
-      return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd, getActiveUserId());
+      return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd, resolveMemoryOwnerId(context));
     case 'dispatch_subagents':
       return dispatchSubagents(args as DispatchSubagentsArgs, cwd, context);
     case 'web_search':

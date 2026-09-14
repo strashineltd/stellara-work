@@ -103,18 +103,59 @@ describe('switchIdentity (H10)', () => {
 });
 
 describe('backfillIdentityOwnership (R2)', () => {
-  it('backfills legacy rows once for the active real user', () => {
-    const migrate = vi.fn(() => 3);
+  /** 一次性标记的内存实现（真实持久化由 db-identity.test.ts 覆盖） */
+  function markerDeps(overrides: Partial<ReturnType<typeof baseDeps>> = {}) {
+    return { ...baseDeps(), ...overrides };
+  }
 
-    expect(backfillIdentityOwnership({ getActiveUserId: () => 'u1', migrate })).toBe(3);
-    expect(migrate).toHaveBeenCalledTimes(1);
-    expect(migrate).toHaveBeenCalledWith('u1');
+  function baseDeps() {
+    let done = false;
+    const markDone = vi.fn(() => {
+      done = true;
+    });
+    return {
+      getActiveUserId: () => 'u1',
+      migrate: vi.fn(() => 3),
+      isDone: () => done,
+      markDone,
+    };
+  }
+
+  it('backfills legacy rows once for the active real user and sets the marker', () => {
+    const deps = markerDeps();
+
+    expect(backfillIdentityOwnership(deps)).toBe(3);
+    expect(deps.migrate).toHaveBeenCalledTimes(1);
+    expect(deps.migrate).toHaveBeenCalledWith('u1');
+    expect(deps.markDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op on the second run, even when new default rows exist', () => {
+    const deps = markerDeps();
+
+    expect(backfillIdentityOwnership(deps)).toBe(3);
+    // 第二次运行：migrate 可能发现新的 default 行（模拟），但标记已存在 → 不允许再迁
+    deps.migrate.mockReturnValue(5);
+    expect(backfillIdentityOwnership(deps)).toBe(0);
+    expect(deps.migrate).toHaveBeenCalledTimes(1);
   });
 
   it('leaves data with the default profile when it is active', () => {
-    const migrate = vi.fn(() => 0);
+    const deps = markerDeps({ getActiveUserId: () => 'default', migrate: vi.fn(() => 0) });
 
-    expect(backfillIdentityOwnership({ getActiveUserId: () => 'default', migrate })).toBe(0);
-    expect(migrate).not.toHaveBeenCalled();
+    expect(backfillIdentityOwnership(deps)).toBe(0);
+    expect(deps.migrate).not.toHaveBeenCalled();
+    expect(deps.markDone).not.toHaveBeenCalled();
+  });
+
+  it('does not mark done when the backfill throws', () => {
+    const deps = markerDeps({
+      migrate: vi.fn(() => {
+        throw new Error('db exploded');
+      }),
+    });
+
+    expect(() => backfillIdentityOwnership(deps)).toThrow('db exploded');
+    expect(deps.markDone).not.toHaveBeenCalled();
   });
 });

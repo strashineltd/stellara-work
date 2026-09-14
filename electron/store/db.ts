@@ -125,6 +125,12 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_relations_source ON knowledge_relations(source_id);
     CREATE INDEX IF NOT EXISTS idx_relations_target ON knowledge_relations(target_id);
+
+    -- H10：键值元数据（一次性回填标记等）
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // 迁移必须先于 project_id 索引创建。旧版 sessions 表没有该列；
@@ -344,6 +350,21 @@ export function migrateIdentityOwnership(userId: string): number {
     return changes;
   });
   return run();
+}
+
+const IDENTITY_BACKFILL_KEY = 'identity_backfill_done';
+
+/** H10：历史数据回填是否已完成（跨重启一次性标记）。 */
+export function isIdentityBackfillDone(): boolean {
+  const row = getDb().prepare('SELECT value FROM meta WHERE key = ?').get(IDENTITY_BACKFILL_KEY) as { value: string } | undefined;
+  return row?.value === '1';
+}
+
+/** H10：回填成功后写入一次性标记。 */
+export function markIdentityBackfillDone(): void {
+  getDb()
+    .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(IDENTITY_BACKFILL_KEY, '1');
 }
 
 export function createSession(s: {

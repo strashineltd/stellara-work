@@ -26,6 +26,9 @@ interface SettingsCloudAccountSectionProps {
   onChanged?: () => void;
   /** 外部变更信号（递增时重新拉取状态） */
   refreshKey?: number;
+  /** H10：默认档不可登录云账号（需先创建本地身份） */
+  disabled?: boolean;
+  disabledHint?: string;
 }
 
 type Mode = 'signin' | 'signup';
@@ -103,7 +106,7 @@ const FIELD_BY_CODE: Record<string, FieldKey> = {
   verification_failed: 'code',
 };
 
-export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: SettingsCloudAccountSectionProps) {
+export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disabled = false, disabledHint }: SettingsCloudAccountSectionProps) {
   const [state, setState] = useState<CloudAuthState | null>(null);
   const [mode, setMode] = useState<Mode>('signin');
   // 有未完成的注册会话时直接回到验证码步骤，避免切页签后进度丢失
@@ -544,8 +547,15 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
   const otpComplete = codeValue.length === CODE_LENGTH;
 
   return (
-    <div className="settings-section">
+    <div className="settings-section" data-disabled={disabled || undefined}>
       <div className="settings-section__title">云账号</div>
+
+      {disabled && (
+        <div className="cloud-note" role="note">
+          <Icon name="shield" size={14} />
+          <span>{disabledHint ?? '请先创建本地身份后再登录云账号'}</span>
+        </div>
+      )}
 
       {notice && (
         <div className="cloud-note" role="status">

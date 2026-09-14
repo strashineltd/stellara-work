@@ -6,7 +6,9 @@ import {
   _setDbPath, initDb, createSession, createProject, listSessions, listProjects, migrateIdentityOwnership,
   getOwnedSession, assertSessionOwned, assertProjectOwned, deleteSessionsByUser,
   listServerSessions, findSessionByRemote, findSessionByRemoteId, appendMessage, getMessages,
+  isIdentityBackfillDone, markIdentityBackfillDone,
 } from './db';
+import { backfillIdentityOwnership } from '../identity-switch';
 
 let dir: string;
 beforeEach(async () => { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-id-')); _setDbPath(path.join(dir, 't.db')); initDb(); });
@@ -89,5 +91,48 @@ describe('ownership guards', () => {
     expect(listSessions('u2').map((s) => s.id)).toEqual(['s2']);
     expect(listSessions('default').map((s) => s.id)).toEqual(['s3']);
     expect(getMessages('s2')).toHaveLength(1);
+  });
+});
+
+describe('one-time identity backfill (H10)', () => {
+  function runBackfill(activeUserId: string): number {
+    return backfillIdentityOwnership({
+      getActiveUserId: () => activeUserId,
+      migrate: migrateIdentityOwnership,
+      isDone: isIdentityBackfillDone,
+      markDone: markIdentityBackfillDone,
+    });
+  }
+
+  it('backfills legacy rows on the first run and spares default rows created later', () => {
+    createSession({ id: 'legacy', title: 'x', modelId: 'm' }); // 升级前数据 → default
+
+    expect(runBackfill('u1')).toBe(1);
+    expect(listSessions('u1').map((s) => s.id)).toEqual(['legacy']);
+    expect(isIdentityBackfillDone()).toBe(true);
+
+    // H10 之后在默认档新建的会话：后续启动不得再被划走
+    createSession({ id: 'fresh-default', title: 'y', modelId: 'm' });
+    expect(runBackfill('u1')).toBe(0);
+    expect(listSessions('default').map((s) => s.id)).toEqual(['fresh-default']);
+    expect(listSessions('u1').map((s) => s.id)).toEqual(['legacy']);
+  });
+
+  it('keeps the marker across a database reopen', () => {
+    expect(isIdentityBackfillDone()).toBe(false);
+
+    runBackfill('u1');
+    expect(isIdentityBackfillDone()).toBe(true);
+
+    // 模拟应用重启：释放连接后按同一路径重新打开
+    _setDbPath(null);
+    _setDbPath(path.join(dir, 't.db'));
+    initDb();
+
+    expect(isIdentityBackfillDone()).toBe(true);
+    // 重开后的新默认行依然不会在下次启动被回填
+    createSession({ id: 'after-reopen', title: 'z', modelId: 'm' });
+    expect(runBackfill('u1')).toBe(0);
+    expect(listSessions('default').map((s) => s.id)).toEqual(['after-reopen']);
   });
 });

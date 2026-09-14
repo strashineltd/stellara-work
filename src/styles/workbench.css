@@ -7227,3 +7227,7 @@ html[data-page-hidden] .kbd.rec {
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--color-border);
 }
+
+/* H10：默认档禁用云账号区块（仅视觉说明；交互仍由组件 disabled 状态控制） */
+.settings-section[data-disabled] { opacity: 0.85; }
+.settings-section[data-disabled] > *:not(:first-child):not(.cloud-note) { pointer-events: none; }

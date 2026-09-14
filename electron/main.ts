@@ -434,6 +434,8 @@ function registerIpcHandlers(): void {
   });
 
   handle('context:getSnapshot', async (_e, sessionId: string): Promise<ContextStateView> => {
+    const { assertSessionOwned } = await import('./store/db');
+    assertSessionOwned(sessionId, getActiveUserId());
     const hub = await openPersistedContextHub(sessionId);
     try {
       return contextStateView(hub);
@@ -443,6 +445,8 @@ function registerIpcHandlers(): void {
   });
 
   handle('context:createCheckpoint', async (_e, sessionId: string): Promise<ContextStateView> => {
+    const { assertSessionOwned } = await import('./store/db');
+    assertSessionOwned(sessionId, getActiveUserId());
     const hub = await openPersistedContextHub(sessionId);
     try {
       const checkpoint = hub.createCheckpoint();
@@ -616,6 +620,10 @@ function registerIpcHandlers(): void {
   // Attachments: 校验 + 复制到 workDir/.stellara-attachments/{sessionId}/
   handle('attachments:add', async (_e, sessionId: string, workDir: string, filePaths: string[]) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    {
+      const { assertSessionOwned } = await import('./store/db');
+      assertSessionOwned(sessionId, getActiveUserId());
+    }
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (!Array.isArray(filePaths) || filePaths.length === 0 || filePaths.some((p) => typeof p !== 'string')) {
       throw new Error('请选择要上传的文件');
@@ -645,6 +653,10 @@ function registerIpcHandlers(): void {
 
   handle('attachments:readImage', async (_e, sessionId: string, workDir: string, id: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    {
+      const { assertSessionOwned } = await import('./store/db');
+      assertSessionOwned(sessionId, getActiveUserId());
+    }
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (typeof id !== 'string' || !id.trim()) throw new Error('附件无效');
     await assertWorkDirAllowed(workDir);
@@ -654,6 +666,10 @@ function registerIpcHandlers(): void {
 
   handle('attachments:open', async (_e, sessionId: string, workDir: string, id: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    {
+      const { assertSessionOwned } = await import('./store/db');
+      assertSessionOwned(sessionId, getActiveUserId());
+    }
     if (typeof workDir !== 'string' || !workDir.trim()) throw new Error('工作目录无效');
     if (typeof id !== 'string' || !id.trim()) throw new Error('附件无效');
     await assertWorkDirAllowed(workDir);
@@ -1307,12 +1323,16 @@ function registerIpcHandlers(): void {
   // Browser (Task 9, read-only for Task 10 UI; trusted handle wrapper already enforces isTrustedIpcSender)
   handle('browser:list', async (_e, sessionId: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    const { assertSessionOwned } = await import('./store/db');
+    assertSessionOwned(sessionId, getActiveUserId());
     const { browserService } = await import('./browser/service');
     return browserService.list(sessionId);
   });
 
   handle('browser:getSnapshot', async (_e, sessionId: string, tabId: string) => {
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('会话无效');
+    const { assertSessionOwned } = await import('./store/db');
+    assertSessionOwned(sessionId, getActiveUserId());
     if (typeof tabId !== 'string' || !tabId.trim()) throw new Error('标签页无效');
     const { browserService } = await import('./browser/service');
     const result = await browserService.get(sessionId).snapshot({ tabId });
@@ -1379,6 +1399,8 @@ function registerIpcHandlers(): void {
 
   handle('browser:attachView', async (_e, sessionId: string, tabId: string) => {
     if (typeof sessionId !== 'string' || typeof tabId !== 'string') throw new Error('参数无效');
+    const { assertSessionOwned } = await import('./store/db');
+    assertSessionOwned(sessionId, getActiveUserId());
     const { browserService } = await import('./browser/service');
     browserService.attachView(sessionId, tabId);
   });
@@ -1398,6 +1420,8 @@ function registerIpcHandlers(): void {
 
   handle('browser:setUserInteraction', async (_e, sessionId: string, tabId: string, enabled: boolean) => {
     if (typeof sessionId !== 'string' || typeof tabId !== 'string' || typeof enabled !== 'boolean') throw new Error('参数无效');
+    const { assertSessionOwned } = await import('./store/db');
+    assertSessionOwned(sessionId, getActiveUserId());
     const { browserService } = await import('./browser/service');
     await browserService.setUserInteraction(sessionId, tabId, enabled);
   });
@@ -2226,9 +2250,12 @@ app.whenReady().then(async () => {
     // H10（R2）：历史数据回填只在启动时执行一次，且仅当活动身份是真实用户；
     // 默认档数据保持归属默认档，切换身份时不会重新回填（见 identity-switch.ts）。
     const { backfillIdentityOwnership } = await import('./identity-switch');
+    const { isIdentityBackfillDone, markIdentityBackfillDone } = await import('./store/db');
     const backfilled = backfillIdentityOwnership({
       getActiveUserId,
       migrate: migrateIdentityOwnership,
+      isDone: isIdentityBackfillDone,
+      markDone: markIdentityBackfillDone,
     });
     if (backfilled > 0) log.info(`身份回填：${backfilled} 行历史数据归入活动身份`);
     // Memory OS: 初始化记忆存储
