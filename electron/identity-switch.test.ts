@@ -100,6 +100,23 @@ describe('switchIdentity (H10)', () => {
     await expect(switchIdentity(deps, 'nope', true)).rejects.toThrow(/不存在/);
     expect(deps.calls).toEqual([]);
   });
+
+  it('still succeeds and broadcasts once when the cloud guard rejects', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const guardCloud = vi.fn(async () => {
+      throw new Error('cloud exploded');
+    });
+    const deps = makeDeps({ guardCloud });
+
+    try {
+      await expect(switchIdentity(deps, 'u1')).resolves.toEqual({ ok: true, user: USER_IDENTITY });
+      expect(guardCloud).toHaveBeenCalledWith('u1');
+      expect(deps.calls).toEqual(['set:u1', 'broadcast:u1']);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });
 
 describe('backfillIdentityOwnership (R2)', () => {
@@ -138,14 +155,22 @@ describe('backfillIdentityOwnership (R2)', () => {
     deps.migrate.mockReturnValue(5);
     expect(backfillIdentityOwnership(deps)).toBe(0);
     expect(deps.migrate).toHaveBeenCalledTimes(1);
+    expect(deps.markDone).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves data with the default profile when it is active', () => {
+  it('marks the migration as evaluated on a default-profile first run and never migrates later default rows', () => {
     const deps = markerDeps({ getActiveUserId: () => 'default', migrate: vi.fn(() => 0) });
 
+    // 首次启动：默认档不迁移，但「迁移时刻」已过 → 必须落标记
     expect(backfillIdentityOwnership(deps)).toBe(0);
     expect(deps.migrate).not.toHaveBeenCalled();
-    expect(deps.markDone).not.toHaveBeenCalled();
+    expect(deps.markDone).toHaveBeenCalledTimes(1);
+
+    // 之后用户创建本地身份并重启：标记已存在，H10 之后新建的默认行不得被划走
+    deps.getActiveUserId = () => 'u1';
+    expect(backfillIdentityOwnership(deps)).toBe(0);
+    expect(deps.migrate).not.toHaveBeenCalled();
+    expect(deps.markDone).toHaveBeenCalledTimes(1);
   });
 
   it('does not mark done when the backfill throws', () => {

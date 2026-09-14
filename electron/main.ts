@@ -1216,18 +1216,26 @@ function registerIpcHandlers(): void {
     return cloudAuth.getState();
   });
 
+  // H10：默认档没有本地身份，登录 / 注册入口一律在主进程拦截
+  // （渲染层 disabled 只是辅助，键盘与直接 invoke 都绕不过这里）。
   handle('auth:cloud:sendSignUpCode', async (_e, args: CloudSignUpArgs) => {
-    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    const { cloudAuth, requireRealIdentityForCloud } = await import('./auth/cloud-auth-manager');
+    const blocked = requireRealIdentityForCloud();
+    if (blocked) return { ok: false as const, error: blocked };
     return cloudAuth.sendSignUpCode(args);
   });
 
   handle('auth:cloud:verifySignUp', async (_e, args: { pendingId: string; code: string }) => {
-    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    const { cloudAuth, requireRealIdentityForCloud } = await import('./auth/cloud-auth-manager');
+    const blocked = requireRealIdentityForCloud();
+    if (blocked) return { ok: false as const, error: blocked };
     return cloudAuth.verifySignUp(args);
   });
 
   handle('auth:cloud:signInWithPassword', async (_e, args: { identifier: string; password: string }) => {
-    const { cloudAuth } = await import('./auth/cloud-auth-manager');
+    const { cloudAuth, requireRealIdentityForCloud } = await import('./auth/cloud-auth-manager');
+    const blocked = requireRealIdentityForCloud();
+    if (blocked) return { ok: false as const, error: blocked };
     return cloudAuth.signInWithPassword(args);
   });
 
@@ -2247,8 +2255,9 @@ app.whenReady().then(async () => {
     // 云账号绑定表（Phase 3）：必须在 initLocalUsers 之后（引用 local_users.id）
     const { initCloudLinks } = await import('./store/cloud-links');
     initCloudLinks();
-    // H10（R2）：历史数据回填只在启动时执行一次，且仅当活动身份是真实用户；
-    // 默认档数据保持归属默认档，切换身份时不会重新回填（见 identity-switch.ts）。
+    // H10（R2）：历史数据回填只在启动时评估一次并落「已评估」标记（默认档也落）；
+    // 仅当活动身份是真实用户时才迁移，默认档数据（含 H10 后新建）保持归属默认档
+    // （见 identity-switch.ts）。
     const { backfillIdentityOwnership } = await import('./identity-switch');
     const { isIdentityBackfillDone, markIdentityBackfillDone } = await import('./store/db');
     const backfilled = backfillIdentityOwnership({

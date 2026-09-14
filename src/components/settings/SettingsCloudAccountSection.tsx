@@ -304,6 +304,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
   // ---------- 用户名占用预检 ----------
 
   async function checkUsernameAvailability() {
+    if (disabled) return;
     const name = username.trim();
     if (!name || !USERNAME_PATTERN.test(name)) {
       setUsernameCheck('idle');
@@ -329,7 +330,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
   // ---------- 动作 ----------
 
   async function handleSignIn() {
-    if (busy) return;
+    if (disabled || busy) return;
     resetMessages();
     if (!validateSigninForm()) return;
 
@@ -355,7 +356,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
    * 否则「用户名不合规」会拖到用户填完验证码才报错。
    */
   async function handleSendCode(opts: { resend?: boolean } = {}) {
-    if (busy) return;
+    if (disabled || busy) return;
     if (opts.resend && resendLeft > 0) return;
     resetMessages();
 
@@ -404,7 +405,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
   }
 
   async function handleVerify() {
-    if (busy || !pendingId) return;
+    if (disabled || busy || !pendingId) return;
     resetMessages();
     clearFieldErrors('code');
     if (codeValue.length < CODE_LENGTH) {
@@ -634,6 +635,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
               type="button"
               role="tab"
               aria-selected={mode === 'signin'}
+              disabled={disabled}
               onClick={() => switchMode('signin')}
             >
               登录
@@ -643,6 +645,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
               type="button"
               role="tab"
               aria-selected={mode === 'signup'}
+              disabled={disabled}
               onClick={() => switchMode('signup')}
             >
               注册
@@ -696,6 +699,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                   <button
                     className="cloud-link"
                     type="button"
+                    disabled={disabled}
                     onClick={() => setShowSigninPassword((prev) => !prev)}
                     aria-label={showSigninPassword ? '隐藏密码' : '显示密码'}
                   >
@@ -716,7 +720,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                 <button
                   className="btn btn-primary"
                   type="button"
-                  disabled={busy || !identifier.trim() || !signinPassword}
+                  disabled={disabled || busy || !identifier.trim() || !signinPassword}
                   onClick={() => void handleSignIn()}
                 >
                   {busy ? '登录中…' : '登录'}
@@ -838,6 +842,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                   <button
                     className="cloud-link"
                     type="button"
+                    disabled={disabled}
                     onClick={() => setShowSignupPassword((prev) => !prev)}
                     aria-label={showSignupPassword ? '隐藏密码' : '显示密码'}
                   >
@@ -896,7 +901,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                     CloudBase 要求注册必须验证邮箱；点下一步会向该邮箱发送验证码。
                   </div>
                 </div>
-                <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void handleSendCode()}>
+                <button className="btn btn-primary" type="button" disabled={disabled || busy} onClick={() => void handleSendCode()}>
                   {busy ? '发送中…' : '发送验证码'}
                 </button>
               </div>
@@ -922,7 +927,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                   <div className="cloud-recap__label">验证码已发送至</div>
                   <div className="cloud-recap__value">{email.trim()}</div>
                 </div>
-                <button className="cloud-link" type="button" disabled={busy} onClick={backToForm}>
+                <button className="cloud-link" type="button" disabled={disabled || busy} onClick={backToForm}>
                   修改
                 </button>
               </div>
@@ -950,7 +955,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                       value={digit}
                       aria-label={`验证码第 ${index + 1} 位`}
                       aria-invalid={Boolean(fieldErrors.code)}
-                      disabled={busy}
+                      disabled={disabled || busy}
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
                       onPaste={handleOtpPaste}
@@ -968,7 +973,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                   <button
                     className="cloud-link"
                     type="button"
-                    disabled={busy || resendLeft > 0}
+                    disabled={disabled || busy || resendLeft > 0}
                     onClick={() => void handleSendCode({ resend: true })}
                   >
                     {resendLeft > 0 ? `重新发送 ${resendLeft}s` : '重新发送'}
@@ -982,13 +987,13 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disable
                     注册成功后会自动登录，并把云账号绑定到当前本地身份。
                   </div>
                 </div>
-                <button className="btn btn-secondary" type="button" disabled={busy} onClick={backToForm}>
+                <button className="btn btn-secondary" type="button" disabled={disabled || busy} onClick={backToForm}>
                   返回
                 </button>
                 <button
                   className="btn btn-primary"
                   type="button"
-                  disabled={busy || !otpComplete || !pendingId || !remaining}
+                  disabled={disabled || busy || !otpComplete || !pendingId || !remaining}
                   onClick={() => void handleVerify()}
                 >
                   {busy ? '验证中…' : remaining ? '完成注册' : '验证码已过期'}

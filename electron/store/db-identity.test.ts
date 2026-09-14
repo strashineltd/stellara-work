@@ -118,6 +118,17 @@ describe('one-time identity backfill (H10)', () => {
     expect(listSessions('u1').map((s) => s.id)).toEqual(['legacy']);
   });
 
+  it('treats the first startup as evaluated even on the default profile', () => {
+    createSession({ id: 'legacy-default', title: 'x', modelId: 'm' }); // 升级前数据 → default
+    expect(runBackfill('default')).toBe(0);
+    expect(isIdentityBackfillDone()).toBe(true);
+
+    // H10 之后在默认档新建的会话：用户随后创建身份并重启，也不能被回填
+    createSession({ id: 'fresh-default', title: 'y', modelId: 'm' });
+    expect(runBackfill('u1')).toBe(0);
+    expect(listSessions('default').map((s) => s.id)).toEqual(['legacy-default', 'fresh-default']);
+  });
+
   it('keeps the marker across a database reopen', () => {
     expect(isIdentityBackfillDone()).toBe(false);
 
