@@ -93,8 +93,9 @@ export function adjustCutForTransactions(items: ResponseItem[], candidate: numbe
       }
     }
   }
-  if (cut >= items.length && components.length > 0) {
-    cut = components[components.length - 1]!.start;
+  if (components.length > 0) {
+    const last = components[components.length - 1]!;
+    if (cut > last.start) cut = last.start;
   }
   return cut;
 }

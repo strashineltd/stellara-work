@@ -52,8 +52,15 @@ describe('transactionComponents / adjustCutForTransactions', () => {
   });
 
   it('切点落入事务内部时向外扩张', () => {
-    const items = [call('c1'), out('c1', 'x'), msg('tail')];
+    const items = [call('c1'), out('c1', 'x'), call('c2'), out('c2', 'y'), msg('tail')];
     expect(adjustCutForTransactions(items, 1)).toBe(2);
+  });
+
+  it('目标极小也至少保留最后一个事务组件', () => {
+    const items = [call('c1'), out('c1', 'x'.repeat(800)), msg('tail')];
+    const result = compact(items, options({ targetTokens: 1, hardLimitTokens: 1_000_000 }));
+    expect(result.keptItems.some((i) => i.type === 'function_call')).toBe(true);
+    assertNoOrphanOutputs(result.keptItems);
   });
 
   it('无法部分切割的轮次整体保留（不清空窗口）', () => {
