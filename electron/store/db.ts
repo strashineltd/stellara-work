@@ -384,18 +384,33 @@ export function createSession(s: {
   };
 }
 
-export function findSessionByRemote(serverId: string, remoteSessionId: string): Session | undefined {
-  const row = getDb()
-    .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ?')
-    .get(serverId, remoteSessionId) as Record<string, unknown> | undefined;
+/**
+ * 按服务器 + 远端会话查找映射行。
+ * 传入 userId 时仅命中该身份的映射行（H10：服务器会话按身份隔离）。
+ */
+export function findSessionByRemote(serverId: string, remoteSessionId: string, userId?: string): Session | undefined {
+  const row = (userId === undefined
+    ? getDb()
+        .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ?')
+        .get(serverId, remoteSessionId)
+    : getDb()
+        .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ? AND user_id = ?')
+        .get(serverId, remoteSessionId, userId)) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : undefined;
 }
 
-/** 按远端会话 ID 查找映射行（不限 server_id），用于认领服务器重建后的孤儿映射。 */
-export function findSessionByRemoteId(remoteSessionId: string): Session | undefined {
-  const row = getDb()
-    .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? ORDER BY updated_at DESC LIMIT 1")
-    .get(remoteSessionId) as Record<string, unknown> | undefined;
+/**
+ * 按远端会话 ID 查找映射行（不限 server_id），用于认领服务器重建后的孤儿映射。
+ * 传入 userId 时仅命中该身份的映射行（避免认领他人行）。
+ */
+export function findSessionByRemoteId(remoteSessionId: string, userId?: string): Session | undefined {
+  const row = (userId === undefined
+    ? getDb()
+        .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? ORDER BY updated_at DESC LIMIT 1")
+        .get(remoteSessionId)
+    : getDb()
+        .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1")
+        .get(remoteSessionId, userId)) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : undefined;
 }
 
@@ -404,10 +419,13 @@ export function reassignServerSession(id: string, serverId: string): void {
   getDb().prepare('UPDATE sessions SET server_id = ? WHERE id = ?').run(serverId, id);
 }
 
-export function listServerSessions(serverId: string): Session[] {
-  const rows = getDb()
-    .prepare('SELECT * FROM sessions WHERE server_id = ? ORDER BY updated_at DESC')
-    .all(serverId) as Record<string, unknown>[];
+/** 某服务器的映射行；传入 userId 时仅返回该身份的行（H10）。 */
+export function listServerSessions(serverId: string, userId?: string): Session[] {
+  const rows = (userId === undefined
+    ? getDb().prepare('SELECT * FROM sessions WHERE server_id = ? ORDER BY updated_at DESC').all(serverId)
+    : getDb()
+        .prepare('SELECT * FROM sessions WHERE server_id = ? AND user_id = ? ORDER BY updated_at DESC')
+        .all(serverId, userId)) as Record<string, unknown>[];
   return rows.map(rowToSession);
 }
 

@@ -21,6 +21,7 @@ import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
 import { isMainWindowWebContents, isSafeExternalUrl, isSameOrigin } from './security/url-guard';
 import { isTrustedIpcSender } from './security/ipc-guard';
+import { getActiveUserId } from './auth/local-auth-manager';
 import {
   findUngrantedAttachmentSources,
   grantAttachmentSources,
@@ -389,8 +390,9 @@ function registerIpcHandlers(): void {
 
   // Chat
   handle('chat:start', async (_e, request: ChatRequest): Promise<{ streamId: string }> => {
-    const { getSession, updateSessionMeta } = await import('./store/db');
-    if (getSession(request.sessionId)?.runtime === 'server') {
+    const { assertSessionOwned, updateSessionMeta } = await import('./store/db');
+    const session = assertSessionOwned(request.sessionId, getActiveUserId());
+    if (session.runtime === 'server') {
       // 远端 server 持有会话历史：只发送最后一条用户文本
       const lastUser = [...request.messages].reverse().find((message) => message.role === 'user');
       if (!lastUser) throw new Error('消息历史末尾必须是 user 消息');
@@ -654,12 +656,13 @@ function registerIpcHandlers(): void {
     return true;
   });
 
-  // Projects
+  // Projects（身份由主进程注入，渲染层不传 userId）
   handle('projects:list', async () => {
+    const userId = getActiveUserId();
     const { listProjects } = await import('./store/db');
-    const projects = listProjects();
+    const projects = listProjects(userId);
     const { listSessions } = await import('./store/db');
-    const sessions = listSessions();
+    const sessions = listSessions(userId);
     return projects.map((p) => ({
       id: p.id,
       name: p.name,
@@ -671,13 +674,14 @@ function registerIpcHandlers(): void {
   });
 
   handle('projects:create', async (_e, args: { name: string; workDir: string; entryFile?: string }) => {
+    const userId = getActiveUserId();
     const { createProjectGuarded } = await import('./projects/create');
     const { v4: uuid } = await import('uuid');
     const { createProject } = await import('./store/db');
     const project = await createProjectGuarded(args, {
       newId: () => uuid(),
       verifySelection: verifyProjectSelection,
-      persist: createProject,
+      persist: (draft) => createProject({ ...draft, userId }),
     });
     // 新项目自动初始化内置技能模板（幂等；失败不影响项目创建）
     try {
@@ -695,58 +699,63 @@ function registerIpcHandlers(): void {
     if (typeof selection?.workDir !== 'string' || typeof selection?.path !== 'string') {
       throw new Error('项目文件无效');
     }
+    const { assertProjectOwned, updateProjectFile } = await import('./store/db');
+    assertProjectOwned(id.trim(), getActiveUserId());
     const verified = await verifyProjectSelection(selection.workDir, selection.path);
-    const { updateProjectFile } = await import('./store/db');
     return updateProjectFile(id.trim(), verified.workDir, verified.path);
   });
 
   handle('projects:delete', async (_e, id: string) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
-    const { deleteProject } = await import('./store/db');
-    deleteProject(id.trim());
+    const { assertProjectOwned, deleteProject } = await import('./store/db');
+    const projectId = id.trim();
+    assertProjectOwned(projectId, getActiveUserId());
+    deleteProject(projectId);
   });
 
   handle('projects:rename', async (_e, id: string, name: string) => {
     if (typeof id !== 'string' || !id.trim()) throw new Error('项目 ID 无效');
     if (typeof name !== 'string' || !name.trim()) throw new Error('项目名称不能为空');
-    const { renameProject } = await import('./store/db');
-    renameProject(id.trim(), name.trim().slice(0, 50));
+    const { assertProjectOwned, renameProject } = await import('./store/db');
+    const projectId = id.trim();
+    assertProjectOwned(projectId, getActiveUserId());
+    renameProject(projectId, name.trim().slice(0, 50));
   });
 
   // Sessions（list 经桥接对账远端；get/create/delete/rename 按 runtime 分派）
+  // 身份由主进程注入；按 id 操作先校验归属，失败抛「无权限访问该数据」
   handle('sessions:list', async () => {
-    return requireServerRuntime().sessions.list();
+    return requireServerRuntime().sessions.list(getActiveUserId());
   });
 
   handle('sessions:search', async (_e, query: string): Promise<string[]> => {
     if (typeof query !== 'string') return [];
     const { searchSessions } = await import('./store/db');
-    return searchSessions(query);
+    return searchSessions(query, getActiveUserId());
   });
 
   handle('sessions:get', async (_e, id: string) => {
-    const { getSession, getMessages } = await import('./store/db');
-    const session = getSession(id);
-    if (!session) throw new Error(`Session 不存在: ${id}`);
+    const { assertSessionOwned, getMessages } = await import('./store/db');
+    const session = assertSessionOwned(id, getActiveUserId());
     if (session.runtime === 'server') return requireServerRuntime().sessions.get(id);
     const messages = getMessages(id);
     return { session, messages };
   });
 
   handle('sessions:create', async (_e, args: CreateSessionArgs & { modelId: string }) => {
+    const userId = getActiveUserId();
     if (args.runtime === 'server') {
-      return requireServerRuntime().sessions.create(args);
+      return requireServerRuntime().sessions.create(args, userId);
     }
     const { v4: uuid } = await import('uuid');
-    const { createSession, getProject } = await import('./store/db');
+    const { assertProjectOwned, createSession } = await import('./store/db');
     const { getKey } = await import('./config/secrets');
     if (!getKey(args.modelId)) {
       throw new Error(`Model ${args.modelId} 未配置 API key`);
     }
     let workDir = args.workDir;
     if (args.projectId) {
-      const project = getProject(args.projectId);
-      if (!project) throw new Error('项目不存在或已被删除');
+      const project = assertProjectOwned(args.projectId, userId);
       if (!project.workDir) throw new Error('该项目尚未设置入口文件');
       workDir = project.workDir;
     }
@@ -759,12 +768,14 @@ function registerIpcHandlers(): void {
       modelId: args.modelId,
       workDir,
       projectId: args.projectId,
+      userId,
     });
   });
 
   handle('sessions:delete', async (_e, id: string) => {
-    const { deleteSession, getSession } = await import('./store/db');
-    if (getSession(id)?.runtime === 'server') {
+    const { assertSessionOwned, deleteSession } = await import('./store/db');
+    const session = assertSessionOwned(id, getActiveUserId());
+    if (session.runtime === 'server') {
       await requireServerRuntime().sessions.remove(id);
       return;
     }
@@ -772,8 +783,9 @@ function registerIpcHandlers(): void {
   });
 
   handle('sessions:rename', async (_e, id: string, title: string) => {
-    const { renameSession, getSession } = await import('./store/db');
-    if (getSession(id)?.runtime === 'server') {
+    const { assertSessionOwned, renameSession } = await import('./store/db');
+    const session = assertSessionOwned(id, getActiveUserId());
+    if (session.runtime === 'server') {
       await requireServerRuntime().sessions.rename(id, title);
       return;
     }
@@ -781,17 +793,22 @@ function registerIpcHandlers(): void {
   });
 
   handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
-    const { saveMessages } = await import('./store/db');
+    const { assertSessionOwned, saveMessages } = await import('./store/db');
+    assertSessionOwned(id, getActiveUserId());
     saveMessages(id, messages);
   });
 
   handle('sessions:appendMessage', async (_e, id: string, message: MessageRow) => {
-    const { appendMessage } = await import('./store/db');
+    const { assertSessionOwned, appendMessage } = await import('./store/db');
+    assertSessionOwned(id, getActiveUserId());
     appendMessage({ ...message, sessionId: id });
   });
 
   handle('sessions:move', async (_e, sessionId: string, projectId: string | null) => {
-    const { moveSession } = await import('./store/db');
+    const { assertProjectOwned, assertSessionOwned, moveSession } = await import('./store/db');
+    const userId = getActiveUserId();
+    assertSessionOwned(sessionId, userId);
+    if (projectId !== null) assertProjectOwned(projectId, userId);
     moveSession(sessionId, projectId);
   });
 
@@ -904,6 +921,8 @@ function registerIpcHandlers(): void {
 
   handle('settings:resetSelective', async (_e, level: 'sessions' | 'memories' | 'all') => {
     if (level === 'all') {
+      // 'all' 是「清空本机全部数据」入口：配置与所有身份的数据一并无条件清除，
+      // 刻意不按活动身份区分（身份列表与 local_users 由 wipeAllData 处理）。
       const { wipeAllData } = await import('./config/wipe-data');
       await wipeAllData();
       try {
@@ -916,14 +935,15 @@ function registerIpcHandlers(): void {
       return { cleared: 'all' as const };
     }
     if (level === 'sessions') {
-      const { deleteAllSessions } = await import('./store/db');
-      const count = deleteAllSessions();
+      // 只清当前身份的会话；远端 server 上的会话不在此处理（与 deleteAllSessions 语义一致）
+      const { deleteSessionsByUser } = await import('./store/db');
+      const count = deleteSessionsByUser(getActiveUserId());
       broadcastSettingsChanged();
       return { cleared: 'sessions' as const, count };
     }
     if (level === 'memories') {
-      const { deleteAllMemories } = await import('./memory/memory-store');
-      const count = deleteAllMemories();
+      const { deleteMemoriesByUser } = await import('./memory/memory-store');
+      const count = deleteMemoriesByUser(getActiveUserId());
       broadcastSettingsChanged();
       return { cleared: 'memories' as const, count };
     }
@@ -948,7 +968,7 @@ function registerIpcHandlers(): void {
     const { listSessions, countAllMessages } = await import('./store/db');
     const { listKeys } = await import('./config/secrets');
     const cfg = await loadConfig();
-    const sessions = listSessions();
+    const sessions = listSessions(getActiveUserId());
     const keys = await listKeys();
     // 真实数据（不再硬编码桩值）
     let dbSizeBytes = 0;
@@ -1168,41 +1188,44 @@ function registerIpcHandlers(): void {
     return cloudAuth.isUsernameRegistered(username);
   });
 
-  // Memory OS
+  // Memory OS（身份由主进程注入；按 id 操作先校验归属）
   handle('memory:search', async (_e, query: string, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number }) => {
     const { searchMemories } = await import('./memory/memory-store');
-    return searchMemories({ query, scope: options?.scope, kind: options?.kind, limit: options?.limit });
+    return searchMemories({ query, scope: options?.scope, kind: options?.kind, limit: options?.limit }, getActiveUserId());
   });
 
   handle('memory:list', async (_e, options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) => {
     const { listMemories } = await import('./memory/memory-store');
-    return listMemories({ scope: options?.scope, kind: options?.kind, limit: options?.limit, offset: options?.offset });
+    return listMemories({ scope: options?.scope, kind: options?.kind, limit: options?.limit, offset: options?.offset }, getActiveUserId());
   });
 
-  handle('memory:save', async (_e, memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) => {
+  handle('memory:save', async (_e, memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount' | 'userId'>) => {
     const { saveMemory } = await import('./memory/memory-store');
-    return saveMemory(memory);
+    // 归属由主进程决定：即使渲染层夹带 userId 也被覆盖
+    return saveMemory({ ...memory, userId: getActiveUserId() });
   });
 
   handle('memory:update', async (_e, id: string, patch: { content?: string; importance?: number; tags?: string[] }) => {
-    const { updateMemory } = await import('./memory/memory-store');
+    const { assertMemoryOwned, updateMemory } = await import('./memory/memory-store');
+    assertMemoryOwned(id, getActiveUserId());
     updateMemory(id, patch);
   });
 
   handle('memory:delete', async (_e, id: string) => {
-    const { deleteMemory } = await import('./memory/memory-store');
+    const { assertMemoryOwned, deleteMemory } = await import('./memory/memory-store');
+    assertMemoryOwned(id, getActiveUserId());
     deleteMemory(id);
   });
 
   handle('memory:stats', async () => {
     const { getMemoryStats } = await import('./memory/memory-store');
-    return getMemoryStats();
+    return getMemoryStats(getActiveUserId());
   });
 
   handle('memory:exportSingle', async (_e, id: string): Promise<{ path: string } | null> => {
     const { listMemories } = await import('./memory/memory-store');
     const { memoryToMarkdown, exportFileName } = await import('./memory/memory-md');
-    const all = listMemories({ limit: 1000 });
+    const all = listMemories({ limit: 1000 }, getActiveUserId());
     const memory = all.find((m) => m.id === id);
     if (!memory) throw new Error('记忆不存在');
     if (!mainWindow) return null;
@@ -1219,7 +1242,7 @@ function registerIpcHandlers(): void {
   handle('memory:exportAll', async (): Promise<{ path: string; count: number } | null> => {
     const { listMemories } = await import('./memory/memory-store');
     const { memoriesToExport, exportAllFileName } = await import('./memory/memory-md');
-    const all = listMemories({ limit: 1000 });
+    const all = listMemories({ limit: 1000 }, getActiveUserId());
     if (!mainWindow) return null;
     const result = await dialog.showSaveDialog(mainWindow, {
       title: '导出全部记忆',
@@ -1234,7 +1257,7 @@ function registerIpcHandlers(): void {
   handle('memory:copyMd', async (_e, id: string): Promise<string> => {
     const { listMemories } = await import('./memory/memory-store');
     const { memoryToMarkdown } = await import('./memory/memory-md');
-    const memory = listMemories({ limit: 1000 }).find((m) => m.id === id);
+    const memory = listMemories({ limit: 1000 }, getActiveUserId()).find((m) => m.id === id);
     if (!memory) throw new Error('记忆不存在');
     return memoryToMarkdown(memory);
   });
@@ -1359,11 +1382,12 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
     import('./store/db'),
   ]);
   const cfg = await loadConfig();
+  const activeUserId = getActiveUserId();
   const allowed = cfg.models
     .map((m) => m.workDir)
     .filter((d): d is string => !!d);
-  allowed.push(...listProjects().map((project) => project.workDir).filter((d): d is string => !!d));
-  allowed.push(...listSessions().map((session) => session.workDir).filter((d): d is string => !!d));
+  allowed.push(...listProjects(activeUserId).map((project) => project.workDir).filter((d): d is string => !!d));
+  allowed.push(...listSessions(activeUserId).map((session) => session.workDir).filter((d): d is string => !!d));
 
   const resolved = await normalizeWorkDir(workDir);
   if (await isWorkDirGranted(workDir)) return;
@@ -1468,11 +1492,14 @@ async function runAnthropicLoopForIpc(
       mainWindow.webContents.send('chat-stream', { streamId, event });
     }
   };
-  // 记忆注入按项目检索：解析会话所属项目
+  // 记忆注入按项目 + 归属身份检索：解析会话所属项目与身份
   let memoryProjectId: string | undefined;
+  let memoryUserId: string | undefined;
   try {
     const { getSession } = await import('./store/db');
-    memoryProjectId = getSession(request.sessionId)?.projectId ?? undefined;
+    const session = getSession(request.sessionId);
+    memoryProjectId = session?.projectId ?? undefined;
+    memoryUserId = session?.userId;
   } catch {
     // 会话解析失败时按个人记忆注入
   }
@@ -1569,6 +1596,7 @@ async function runAnthropicLoopForIpc(
       extraTools,
       planExtraTools,
       memoryProjectId,
+      memoryUserId,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1645,11 +1673,14 @@ async function runResponsesLoopForIpc(
       mainWindow.webContents.send('chat-stream', { streamId, event });
     }
   };
-  // 记忆注入按项目检索：解析会话所属项目
+  // 记忆注入按项目 + 归属身份检索：解析会话所属项目与身份
   let memoryProjectId: string | undefined;
+  let memoryUserId: string | undefined;
   try {
     const { getSession } = await import('./store/db');
-    memoryProjectId = getSession(request.sessionId)?.projectId ?? undefined;
+    const session = getSession(request.sessionId);
+    memoryProjectId = session?.projectId ?? undefined;
+    memoryUserId = session?.userId;
   } catch {
     // 会话解析失败时按个人记忆注入
   }
@@ -1752,6 +1783,7 @@ async function runResponsesLoopForIpc(
       extraTools: extraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
       planExtraTools: planExtraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
       memoryProjectId,
+      memoryUserId,
       signal: ctrl.signal,
       onApproval: async (toolCall) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2025,7 +2057,7 @@ async function extractMemoriesFromSession(
 
     const browserMaterial = buildBrowserMaterial(messages);
 
-    const saved = await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall, browserMaterial);
+    const saved = await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall, browserMaterial, session?.userId);
     if (saved.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('memories-extracted', { sessionId: request.sessionId, count: saved.length });
     }

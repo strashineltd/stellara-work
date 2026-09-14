@@ -14,6 +14,7 @@ import { webSearch, webSearchTools } from './web-search';
 import { browserOpenAITools, browserPlanTools } from './browser-tools';
 import { browserService } from '../../browser/service';
 import { mcpManager } from '../../mcp/mcp-manager';
+import { getActiveUserId } from '../../auth/local-auth-manager';
 
 function toBrowserError(e: unknown, fallback: string): ToolResult {
   const msg = e instanceof Error ? e.message : String(e ?? fallback);
@@ -111,9 +112,9 @@ async function invokeToolInternal(
     case 'git_log':
       return gitLog(args as Record<string, unknown>, cwd);
     case 'memory_search':
-      return memorySearch(args as { query: string; limit?: number }, cwd);
+      return memorySearch(args as { query: string; limit?: number }, cwd, getActiveUserId());
     case 'memory_save':
-      return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd);
+      return memorySave(args as { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, cwd, getActiveUserId());
     case 'dispatch_subagents':
       return dispatchSubagents(args as DispatchSubagentsArgs, cwd, context);
     case 'web_search':
