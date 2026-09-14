@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerConfig, McpToolInfo, ToolResult } from '../../shared/ipc';
+import { checkMcpHttpUrl } from '../security/net-policy';
 
 const CONNECT_TIMEOUT_MS = 10_000;
 const CLIENT_IDENTITY = { name: 'stellara-work', version: '0.9.0' };
@@ -18,6 +19,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export async function connectMcpServer(
   cfg: McpServerConfig,
 ): Promise<{ client: Client; tools: McpToolInfo[] }> {
+  if (cfg.transport === 'http' && cfg.url) {
+    const netCheck = checkMcpHttpUrl(cfg.url);
+    if (!netCheck.ok) {
+      throw new Error(netCheck.error ?? '不允许访问受限地址');
+    }
+  }
   const client = new Client(CLIENT_IDENTITY);
   let transport;
   if (cfg.transport === 'http') {

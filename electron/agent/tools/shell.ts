@@ -40,7 +40,7 @@ const ALLOWED_COMMANDS_POSIX = new Set([
   // 开发 / 构建工具
   'pip', 'pip3', 'cargo', 'rustc', 'go', 'java', 'javac', 'gradle', 'mvn',
   // 文本处理（只读）
-  'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'diff',
+  'sed', 'cut', 'sort', 'uniq', 'wc', 'diff',
   // macOS / Linux 构建链
   'make', 'cmake', 'ninja', 'clang', 'clang++', 'cc', 'gcc', 'g++',
   // macOS 专属开发命令
@@ -145,7 +145,6 @@ const PATH_FLAGS: Record<string, Set<string>> = {
   mvn: new Set(['-f', '--file', '-s', '--settings', '-gs', '--global-settings']),
   grep: new Set(['-f', '--file']),
   rg: new Set(['-f', '--file']),
-  awk: new Set(['-f', '--file']),
   sed: new Set(['-f', '--file']),
   sort: new Set(['-o', '--output']),
   file: new Set(['-f', '--files-from']),

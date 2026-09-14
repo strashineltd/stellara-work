@@ -732,6 +732,7 @@ describe('runCommand structural policy (executable + subcommand allowlist)', () 
     ['python script', 'python x.py'],
     ['python3 script', 'python3 x.py'],
     ['python3.11 script', 'python3.11 x.py'],
+    ['awk script', 'awk "BEGIN { print 1 }"'],
     ['sh', 'sh script.sh'],
     ['bash', 'bash script.sh'],
     ['zsh', 'zsh script.zsh'],

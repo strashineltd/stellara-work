@@ -3,6 +3,7 @@ import { loadConfig, saveConfig } from '../config/config-v2';
 import type { McpServerConfig, McpTestResult, McpToolInfo, OpenAITool, ToolResult } from '../../shared/ipc';
 import { connectMcpServer, callMcpTool } from './mcp-client';
 import { mcpToolToOpenAITool, parseMcpToolName } from './mcp-tools';
+import { checkMcpHttpUrl } from '../security/net-policy';
 
 interface CachedConnection {
   client: Client;
@@ -74,6 +75,10 @@ export class McpManager {
     const sanitized = withoutSpawnFields(cfg);
     const err = validationError(sanitized);
     if (err) throw new Error(err);
+    if (sanitized.transport === 'http' && sanitized.url) {
+      const netCheck = checkMcpHttpUrl(sanitized.url);
+      if (!netCheck.ok) throw new Error(netCheck.error ?? '不允许访问受限地址');
+    }
     const current = await loadConfig();
     if (current.mcpServers.some((s) => s.id === sanitized.id)) {
       throw new Error(`MCP 服务器 id 已存在: ${sanitized.id}`);
@@ -98,6 +103,10 @@ export class McpManager {
     const merged = { ...current.mcpServers[idx]!, ...patch };
     const err = validationError(merged);
     if (err) throw new Error(err);
+    if (merged.transport === 'http' && merged.url) {
+      const netCheck = checkMcpHttpUrl(merged.url);
+      if (!netCheck.ok) throw new Error(netCheck.error ?? '不允许访问受限地址');
+    }
     // C3+：确认只看合并后的最终形态，而非 patch 里恰好出现的键。
     // 任何会改变 spawn 形态的补丁（transport/command/args）且最终是带命令的
     // stdio，都必须确认；http 不允许携带 spawn 字段（防止先存后翻）。
@@ -113,6 +122,10 @@ export class McpManager {
 
   async testConnection(cfg: McpServerConfig): Promise<McpTestResult> {
     try {
+      if (cfg.transport === 'http' && cfg.url) {
+        const netCheck = checkMcpHttpUrl(cfg.url);
+        if (!netCheck.ok) return { ok: false, error: netCheck.error ?? '不允许访问受限地址' };
+      }
       await this.assertStdioCommandConfirmed(cfg);
       const { client, tools } = await connectMcpServer(cfg);
       await client.close();

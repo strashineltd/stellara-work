@@ -118,7 +118,7 @@
       "icon": "assets/icon-512.png",
       "category": "public.app-category.developer-tools",
       "identity": "-",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "win": {

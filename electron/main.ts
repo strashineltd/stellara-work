@@ -2342,6 +2342,11 @@ app.on('will-quit', () => {
 
 // 安全：阻止新窗口创建
 app.on('web-contents-created', (_e, contents) => {
+  // 安全加固：全局阻止未授权的 <webview> 标签附加
+  contents.on('will-attach-webview', (event) => {
+    event.preventDefault();
+  });
+
   contents.on('will-navigate', (event, url) => {
     // M8: 仅主窗口导航允许外部化；浏览器视图的页面内导航由 BrowserService 策略处理
     const mainContents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : undefined;
