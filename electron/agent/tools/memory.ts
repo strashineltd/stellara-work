@@ -7,14 +7,14 @@
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 import { searchMemories, saveMemory } from '../../memory/memory-store';
 
-export async function memorySearch(args: { query: string; scope?: string; kind?: string; limit?: number }, _cwd: string): Promise<ToolResult> {
+export async function memorySearch(args: { query: string; scope?: string; kind?: string; limit?: number }, _cwd: string, userId: string = 'default'): Promise<ToolResult> {
   try {
     const results = searchMemories({
       query: args.query,
       scope: args.scope as 'personal' | 'project' | 'workspace' | undefined,
       kind: args.kind as 'fact' | 'preference' | 'decision' | 'codebase' | 'requirement' | 'meeting' | undefined,
       limit: args.limit ?? 5,
-    });
+    }, userId);
 
     if (results.length === 0) {
       return { ok: true, output: '(未找到相关记忆)' };
@@ -31,7 +31,7 @@ export async function memorySearch(args: { query: string; scope?: string; kind?:
   }
 }
 
-export async function memorySave(args: { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, _cwd: string): Promise<ToolResult> {
+export async function memorySave(args: { content: string; kind: string; scope?: string; tags?: string[]; importance?: number }, _cwd: string, userId: string = 'default'): Promise<ToolResult> {
   try {
     const validKinds = ['fact', 'preference', 'decision', 'codebase', 'requirement', 'meeting'];
     if (!validKinds.includes(args.kind)) {
@@ -49,6 +49,7 @@ export async function memorySave(args: { content: string; kind: string; scope?: 
       importance: args.importance ?? 0.7,
       confidence: 0.9,
       tags: args.tags,
+      userId,
     });
 
     return { ok: true, output: `已保存记忆: ${memory.content} (${memory.kind})` };

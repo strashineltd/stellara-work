@@ -200,6 +200,14 @@ export function deleteMemory(id: string): void {
   try { db.prepare('DELETE FROM memories_fts WHERE memory_id = ?').run(id); } catch { /* ignore */ }
 }
 
+/** 校验记忆归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中记忆。 */
+export function assertMemoryOwned(id: string, userId: string): Memory {
+  const row = getDb().prepare('SELECT * FROM memories WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const memory = row ? rowToMemory(row) : undefined;
+  if (!memory || memory.userId !== userId) throw new Error('无权限访问该数据');
+  return memory;
+}
+
 /** 删除全部记忆，返回删除的条数。 */
 export function deleteAllMemories(): number {
   const db = getDb();
@@ -208,6 +216,18 @@ export function deleteAllMemories(): number {
     return db.prepare('DELETE FROM memories').run().changes;
   });
   return deleteAll();
+}
+
+/** 删除某身份的全部记忆及其 FTS 索引，返回删除条数。 */
+export function deleteMemoriesByUser(userId: string): number {
+  const db = getDb();
+  const deleteByUser = db.transaction(() => {
+    try {
+      db.prepare('DELETE FROM memories_fts WHERE memory_id IN (SELECT id FROM memories WHERE user_id = ?)').run(userId);
+    } catch { /* FTS5 表可能不存在 */ }
+    return db.prepare('DELETE FROM memories WHERE user_id = ?').run(userId).changes;
+  });
+  return deleteByUser();
 }
 
 export function bumpAccess(id: string): void {

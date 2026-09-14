@@ -322,6 +322,13 @@ export function getOwnedSession(id: string, userId: string): Session | undefined
   return session && session.userId === userId ? session : undefined;
 }
 
+/** 校验会话归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中会话。 */
+export function assertSessionOwned(id: string, userId: string): Session {
+  const session = getOwnedSession(id, userId);
+  if (!session) throw new Error('无权限访问该数据');
+  return session;
+}
+
 /**
  * 把仍归属 'default' 的历史数据回填给指定身份，返回总变更行数。
  * 目标为 'default' 时视为无需回填，直接返回 0；重复调用因无匹配行返回 0（幂等）。
@@ -531,6 +538,13 @@ export function getProject(id: string): Project | null {
   return row ? rowToProject(row) : null;
 }
 
+/** 校验项目归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中项目。 */
+export function assertProjectOwned(id: string, userId: string): Project {
+  const project = getProject(id);
+  if (!project || project.userId !== userId) throw new Error('无权限访问该数据');
+  return project;
+}
+
 export function createProject(p: { id: string; name: string; workDir?: string; entryFile?: string; userId?: string }): Project {
   const now = Date.now();
   const userId = p.userId ?? 'default';
@@ -567,6 +581,11 @@ export function deleteProject(id: string): void {
 export function deleteAllSessions(): number {
   const result = getDb().prepare('DELETE FROM sessions').run();
   return result.changes;
+}
+
+/** 删除某身份的全部会话及其消息（CASCADE），返回删除的会话数。 */
+export function deleteSessionsByUser(userId: string): number {
+  return getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId).changes;
 }
 
 /** 删除所有项目（会话的 project_id 置 NULL） */

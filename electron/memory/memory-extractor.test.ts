@@ -215,6 +215,36 @@ describe('extractMemories', () => {
     expect(mockSaveMemory).toHaveBeenNthCalledWith(1, expect.objectContaining({ importance: 1 }));
     expect(mockSaveMemory).toHaveBeenNthCalledWith(2, expect.objectContaining({ importance: 0 }));
   });
+
+  it('显式 userId → 去重与保存都按该身份转发', async () => {
+    const llmCall = vi.fn().mockResolvedValue(JSON.stringify([
+      { kind: 'preference', content: '用户偏好极简 UI', importance: 0.9, tags: ['ui'] },
+    ]));
+    const messages = makeMessages([
+      ['user', '我觉得界面应该更简洁一些，不要太多装饰，整体风格尽量克制'],
+      ['assistant', '好的，我会简化界面设计并保持一致的视觉风格'],
+    ]);
+
+    await extractMemories(messages, 'personal', undefined, 'test', llmCall, undefined, 'u1');
+
+    expect(mockFindDuplicate).toHaveBeenCalledWith('用户偏好极简 UI', 'u1');
+    expect(mockSaveMemory).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u1' }));
+  });
+
+  it('未传 userId → 默认档', async () => {
+    const llmCall = vi.fn().mockResolvedValue(JSON.stringify([
+      { kind: 'fact', content: '项目使用 Electron + React', importance: 0.6, tags: ['stack'] },
+    ]));
+    const messages = makeMessages([
+      ['user', '这个项目使用 Electron 和 React，请帮我梳理一下技术栈结构'],
+      ['assistant', '好的，我来梳理 Electron 与 React 的职责划分'],
+    ]);
+
+    await extractMemories(messages, 'personal', undefined, 'test', llmCall);
+
+    expect(mockFindDuplicate).toHaveBeenCalledWith('项目使用 Electron + React', 'default');
+    expect(mockSaveMemory).toHaveBeenCalledWith(expect.objectContaining({ userId: 'default' }));
+  });
 });
 
 describe('saveManualMemory', () => {
@@ -249,6 +279,14 @@ describe('saveManualMemory', () => {
         tags: ['important'],
       }),
     );
+  });
+
+  it('userId 透传给 saveMemory，缺省为默认档', () => {
+    saveManualMemory({ content: '甲的记忆', kind: 'fact', userId: 'u1' });
+    expect(mockSaveMemory).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u1' }));
+
+    saveManualMemory({ content: '默认档记忆', kind: 'fact' });
+    expect(mockSaveMemory).toHaveBeenLastCalledWith(expect.objectContaining({ userId: 'default' }));
   });
 });
 
