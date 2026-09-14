@@ -143,6 +143,12 @@ export function installDevPreviewApi(): void {
           planState: [], pendingWork: [], createdAt: new Date().toISOString(),
         },
       }),
+      compact: async (sessionId: string) => ({
+        ok: true,
+        busy: false,
+        compacted: true,
+        snapshot: previewContextState(sessionId),
+      }),
     },
     tools: { invoke: async () => ({ ok: true, output: 'Preview' }) },
     browser: {

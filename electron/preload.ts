@@ -142,6 +142,7 @@ const api: ElectronAPI = {
   context: {
     getSnapshot: (sessionId: string) => ipcRenderer.invoke('context:getSnapshot', sessionId),
     createCheckpoint: (sessionId: string) => ipcRenderer.invoke('context:createCheckpoint', sessionId),
+    compact: (sessionId: string) => ipcRenderer.invoke('context:compact', sessionId),
   },
   tools: {
     invoke: (name: ToolName, args: ToolArgs): Promise<ToolResult> =>

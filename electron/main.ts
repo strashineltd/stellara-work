@@ -45,6 +45,7 @@ import type {
   Memory,
   McpServerConfig,
   ContextStateView,
+  ContextCompactResult,
   BrowserConfigView,
   ViewportRect,
   CloudSignUpArgs,
@@ -438,6 +439,36 @@ function registerIpcHandlers(): void {
       const checkpoint = hub.createCheckpoint();
       await hub.commitEvent('checkpoint_created', { checkpointId: checkpoint.id });
       return contextStateView(hub);
+    } finally {
+      hub.dispose();
+    }
+  });
+
+  handle('context:compact', async (_e, sessionId: string): Promise<ContextCompactResult> => {
+    if (!sessionId) throw new Error('缺少会话 ID');
+    if (chatStreams.isSessionActive(sessionId)) {
+      return { ok: false, busy: true };
+    }
+    const [{ loadConfig }, { summarizeWithModel }, { COMPACTION_SUMMARY_PROMPT }] = await Promise.all([
+      import('./config/config-v2'),
+      import('./llm/client-factory'),
+      import('./context/compactor'),
+    ]);
+    const config = await loadConfig();
+    let summaryModel: ModelConfig | undefined;
+    try {
+      summaryModel = await resolveSessionExecutionContext(sessionId);
+    } catch {
+      summaryModel = undefined;
+    }
+    const hub = await openPersistedContextHub(sessionId);
+    try {
+      const summarize =
+        config.app.contextCompactionSummaryEnabled !== false && summaryModel
+          ? (transcript: string) => summarizeWithModel(summaryModel!, COMPACTION_SUMMARY_PROMPT, transcript)
+          : undefined;
+      const result = await hub.ensureContextBudget({ force: true, summarize });
+      return { ok: true, busy: false, compacted: result.compacted, snapshot: contextStateView(hub) };
     } finally {
       hub.dispose();
     }
@@ -1509,7 +1540,7 @@ async function runAnthropicLoopForIpc(
   attachContextEvents(contextHub, send);
 
   // 创建 AbortController
-  const ctrl = chatStreams.start(streamId);
+  const ctrl = chatStreams.start(streamId, request.sessionId);
   let terminalEventSent = false;
   let taskCompleted = false;
   let taskFailed = false;
@@ -1689,7 +1720,7 @@ async function runResponsesLoopForIpc(
   attachContextEvents(contextHub, send);
 
   // 创建 AbortController
-  const ctrl = chatStreams.start(streamId);
+  const ctrl = chatStreams.start(streamId, request.sessionId);
   let terminalEventSent = false;
   let taskCompleted = false;
   let taskFailed = false;

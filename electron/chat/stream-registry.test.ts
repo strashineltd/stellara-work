@@ -48,4 +48,14 @@ describe('ChatStreamRegistry', () => {
     registry.cleanup('sub-1');
     expect(registry.allStreamIds()).toEqual([]);
   });
+
+  it('isSessionActive 按会话匹配并在 cleanup 后失效', () => {
+    const registry = new ChatStreamRegistry();
+    registry.start('a', 'sess-1');
+    registry.start('b', 'sess-2');
+    expect(registry.isSessionActive('sess-1')).toBe(true);
+    registry.cleanup('a');
+    expect(registry.isSessionActive('sess-1')).toBe(false);
+    expect(registry.isSessionActive('sess-2')).toBe(true);
+  });
 });
