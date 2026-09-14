@@ -63,18 +63,19 @@ hardThreshold = usableInputBudget × 0.90
 - 从最新组向前累计 token，保留至累计超过保留目标 `floor(usableInputBudget × 0.6)`；**至少保留 1 个完整事务组**。
 - 切点 = 最老的被保留组之前的边界；`windowStartIndex = 被丢弃的 items 数量`。
 
-### 4.2 保留窗口内的大输出改写
+### 4.2 工具结果入库上限（ingest cap）
 
-- 同内容输出（sha256 相同且长度超过 2K tokens）去重：后者替换为 `{ deduped: true, sameAs: <call_id> }`。
-- 单条工具结果超过 16K tokens（`estimateTextTokens`）时替换为 stub，按工具名区分：
+- 工具执行完成后、写入 hub 前：`capToolOutput(name, result, { maxTokens: 16_000 })`（`estimateTextTokens` 估算），超限时替换为 stub，按工具名区分：
   - `read_file`：`{ path, range?, digest, bytes, truncated: true }`（从原结果 JSON 提取 path/offset/limit；解析失败则退化为通用 stub）。
   - `run_command`：`{ exitCode, head（前 20 行）, tail（后 20 行）, digest, truncated: true }`。
   - 其他：`{ head, tail, digest, bytes, truncated: true }`。
-- 工具结果进 hub 前由 loop 调用 `capToolOutput(name, result)` 施加同一上限（对 UI 展示的完整结果不受影响，只截进入上下文的部分）。
+- UI 的 `tool_result` 事件仍发完整结果；进入上下文与 DB 的都是 stub。
+- **活跃 items 一经持久化不再改写**（去重、stub 等一律不作用于已入库 item）：这是指针 digest 校验可靠的前提（见 6.3）。v1 不做保留窗口内的段级去重/改写，属非目标。
+- 被丢弃前缀在生成摘要时有独立的一行化处理（4.3），不影响存档。
 
 ### 4.3 前缀摘要（可选，LLM）
 
-- 仅当开关开启且存在 `summarize` 回调时执行；输入为被丢弃前缀中所有 `message` 文本 + 工具结果一行 stub（工具名 + 首行 + digest），并附带上一次压缩摘要以累积信息。
+- 仅当开关开启且存在 `summarize` 回调时执行；输入为被丢弃前缀中所有 `message` 文本 + 工具结果一行 stub（工具名 + 首行 + digest），并对同内容工具输出去重，同时附带上一次压缩摘要以累积信息。
 - 摘要 prompt：保留用户意图/约束、已完成工作、失败与排除过程、当前进展与未完成事项；≤ 800 字；不得编造。
 - 失败（超时、空串、异常）只记录日志并返回 `summary: undefined`，确定性压缩结果照常生效。
 
@@ -171,7 +172,7 @@ async ensureContextBudget(opts: {
 
 - 若 `windowStartIndex > items.length` → 指针非法，忽略并保留全量窗口。
 - 若 `windowStartIndex === items.length`（压缩后尚未追加新 item）→ 合法，活跃窗口为空。
-- 若 `windowStartIndex < items.length` 且 `windowDigest` 存在：对 `items[windowStartIndex]` 做 `sha256(stableJSON)`（键排序的 JSON.stringify）比对，不匹配 → 忽略指针并 `log.warn`。
+- 若 `windowStartIndex < items.length` 且 `windowDigest` 存在：对 `items[windowStartIndex]` 做 `sha256(stableJSON)`（键排序的 JSON.stringify）比对，不匹配 → 忽略指针并 `log.warn`。活跃 items 入库后不再改写，因此该比对是稳定可靠的。
 
 ### 6.4 checkpoint 与恢复的关系
 
@@ -251,7 +252,7 @@ if (budget.hardLimited) {
   - 事务分组：多组 function_call + 乱序 output 不乱切；缺 output 的 call 必保留；reasoning 与相邻组绑定。
   - 切点：保留目标累计、至少 1 组、`windowStartIndex`/`droppedCount` 正确。
   - 大输出 stub：`read_file`/`run_command`/通用三种形态；`capToolOutput` 阈值边界。
-  - 去重：同内容长输出替换为 `sameAs`。
+  - 摘要转写：同内容工具输出去重、一行化 stub、附带旧摘要。
   - 迭代收缩：仍超硬时降目标重切，3 轮后 `ok: false`。
   - 摘要：成功注入、异常/空串/超时返回 undefined 且 `ok: true`。
 - `context-hub.test.ts`（扩展）：
