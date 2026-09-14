@@ -100,3 +100,58 @@ describe('compact', () => {
     expect(result.tokensAfter).toBeLessThan(result.tokensBefore);
   });
 });
+
+import { capToolOutput, buildSummaryTranscript } from './compactor';
+
+describe('capToolOutput', () => {
+  it('未超限时原样返回', () => {
+    const result = { ok: true, output: 'small' };
+    expect(capToolOutput('read_file', { path: 'a.txt' }, result)).toBe(result);
+  });
+
+  it('read_file 超限时保留路径与 digest', () => {
+    const result = {
+      ok: true,
+      output: Array.from({ length: 30_000 }, (_, i) => `line ${i} ${(i * 7919).toString(36)}`).join('\n'),
+    };
+    const capped = capToolOutput('read_file', { path: 'a.txt', offset: 10, limit: 50 }, result, 100) as {
+      truncation: { kind: string; path?: string; digest: string };
+    };
+    expect(capped.truncation.kind).toBe('read_file');
+    expect(capped.truncation.path).toBe('a.txt');
+    expect(capped.truncation.digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('run_command 超限时保留退出码与头尾', () => {
+    const stdout = Array.from({ length: 100 }, (_, i) => `line-${i}`).join('\n');
+    const result = {
+      ok: true,
+      output: stdout,
+      meta: { kind: 'command', command: 'run', stdout, stderr: 'boom', exitCode: 3, durationMs: 5 },
+    };
+    const capped = capToolOutput('run_command', {}, result, 10) as {
+      truncation: { kind: string; exitCode?: number; head: string; tail: string };
+    };
+    expect(capped.truncation.kind).toBe('command');
+    expect(capped.truncation.exitCode).toBe(3);
+    expect(capped.truncation.head).toContain('line-0');
+    expect(capped.truncation.tail).toContain('line-99');
+  });
+});
+
+describe('buildSummaryTranscript', () => {
+  it('去重同内容工具输出、带工具名与首行、附带旧摘要', () => {
+    const items = [
+      msg('用户要求实现登录'),
+      { type: 'function_call', call_id: 'c1', name: 'read_file', arguments: '{}', status: 'completed' },
+      { type: 'function_call_output', call_id: 'c1', output: 'file body A\nmore' },
+      { type: 'function_call', call_id: 'c2', name: 'read_file', arguments: '{}', status: 'completed' },
+      { type: 'function_call_output', call_id: 'c2', output: 'file body A\nmore' },
+    ] as ResponseItem[];
+    const transcript = buildSummaryTranscript(items, '此前摘要');
+    expect(transcript).toContain('此前摘要');
+    expect(transcript).toContain('[user] 用户要求实现登录');
+    expect(transcript).toContain('[tool read_file] file body A');
+    expect(transcript.match(/\[tool read_file\]/g)).toHaveLength(1);
+  });
+});

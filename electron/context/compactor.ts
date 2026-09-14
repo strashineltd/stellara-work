@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ResponseItem } from '../../shared/responses';
-import { estimateItemsTokens } from './token-estimator';
+import { estimateItemsTokens, estimateTextTokens } from './token-estimator';
 
 export interface CompactOptions {
   targetTokens: number;
@@ -79,7 +79,7 @@ export function transactionComponents(items: ResponseItem[]): Array<{ start: num
   return merged;
 }
 
-/** 把候选切点调整到合法位置；若会清空窗口则保留最后一个事务组件。 */
+/** 把候选切点调整到合法位置；只要有事务组件，就至少保留最后一个组件。 */
 export function adjustCutForTransactions(items: ResponseItem[], candidate: number): number {
   const components = transactionComponents(items);
   let cut = Math.min(Math.max(candidate, 0), items.length);
@@ -134,4 +134,117 @@ export function compact(items: ResponseItem[], opts: CompactOptions): CompactRes
     tokensAfter,
     reason: opts.reason,
   };
+}
+
+const INGEST_MAX_TOKENS = 16_000;
+
+function splitLines(text: string): { head: string; tail: string } {
+  const lines = text.split('\n');
+  return { head: lines.slice(0, 20).join('\n'), tail: lines.slice(-20).join('\n') };
+}
+
+/**
+ * 工具结果入库上限：超限时替换为 stub。UI 的 tool_result 事件不受影响。
+ */
+export function capToolOutput(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+  maxTokens: number = INGEST_MAX_TOKENS,
+): unknown {
+  const serialized = JSON.stringify(result ?? null);
+  if (serialized.length === 0) return result;
+  if (estimateTextTokens(serialized) <= maxTokens) return result;
+
+  const digest = digestText(serialized);
+  const record = (result ?? {}) as {
+    ok?: boolean;
+    output?: string;
+    error?: string;
+    meta?: { kind?: string; command?: string; stdout?: string; stderr?: string; exitCode?: number };
+  };
+
+  if (toolName === 'read_file') {
+    const readArgs = (args ?? {}) as { path?: string; offset?: number; limit?: number };
+    return {
+      ok: record.ok ?? true,
+      output: '',
+      truncation: {
+        kind: 'read_file',
+        path: readArgs.path,
+        offset: readArgs.offset,
+        limit: readArgs.limit,
+        digest,
+        bytes: serialized.length,
+        note: '文件内容过大已省略，可带 offset/limit 重新读取',
+      },
+    };
+  }
+
+  if (toolName === 'run_command' || record.meta?.kind === 'command') {
+    const stdout = record.meta?.stdout ?? record.output ?? '';
+    const stderr = record.meta?.stderr ?? '';
+    const parts = splitLines(stdout);
+    return {
+      ok: record.ok ?? true,
+      output: '',
+      truncation: {
+        kind: 'command',
+        command: record.meta?.command,
+        exitCode: record.meta?.exitCode,
+        head: parts.head,
+        tail: parts.tail,
+        stderrTail: splitLines(stderr).tail,
+        digest,
+        bytes: serialized.length,
+        note: '命令输出过大已截断',
+      },
+    };
+  }
+
+  const parts = splitLines(record.output ?? serialized);
+  return {
+    ok: record.ok ?? true,
+    output: '',
+    truncation: {
+      kind: 'generic',
+      tool: toolName,
+      head: parts.head,
+      tail: parts.tail,
+      digest,
+      bytes: serialized.length,
+      note: '工具输出过大已截断',
+    },
+  };
+}
+
+export const COMPACTION_SUMMARY_PROMPT = `你是对话摘要助手。把给出的对话历史压缩成简洁摘要，保留：
+1. 用户的关键需求、约束与偏好
+2. 已完成的工作（修改的文件、运行的命令与结果）
+3. 重要的失败与排除过程
+4. 当前进展与未完成事项
+直接输出摘要正文，不要标题，不超过 800 字，不得编造历史中没有的信息。`;
+
+/** 把被丢弃的前缀转写成摘要输入：工具结果一行化 + 去重。 */
+export function buildSummaryTranscript(items: ResponseItem[], previousSummary?: string): string {
+  const callNames = new Map<string, string>();
+  for (const item of items) {
+    if (item.type === 'function_call') callNames.set(item.call_id, item.name);
+  }
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  if (previousSummary) lines.push(`【此前摘要】${previousSummary}`, '');
+  for (const item of items) {
+    if (item.type === 'message') {
+      const text = item.content.map((part) => part.text).join('\n').trim();
+      if (text) lines.push(`[${item.role}] ${text}`);
+    } else if (item.type === 'function_call_output') {
+      const digest = digestText(item.output);
+      if (seen.has(digest)) continue;
+      seen.add(digest);
+      const firstLine = (item.output.split('\n')[0] ?? '').slice(0, 200);
+      lines.push(`[tool ${callNames.get(item.call_id) ?? 'unknown'}] ${firstLine} (digest ${digest.slice(0, 8)})`);
+    }
+  }
+  return lines.join('\n');
 }
