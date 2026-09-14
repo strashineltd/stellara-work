@@ -137,6 +137,18 @@ describe('capToolOutput', () => {
     expect(capped.truncation.head).toContain('line-0');
     expect(capped.truncation.tail).toContain('line-99');
   });
+
+  it('单行超大输出也受字符上限约束', () => {
+    const result = {
+      ok: true,
+      output: Array.from({ length: 50_000 }, (_, i) => (i * 31).toString(36)).join(''),
+    };
+    const capped = capToolOutput('generic_tool', {}, result, 100) as {
+      truncation: { head: string; tail: string };
+    };
+    expect(capped.truncation.head.length).toBeLessThanOrEqual(4_000);
+    expect(capped.truncation.tail.length).toBeLessThanOrEqual(4_000);
+  });
 });
 
 describe('buildSummaryTranscript', () => {

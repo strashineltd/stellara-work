@@ -137,10 +137,17 @@ export function compact(items: ResponseItem[], opts: CompactOptions): CompactRes
 }
 
 const INGEST_MAX_TOKENS = 16_000;
+const STUB_HEAD_CHARS = 4_000;
+const STUB_TAIL_CHARS = 4_000;
 
-function splitLines(text: string): { head: string; tail: string } {
-  const lines = text.split('\n');
-  return { head: lines.slice(0, 20).join('\n'), tail: lines.slice(-20).join('\n') };
+function takeHead(text: string): string {
+  const head = text.split('\n').slice(0, 20).join('\n');
+  return head.length > STUB_HEAD_CHARS ? head.slice(0, STUB_HEAD_CHARS) : head;
+}
+
+function takeTail(text: string): string {
+  const tail = text.split('\n').slice(-20).join('\n');
+  return tail.length > STUB_TAIL_CHARS ? tail.slice(-STUB_TAIL_CHARS) : tail;
 }
 
 /**
@@ -152,7 +159,7 @@ export function capToolOutput(
   result: unknown,
   maxTokens: number = INGEST_MAX_TOKENS,
 ): unknown {
-  const serialized = JSON.stringify(result ?? null);
+  const serialized = JSON.stringify(result ?? null) ?? '';
   if (serialized.length === 0) return result;
   if (estimateTextTokens(serialized) <= maxTokens) return result;
 
@@ -184,7 +191,6 @@ export function capToolOutput(
   if (toolName === 'run_command' || record.meta?.kind === 'command') {
     const stdout = record.meta?.stdout ?? record.output ?? '';
     const stderr = record.meta?.stderr ?? '';
-    const parts = splitLines(stdout);
     return {
       ok: record.ok ?? true,
       output: '',
@@ -192,9 +198,9 @@ export function capToolOutput(
         kind: 'command',
         command: record.meta?.command,
         exitCode: record.meta?.exitCode,
-        head: parts.head,
-        tail: parts.tail,
-        stderrTail: splitLines(stderr).tail,
+        head: takeHead(stdout),
+        tail: takeTail(stdout),
+        stderrTail: takeTail(stderr),
         digest,
         bytes: serialized.length,
         note: '命令输出过大已截断',
@@ -202,15 +208,14 @@ export function capToolOutput(
     };
   }
 
-  const parts = splitLines(record.output ?? serialized);
   return {
     ok: record.ok ?? true,
     output: '',
     truncation: {
       kind: 'generic',
       tool: toolName,
-      head: parts.head,
-      tail: parts.tail,
+      head: takeHead(record.output ?? serialized),
+      tail: takeTail(record.output ?? serialized),
       digest,
       bytes: serialized.length,
       note: '工具输出过大已截断',
