@@ -1,17 +1,19 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalIdentity, LocalUser } from '../../shared/ipc';
+import type { LocalIdentity } from '../../shared/ipc';
 import { AccountBadge } from './AccountBadge';
 
-const LEO: LocalUser = { id: 'u1', displayName: 'Leo', createdAt: 1, updatedAt: 1 };
+const LEO: LocalIdentity = { id: 'u1', name: 'Leo', kind: 'user' };
+const DEFAULT_IDENTITY: LocalIdentity = { id: 'default', name: '本地默认', kind: 'default' };
 const IDENTITIES: LocalIdentity[] = [
-  { id: 'default', name: '本地默认', kind: 'default' },
-  { id: 'u1', name: 'Leo', kind: 'user' },
+  DEFAULT_IDENTITY,
+  LEO,
   { id: 'u2', name: 'Ada', kind: 'user' },
 ];
 
-let switchCalls: string[] = [];
+let switchCalls: Array<{ id: string; force: boolean | undefined }> = [];
+let identityChanged: ((user: LocalIdentity) => void) | null = null;
 
 function renderBadge() {
   const container = document.createElement('div');
@@ -41,17 +43,23 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   switchCalls = [];
+  identityChanged = null;
   (window as any).electronAPI = {
-    auth: {
-      local: {
-        getCurrent: vi.fn().mockResolvedValue(LEO),
-        list: vi.fn().mockResolvedValue(IDENTITIES),
-        switch: vi.fn(async (id: string) => {
-          switchCalls.push(id);
-        }),
-        create: vi.fn(),
-      },
+    identity: {
+      getCurrent: vi.fn().mockResolvedValue(LEO),
+      list: vi.fn().mockResolvedValue(IDENTITIES),
+      switch: vi.fn(async (id: string, force?: boolean) => {
+        switchCalls.push({ id, force });
+        return { ok: true, user: IDENTITIES.find((item) => item.id === id) ?? DEFAULT_IDENTITY };
+      }),
+      onChanged: vi.fn((callback: (user: LocalIdentity) => void) => {
+        identityChanged = callback;
+        return () => {
+          identityChanged = null;
+        };
+      }),
     },
+    auth: { local: { create: vi.fn() } },
   };
 });
 
@@ -87,8 +95,41 @@ describe('AccountBadge', () => {
     fireClick(ada);
     await act(async () => {});
 
-    expect(switchCalls).toEqual(['u2']);
+    expect(switchCalls).toHaveLength(1);
+    expect(switchCalls[0]!.id).toBe('u2');
+    expect(switchCalls[0]!.force).toBeUndefined();
     expect(container.querySelector('.account-badge__menu')).toBeNull();
+    unmount();
+  });
+
+  it('renders the default profile without a local user instead of throwing', async () => {
+    (window as any).electronAPI = {
+      identity: {
+        getCurrent: vi.fn().mockResolvedValue(DEFAULT_IDENTITY),
+        list: vi.fn().mockResolvedValue([DEFAULT_IDENTITY]),
+        switch: vi.fn(),
+        onChanged: vi.fn().mockReturnValue(() => {}),
+      },
+    };
+    const { container, unmount } = renderBadge();
+    await act(async () => {});
+
+    const trigger = container.querySelector('.account-badge__trigger');
+    expect(trigger).not.toBeNull();
+    expect(trigger!.querySelector('.account-avatar')?.textContent).toBe('本');
+    expect(trigger!.querySelector('.account-badge__name')?.textContent).toBe('本地默认');
+    unmount();
+  });
+
+  it('refreshes when the main process broadcasts an identity change', async () => {
+    const { container, unmount } = renderBadge();
+    await act(async () => {});
+
+    (window as any).electronAPI.identity.getCurrent.mockResolvedValue(DEFAULT_IDENTITY);
+    act(() => identityChanged?.(DEFAULT_IDENTITY));
+    await act(async () => {});
+
+    expect(container.querySelector('.account-badge__name')?.textContent).toBe('本地默认');
     unmount();
   });
 });

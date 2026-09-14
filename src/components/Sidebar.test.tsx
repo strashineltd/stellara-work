@@ -270,16 +270,17 @@ describe('Sidebar', () => {
   });
 
   it('renders the account badge below the bottom tools', async () => {
-    const user = { id: 'u1', displayName: 'Leo', createdAt: 1, updatedAt: 1 };
     (window as any).electronAPI = {
-      auth: {
-        local: {
-          getCurrent: vi.fn().mockResolvedValue(user),
-          list: vi.fn().mockResolvedValue([{ id: 'u1', name: 'Leo', kind: 'user' }]),
-          switch: vi.fn(),
-          create: vi.fn(),
-        },
+      identity: {
+        getCurrent: vi.fn().mockResolvedValue({ id: 'u1', name: 'Leo', kind: 'user' }),
+        list: vi.fn().mockResolvedValue([
+          { id: 'default', name: '本地默认', kind: 'default' },
+          { id: 'u1', name: 'Leo', kind: 'user' },
+        ]),
+        switch: vi.fn(),
+        onChanged: vi.fn().mockReturnValue(() => {}),
       },
+      auth: { local: { create: vi.fn() } },
     };
     const { querySelector } = render(
       <Sidebar
