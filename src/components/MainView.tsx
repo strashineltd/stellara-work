@@ -35,6 +35,7 @@ import { useShortcuts } from '../hooks/useShortcuts';
 import { useServers } from '../hooks/useServers';
 import { usePresence } from '../hooks/usePresence';
 import { captureFocusTarget, presenceRootProps, restoreFocusTarget } from '../lib/presence-ui';
+import { registerAutosaveFlusher } from '../lib/autosave-flush';
 
 interface MainViewProps {
   /** 可为 null：跳过引导后无模型配置；发送任务前会校验并提示打开设置 */
@@ -424,6 +425,25 @@ export function MainView(props: MainViewProps) {
     }, 300);
   }, [entries, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 身份切换前由调用方 await runAutosaveFlush()：在主进程切换活动身份之前先落盘，
+  // 否则旧身份会话的写入会被 assertSessionOwned 拒绝，最后一条消息丢失。
+  useEffect(() => {
+    return registerAutosaveFlusher(async () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const sessionId = entriesSessionRef.current;
+      if (!sessionId) return;
+      await window.electronAPI.sessions.saveMessages(
+        sessionId,
+        entriesToMessages(entriesRef.current, sessionId),
+      );
+    });
+  }, []);
+
+  // 兜底：未经 runAutosaveFlush 的卸载（如退出应用）仍尝试落盘；
+  // 已 flush 过则定时器已清空，不会重复写。
   useEffect(() => {
     return () => {
       if (!saveTimer.current || !entriesSessionRef.current) return;

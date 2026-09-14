@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LocalIdentity } from '../../shared/ipc';
+import { runAutosaveFlush } from '../lib/autosave-flush';
 import { Icon } from './Icon';
 
 /**
@@ -71,6 +72,7 @@ export function AccountBadge() {
         return;
       }
       try {
+        await runAutosaveFlush();
         const result = await window.electronAPI.identity.switch(id);
         if (result.ok) await refresh();
         // busy（有运行中任务）时不强制切换：完整确认流程在设置 → 账号

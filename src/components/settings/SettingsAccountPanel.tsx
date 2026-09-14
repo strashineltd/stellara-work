@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { LocalIdentity, LocalUser } from '../../../shared/ipc';
+import { runAutosaveFlush } from '../../lib/autosave-flush';
 import { Icon } from '../Icon';
 import { SettingsCloudAccountSection } from './SettingsCloudAccountSection';
 
@@ -85,6 +86,7 @@ export function SettingsAccountPanel({ onChanged, refreshKey = 0 }: SettingsAcco
   }
 
   async function performSwitch(id: string, force?: boolean) {
+    await runAutosaveFlush();
     const result = await window.electronAPI.identity.switch(id, force);
     if (!result.ok) {
       setPendingSwitch({ id, count: result.count });
