@@ -354,4 +354,42 @@ describe('上下文压缩与恢复', () => {
     expect(after / before).toBeGreaterThan(1);
     expect(after / before).toBeLessThanOrEqual(2);
   });
+
+  it('摘要期间追加的 items 不丢失', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    const appended: import('../../shared/responses').ResponseItem = {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'late-arrival' }],
+    };
+    await hub.ensureContextBudget({
+      summarize: async () => {
+        hub.addResponseItem(appended);
+        return '摘要';
+      },
+    });
+    expect(hub.getResponseItems()).toContain(appended);
+  });
+
+  it('并发压缩调用只执行一次', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = hub.ensureContextBudget({
+      summarize: async () => {
+        await gate;
+        return '摘要';
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = await hub.ensureContextBudget({});
+    expect(second.compacted).toBe(false);
+    release();
+    const firstResult = await first;
+    expect(firstResult.compacted).toBe(true);
+  });
 });

@@ -195,6 +195,7 @@ export class ContextHub {
   private extraTokens = 0;
   private calibrationRatio = 1;
   private lastEstimatedTokens = 0;
+  private compactionInFlight = false;
 
   constructor(
     private sessionId: string,
@@ -870,60 +871,71 @@ export class ContextHub {
     force?: boolean;
     signal?: AbortSignal;
   }): Promise<EnsureBudgetResult> {
-    if (typeof opts.extraTokens === 'number') this.extraTokens = opts.extraTokens;
-    this.context.usage = this.calculateUsage();
-    if (!opts.force && !this.context.usage.nearLimit) {
-      return { compacted: false, hardLimited: this.context.usage.hardLimited };
-    }
-
-    const usage = this.context.usage;
-    const checkpoint = this.createCheckpoint();
-    const activeItems = [...this.context.responseItems];
-    const result = compact(activeItems, {
-      targetTokens: Math.floor(usage.usableInputBudget * 0.6),
-      hardLimitTokens: usage.hardThreshold,
-      previousWindowStartIndex: this.context.compactionWindowStartIndex,
-      reason: opts.force ? 'manual' : usage.hardLimited ? 'hard_threshold' : 'soft_threshold',
-    });
-    if (!result.ok) {
+    if (this.compactionInFlight) {
       this.context.usage = this.calculateUsage();
       return { compacted: false, hardLimited: this.context.usage.hardLimited };
     }
-
-    let summary: string | undefined;
-    if (opts.summarize) {
-      try {
-        const transcript = buildSummaryTranscript(
-          activeItems.slice(0, result.droppedCount),
-          this.context.compactionSummary,
-        );
-        const text = await opts.summarize(transcript);
-        if (text && text.trim()) summary = text.trim();
-      } catch (err) {
-        log.warn('上下文压缩摘要失败，保留确定性压缩结果:', err);
+    this.compactionInFlight = true;
+    try {
+      if (typeof opts.extraTokens === 'number') this.extraTokens = opts.extraTokens;
+      this.context.usage = this.calculateUsage();
+      if (!opts.force && !this.context.usage.nearLimit) {
+        return { compacted: false, hardLimited: this.context.usage.hardLimited };
       }
-    }
 
-    this.context.responseItems = result.keptItems;
-    await this.commitEvent('context_compacted', {
-      windowStartIndex: result.windowStartIndex,
-      droppedCount: result.droppedCount,
-      windowDigest: result.windowDigest,
-      checkpointId: checkpoint.id,
-      tokensBefore: result.tokensBefore,
-      tokensAfter: result.tokensAfter,
-      compressedCount: result.droppedCount,
-      summary,
-      reason: result.reason,
-    });
-    return {
-      compacted: true,
-      hardLimited: this.context.usage.hardLimited,
-      tokensBefore: result.tokensBefore,
-      tokensAfter: result.tokensAfter,
-      compressedCount: result.droppedCount,
-      summary,
-    };
+      const usage = this.context.usage;
+      const checkpoint = this.createCheckpoint();
+      const activeItems = [...this.context.responseItems];
+      const result = compact(activeItems, {
+        targetTokens: Math.floor(usage.usableInputBudget * 0.6),
+        hardLimitTokens: usage.hardThreshold,
+        previousWindowStartIndex: this.context.compactionWindowStartIndex,
+        reason: opts.force ? 'manual' : usage.hardLimited ? 'hard_threshold' : 'soft_threshold',
+      });
+      if (!result.ok) {
+        this.context.usage = this.calculateUsage();
+        return { compacted: false, hardLimited: this.context.usage.hardLimited };
+      }
+
+      let summary: string | undefined;
+      if (opts.summarize) {
+        try {
+          const transcript = buildSummaryTranscript(
+            activeItems.slice(0, result.droppedCount),
+            this.context.compactionSummary,
+          );
+          const text = await opts.summarize(transcript);
+          if (text && text.trim()) summary = text.trim();
+        } catch (err) {
+          log.warn('上下文压缩摘要失败，保留确定性压缩结果:', err);
+        }
+      }
+
+      // 摘要 await 期间可能追加了新 items（append-only），不能丢弃
+      const appended = this.context.responseItems.slice(activeItems.length);
+      this.context.responseItems = result.keptItems.concat(appended);
+      await this.commitEvent('context_compacted', {
+        windowStartIndex: result.windowStartIndex,
+        droppedCount: result.droppedCount,
+        windowDigest: result.windowDigest,
+        checkpointId: checkpoint.id,
+        tokensBefore: result.tokensBefore,
+        tokensAfter: result.tokensAfter,
+        compressedCount: result.droppedCount,
+        summary,
+        reason: result.reason,
+      });
+      return {
+        compacted: true,
+        hardLimited: this.context.usage.hardLimited,
+        tokensBefore: result.tokensBefore,
+        tokensAfter: result.tokensAfter,
+        compressedCount: result.droppedCount,
+        summary,
+      };
+    } finally {
+      this.compactionInFlight = false;
+    }
   }
 
   recordReportedInputTokens(reported: number): void {
