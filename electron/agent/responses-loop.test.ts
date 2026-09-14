@@ -153,11 +153,11 @@ describe('runResponsesLoop', () => {
     expect(addSpy).toHaveBeenCalled();
   });
 
-  it('检查硬阈值', async () => {
-    // 使用足够大的 context window，但通过添加大量 items 使 usage 超限
+  it('压缩后仍超硬阈值时报错终止且不调用模型', async () => {
+    // 极小 context window / 大 max_output_tokens 使可用预算为 0：
+    // 预填充 items 必超硬阈值，且压缩无法把窗口降到阈值以下（硬阈值压缩失败路径）
     const hub = new ContextHub('sess-001', tmpDir, 4000, 500);
 
-    // 添加大量 response items 使 usage 超限
     for (let i = 0; i < 50; i++) {
       hub.addResponseItem({
         type: 'message',
@@ -165,8 +165,10 @@ describe('runResponsesLoop', () => {
         content: [{ type: 'input_text', text: 'x'.repeat(500) }],
       });
     }
+    expect(hub.isHardLimited()).toBe(true);
 
     const events: string[] = [];
+    const errors: Array<{ error?: string; errorMeta?: { kind?: string } }> = [];
     const gen = runResponsesLoop('test', {
       model: DEFAULT_MODEL,
       cwd: tmpDir,
@@ -176,11 +178,15 @@ describe('runResponsesLoop', () => {
 
     for await (const event of gen) {
       events.push(event.type);
+      if (event.type === 'error') errors.push(event);
     }
 
-    // 由于模拟的 client 总是返回 completed，不会触发硬阈值错误
-    // 但可以验证 contextHub.isHardLimited() 被检查
-    expect(hub.isHardLimited()).toBe(true);
+    // 压缩失败 → 明确报错终止，且未向模型发起请求
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.error).toContain('上下文压缩后仍超出硬阈值');
+    expect(errors[0]!.errorMeta?.kind).toBe('context_too_long');
+    expect(events).not.toContain('done');
+    expect(responseRequests).toHaveLength(0);
   });
 
   it('处理中断信号', async () => {
