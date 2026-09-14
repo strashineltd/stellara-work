@@ -666,3 +666,109 @@ describe('runResponsesLoop', () => {
     expect(firstRequest.tools!.some((t) => t.name === 'write_file')).toBe(false);
   });
 });
+
+describe('上下文压缩接线', () => {
+  function toolCallStream(name: string, args: string): Array<Record<string, unknown>> {
+    return [
+      {
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: { type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: args, status: 'in_progress' },
+      },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp-001',
+          object: 'response',
+          model: 'test',
+          status: 'completed',
+          output: [{ type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: args, status: 'completed' }],
+        },
+      },
+    ];
+  }
+
+  it('压缩后发出 summary 事件并可继续', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const budgetSpy = vi.spyOn(hub, 'ensureContextBudget').mockResolvedValue({
+      compacted: true,
+      hardLimited: false,
+      tokensBefore: 900,
+      tokensAfter: 300,
+      compressedCount: 5,
+      summary: '早前对话摘要',
+    });
+    const events: Array<{ type: string; summary?: string; compressedCount?: number }> = [];
+
+    for await (const event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      events.push(event);
+    }
+
+    expect(budgetSpy).toHaveBeenCalled();
+    expect(events.find((e) => e.type === 'summary')).toMatchObject({
+      compressedCount: 5,
+      summary: '早前对话摘要',
+    });
+    expect(events.map((e) => e.type)).toContain('done');
+  });
+
+  it('压缩后仍超硬阈值 → 明确错误并终止', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    vi.spyOn(hub, 'ensureContextBudget').mockResolvedValue({ compacted: false, hardLimited: true });
+    const events: string[] = [];
+
+    for await (const event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      events.push(event.type);
+    }
+
+    expect(events).toContain('error');
+    expect(events).not.toContain('done');
+  });
+
+  it('开启摘要开关时传入 summarize 回调', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const spy = vi.spyOn(hub, 'ensureContextBudget').mockResolvedValue({ compacted: false, hardLimited: false });
+
+    for await (const _event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+      compactionSummaryEnabled: true,
+    })) {
+    }
+
+    expect(typeof spy.mock.calls[0]![0]!.summarize).toBe('function');
+  });
+
+  it('工具结果超限时以 stub 进入上下文', async () => {
+    const marker = 'UNIQUE-MARKER-20000';
+    const content = Array.from({ length: 30_000 }, (_, i) => (i === 20_000 ? marker : `line ${i}`)).join('\n');
+    await fs.writeFile(path.join(tmpDir, 'big.txt'), content);
+    streamQueue.push(() => toolCallStream('read_file', '{"path":"big.txt"}'));
+
+    const hub = new ContextHub('sess-001', tmpDir);
+    for await (const _event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+    }
+
+    const outputs = hub.getResponseItems().filter((item) => item.type === 'function_call_output');
+    const parsed = outputs.map((item) => JSON.parse((item as { output: string }).output) as { truncation?: { kind?: string } });
+    expect(parsed.some((p) => p?.truncation?.kind === 'read_file')).toBe(true);
+    expect(JSON.stringify(outputs)).not.toContain(marker);
+  });
+});
