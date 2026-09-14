@@ -9,6 +9,7 @@ import {
   type LocalUser,
   type LocalUserPatch,
 } from '../store/local-users';
+import type { LocalIdentity } from '../../shared/ipc';
 
 /**
  * 本地认证协调器（主进程）
@@ -36,15 +37,6 @@ export const DEFAULT_USER_ID = 'default';
 /** 「本地默认」档显示名 */
 export const DEFAULT_IDENTITY_NAME = '本地默认';
 
-export type IdentityKind = 'default' | 'user';
-
-/** 身份列表条目：默认档 + 本地用户 */
-export interface LocalIdentity {
-  id: string;
-  name: string;
-  kind: IdentityKind;
-}
-
 /** 活动身份 id：未激活任何本地用户时返回默认档 */
 export function getActiveUserId(): string {
   return getCurrentLocalUser()?.id ?? DEFAULT_USER_ID;
@@ -60,6 +52,27 @@ export function listIdentities(): LocalIdentity[] {
       kind: 'user',
     })),
   ];
+}
+
+/** 按 id 取身份条目；未知 id 抛「用户不存在」（与 setActiveUserId 同一校验口径） */
+export function getIdentity(id: string): LocalIdentity {
+  const identity = listIdentities().find((item) => item.id === id);
+  if (!identity) throw new Error(`用户不存在: ${id}`);
+  return identity;
+}
+
+/**
+ * 当前活动身份条目；没有活动用户（或用户行已消失）时返回默认档。
+ * `identity:getCurrent` 契约要求永不抛错。
+ */
+export function getCurrentIdentity(): LocalIdentity {
+  return (
+    listIdentities().find((item) => item.id === getActiveUserId()) ?? {
+      id: DEFAULT_USER_ID,
+      name: DEFAULT_IDENTITY_NAME,
+      kind: 'default',
+    }
+  );
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { LocalUser } from '../../../shared/ipc';
+import type { LocalIdentity, LocalUser } from '../../../shared/ipc';
 import { Icon } from '../Icon';
 import { SettingsCloudAccountSection } from './SettingsCloudAccountSection';
 
@@ -34,7 +34,7 @@ function formatDateTime(timestamp: number): string {
  */
 export function SettingsAccountPanel({ onChanged, refreshKey = 0 }: SettingsAccountPanelProps) {
   const [user, setUser] = useState<LocalUser | null>(null);
-  const [users, setUsers] = useState<LocalUser[]>([]);
+  const [users, setUsers] = useState<LocalIdentity[]>([]);
   const [nameDraft, setNameDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,12 +192,12 @@ export function SettingsAccountPanel({ onChanged, refreshKey = 0 }: SettingsAcco
                 return (
                   <div key={item.id} className="settings-item">
                     <span className="account-avatar account-avatar--sm" aria-hidden="true">
-                      {initialOf(item.displayName)}
+                      {initialOf(item.name)}
                     </span>
                     <div className="settings-item__grow">
-                      <div className="settings-item__title">{item.displayName}</div>
+                      <div className="settings-item__title">{item.name}</div>
                       <div className="settings-item__hint">
-                        {active ? '当前使用中' : `创建于 ${formatDateTime(item.createdAt)}`}
+                        {active ? '当前使用中' : item.kind === 'default' ? '系统默认档' : '本地身份'}
                       </div>
                     </div>
                     {active ? (

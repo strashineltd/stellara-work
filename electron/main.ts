@@ -50,6 +50,7 @@ import type {
   ViewportRect,
   CloudSignUpArgs,
   CreateSessionArgs,
+  LocalIdentity,
   ServerInput,
   ServerProvidersResult,
   ServerVcsResult,
@@ -94,6 +95,13 @@ function requireServerRuntime(): ServerRuntime {
 function broadcastSettingsChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now() });
+  }
+}
+
+/** H10：身份切换后广播新身份（渲染层据此清空并重载数据） */
+function broadcastIdentityChanged(identity: LocalIdentity): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('identity-changed', identity);
   }
 }
 
@@ -1151,6 +1159,40 @@ function registerIpcHandlers(): void {
     return user;
   });
 
+  // H10 身份切换：busy/force/云守卫/广播（见 electron/identity-switch.ts）
+  handle('identity:list', async () => {
+    const { listIdentities } = await import('./auth/local-auth-manager');
+    return listIdentities();
+  });
+
+  handle('identity:getCurrent', async () => {
+    const { getCurrentIdentity } = await import('./auth/local-auth-manager');
+    // 契约要求永不抛错：无活动用户时返回默认档
+    return getCurrentIdentity();
+  });
+
+  handle('identity:switch', async (_e, userId: string, force?: boolean) => {
+    const { setActiveUserId, getIdentity } = await import('./auth/local-auth-manager');
+    const { switchIdentity } = await import('./identity-switch');
+    return switchIdentity(
+      {
+        activeStreamCount: () => chatStreams.allStreamIds().length,
+        setActive: (id) => {
+          setActiveUserId(id);
+          return getIdentity(id);
+        },
+        guardCloud: async (activeId) => {
+          const { cloudAuth } = await import('./auth/cloud-auth-manager');
+          const cleared = await cloudAuth.reconcileLocalIdentitySwitch(activeId);
+          if (cleared) broadcastSettingsChanged();
+        },
+        broadcast: broadcastIdentityChanged,
+      },
+      userId,
+      force,
+    );
+  });
+
   // 云账号体系（Phase 3 · 腾讯云 CloudBase）
   // 注意：token 只在主进程内流转，以下 handler 一律只回传账号元数据与状态。
   handle('auth:cloud:getState', async () => {
@@ -2170,7 +2212,7 @@ app.whenReady().then(async () => {
     log.error('config 迁移失败', err);
   }
   try {
-    const { initDb, initContextTables, getDb } = await import('./store/db');
+    const { initDb, initContextTables, getDb, migrateIdentityOwnership } = await import('./store/db');
     initDb();
     // Context Hub 表（response_items / context_events / checkpoints）：
     // 未初始化会导致 chat:start 在 ContextHub 构造时崩溃且无事件回传
@@ -2181,6 +2223,14 @@ app.whenReady().then(async () => {
     // 云账号绑定表（Phase 3）：必须在 initLocalUsers 之后（引用 local_users.id）
     const { initCloudLinks } = await import('./store/cloud-links');
     initCloudLinks();
+    // H10（R2）：历史数据回填只在启动时执行一次，且仅当活动身份是真实用户；
+    // 默认档数据保持归属默认档，切换身份时不会重新回填（见 identity-switch.ts）。
+    const { backfillIdentityOwnership } = await import('./identity-switch');
+    const backfilled = backfillIdentityOwnership({
+      getActiveUserId,
+      migrate: migrateIdentityOwnership,
+    });
+    if (backfilled > 0) log.info(`身份回填：${backfilled} 行历史数据归入活动身份`);
     // Memory OS: 初始化记忆存储
     const { setMemoryDb } = await import('./memory/memory-store');
     setMemoryDb(getDb);

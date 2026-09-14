@@ -1,11 +1,15 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalUser } from '../../shared/ipc';
+import type { LocalIdentity, LocalUser } from '../../shared/ipc';
 import { AccountBadge } from './AccountBadge';
 
 const LEO: LocalUser = { id: 'u1', displayName: 'Leo', createdAt: 1, updatedAt: 1 };
-const ADA: LocalUser = { id: 'u2', displayName: 'Ada', createdAt: 2, updatedAt: 2 };
+const IDENTITIES: LocalIdentity[] = [
+  { id: 'default', name: '本地默认', kind: 'default' },
+  { id: 'u1', name: 'Leo', kind: 'user' },
+  { id: 'u2', name: 'Ada', kind: 'user' },
+];
 
 let switchCalls: string[] = [];
 
@@ -41,7 +45,7 @@ beforeEach(() => {
     auth: {
       local: {
         getCurrent: vi.fn().mockResolvedValue(LEO),
-        list: vi.fn().mockResolvedValue([LEO, ADA]),
+        list: vi.fn().mockResolvedValue(IDENTITIES),
         switch: vi.fn(async (id: string) => {
           switchCalls.push(id);
         }),

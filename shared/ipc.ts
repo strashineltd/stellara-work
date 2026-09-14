@@ -601,6 +601,21 @@ export interface LocalUser {
   updatedAt: number;
 }
 
+/**
+ * 身份条目（H10）：默认档 + 本地用户。
+ * 默认档 id 固定为 `'default'`，不写入 `local_users`。
+ */
+export interface LocalIdentity {
+  id: string;
+  name: string;
+  kind: 'default' | 'user';
+}
+
+/** identity:switch 结果：busy 时未切换，返回运行中任务数（H10） */
+export type IdentitySwitchResult =
+  | { ok: true; user: LocalIdentity }
+  | { ok: false; busy: true; count: number };
+
 export type ThemeName = 'light' | 'dark' | 'system';
 
 // ============================================
@@ -1244,14 +1259,14 @@ export interface ElectronAPI {
     local: {
       /** 当前激活的本地身份 */
       getCurrent: () => Promise<LocalUser>;
-      /** 全部本地身份（按创建时间升序） */
-      list: () => Promise<LocalUser[]>;
+      /** 全部身份（默认档固定第一，随后按创建时间升序） */
+      list: () => Promise<LocalIdentity[]>;
       /** 新建本地身份（不自动切换） */
       create: (displayName?: string) => Promise<LocalUser>;
       /** 更新当前身份（只能改自己） */
       update: (patch: { displayName?: string; avatarPath?: string | null }) => Promise<LocalUser>;
-      /** 切换当前身份 */
-      switch: (id: string) => Promise<LocalUser>;
+      /** 切换当前身份；切到默认档时返回 null */
+      switch: (id: string) => Promise<LocalUser | null>;
     };
     cloud: {
       /** 云账号状态（是否配置 / 是否登录 / 绑定的账号） */
@@ -1269,6 +1284,20 @@ export interface ElectronAPI {
       /** 用户名是否已被占用（注册前预检） */
       isUsernameRegistered: (username: string) => Promise<CloudResult<boolean>>;
     };
+  };
+  /** 本地身份切换（H10）：busy/force 语义 + 变更广播 */
+  identity: {
+    /** 身份列表（默认档固定第一） */
+    list: () => Promise<LocalIdentity[]>;
+    /** 当前身份；无活动用户时返回默认档（不抛错） */
+    getCurrent: () => Promise<LocalIdentity>;
+    /**
+     * 切换身份。有运行中任务且未 force 时返回 busy（count 为任务数）；
+     * 成功后主进程广播 `identity-changed`。
+     */
+    switch: (userId: string, force?: boolean) => Promise<IdentitySwitchResult>;
+    /** 监听身份变更（payload 为新身份）。返回取消监听函数。 */
+    onChanged: (callback: (user: LocalIdentity) => void) => () => void;
   };
 }
 

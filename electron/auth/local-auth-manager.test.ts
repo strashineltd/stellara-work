@@ -7,6 +7,8 @@ import { createLocalUser, getCurrentLocalUser, initLocalUsers, listLocalUsers } 
 import {
   DEFAULT_USER_ID,
   getActiveUserId,
+  getCurrentIdentity,
+  getIdentity,
   listIdentities,
   localAuth,
   setActiveUserId,
@@ -64,6 +66,27 @@ describe('local identity (H10)', () => {
 
     expect(() => setActiveUserId('nope')).toThrow(/不存在/);
     expect(getActiveUserId()).toBe(user.id);
+  });
+
+  it('resolves identity entries by id and rejects unknown ids', () => {
+    const user = createLocalUser('Ada');
+
+    expect(getIdentity(user.id)).toEqual({ id: user.id, name: 'Ada', kind: 'user' });
+    expect(getIdentity(DEFAULT_USER_ID)).toEqual({
+      id: 'default',
+      name: '本地默认',
+      kind: 'default',
+    });
+    expect(() => getIdentity('nope')).toThrow(/不存在/);
+  });
+
+  it('returns the current identity entry, defaulting to the default profile', () => {
+    const user = getCurrentLocalUser()!;
+
+    expect(getCurrentIdentity()).toEqual({ id: user.id, name: user.displayName, kind: 'user' });
+
+    clearActiveRow();
+    expect(getCurrentIdentity()).toEqual({ id: 'default', name: '本地默认', kind: 'default' });
   });
 
   it('clears the active local user when switching to the default profile', () => {

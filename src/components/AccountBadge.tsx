@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { LocalUser } from '../../shared/ipc';
+import type { LocalIdentity, LocalUser } from '../../shared/ipc';
 import { Icon } from './Icon';
 
 /**
@@ -18,7 +18,7 @@ function initialOf(name: string): string {
 
 export function AccountBadge() {
   const [user, setUser] = useState<LocalUser | null>(null);
-  const [users, setUsers] = useState<LocalUser[]>([]);
+  const [users, setUsers] = useState<LocalIdentity[]>([]);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -118,9 +118,9 @@ export function AccountBadge() {
                 onClick={() => void handleSwitch(item.id)}
               >
                 <span className="account-avatar account-avatar--sm" aria-hidden="true">
-                  {initialOf(item.displayName)}
+                  {initialOf(item.name)}
                 </span>
-                <span className="account-badge__item-name">{item.displayName}</span>
+                <span className="account-badge__item-name">{item.name}</span>
                 {active && <Icon name="check" size={13} />}
               </button>
             );

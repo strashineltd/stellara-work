@@ -275,7 +275,7 @@ describe('Sidebar', () => {
       auth: {
         local: {
           getCurrent: vi.fn().mockResolvedValue(user),
-          list: vi.fn().mockResolvedValue([user]),
+          list: vi.fn().mockResolvedValue([{ id: 'u1', name: 'Leo', kind: 'user' }]),
           switch: vi.fn(),
           create: vi.fn(),
         },
