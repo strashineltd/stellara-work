@@ -53,6 +53,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tiktoken": "^1.0.22",
+    "undici": "^8.9.0",
     "uuid": "^14.0.1"
   },
   "devDependencies": {
