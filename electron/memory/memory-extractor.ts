@@ -77,6 +77,8 @@ const EXTRACTION_PROMPT = `分析以下对话，提取值得长期记忆的信�
  * @param scopeId 作用域 ID（如项目 ID）
  * @param source 来源标记
  * @param llmCall LLM 调用函数（传入避免循环依赖）
+ * @param browserMaterial 浏览材料（可选）
+ * @param userId 身份归属（缺省默认档，调用方应显式传活动身份）
  */
 export async function extractMemories(
   messages: ChatMessage[],
@@ -85,6 +87,7 @@ export async function extractMemories(
   source: string,
   llmCall: (systemPrompt: string, userMessage: string) => Promise<string>,
   browserMaterial?: string,
+  userId: string = 'default',
 ): Promise<Memory[]> {
   // 只分析用户和 assistant 的消息
   const transcript = messages
@@ -116,7 +119,7 @@ export async function extractMemories(
       if (!['fact', 'preference', 'decision', 'codebase', 'requirement', 'meeting', 'web'].includes(item.kind)) continue;
 
       // 去重检查
-      const duplicate = findDuplicateMemory(item.content);
+      const duplicate = findDuplicateMemory(item.content, userId);
       if (duplicate) continue;
 
       const memory = saveMemory({
@@ -128,6 +131,7 @@ export async function extractMemories(
         importance: Math.min(1, Math.max(0, item.importance ?? 0.5)),
         confidence: 0.8,
         tags: item.tags ?? [],
+        userId,
       });
 
       saved.push(memory);
@@ -149,6 +153,7 @@ export function saveManualMemory(opts: {
   scope?: Memory['scope'];
   scopeId?: string;
   tags?: string[];
+  userId?: string;
 }): Memory {
   return saveMemory({
     scope: opts.scope ?? 'personal',
@@ -159,5 +164,6 @@ export function saveManualMemory(opts: {
     importance: 0.8,
     confidence: 1.0,
     tags: opts.tags,
+    userId: opts.userId ?? 'default',
   });
 }

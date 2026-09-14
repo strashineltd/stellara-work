@@ -19,7 +19,7 @@ export interface SessionBridgeManager {
 }
 
 export interface SessionBridgeDb {
-  listSessions(): Session[];
+  listSessions(userId?: string): Session[];
   getSession(id: string): Session | null;
   createSession(input: {
     id: string;
@@ -30,11 +30,12 @@ export interface SessionBridgeDb {
     runtime?: 'local' | 'server';
     serverId?: string;
     remoteSessionId?: string;
+    userId?: string;
   }): Session;
-  findSessionByRemote(serverId: string, remoteSessionId: string): Session | undefined;
-  findSessionByRemoteId(remoteSessionId: string): Session | undefined;
+  findSessionByRemote(serverId: string, remoteSessionId: string, userId?: string): Session | undefined;
+  findSessionByRemoteId(remoteSessionId: string, userId?: string): Session | undefined;
   reassignServerSession(id: string, serverId: string): void;
-  listServerSessions(serverId: string): Session[];
+  listServerSessions(serverId: string, userId?: string): Session[];
   deleteSession(id: string): void;
   deleteSessionByRemote(serverId: string, remoteSessionId: string): void;
   renameSession(id: string, title: string): void;
@@ -82,7 +83,13 @@ export class SessionBridge {
     this.uuid = deps.uuid;
   }
 
-  async list(): Promise<SessionSummary[]> {
+  /**
+   * 列表 + 对账远端会话。
+   *
+   * `userId` 为当前活动身份（H10）：只展示 / 对账 / 新建该身份的映射行，
+   * 新映射行归属该身份；其他身份的映射行不展示、也不被本轮对账触碰。
+   */
+  async list(userId: string = 'default'): Promise<SessionSummary[]> {
     const serverState = new Map<string, 'online' | 'offline'>();
     for (const status of this.manager.statuses()) {
       serverState.set(status.id, status.status === 'connected' ? 'online' : 'offline');
@@ -105,11 +112,11 @@ export class SessionBridge {
           const parentID = typeof remote?.parentID === 'string' ? remote.parentID : '';
           if (parentID !== '') continue;
           remoteIds.add(remoteId);
-          this.upsertRemoteRow(serverId, remoteId, remote);
+          this.upsertRemoteRow(serverId, remoteId, remote, userId);
         }
-        for (const cached of this.db.listServerSessions(serverId)) {
+        for (const cached of this.db.listServerSessions(serverId, userId)) {
           if (cached.remoteSessionId && !remoteIds.has(cached.remoteSessionId)) {
-            this.db.deleteSessionByRemote(serverId, cached.remoteSessionId);
+            this.db.deleteSession(cached.id);
           }
         }
       } catch {
@@ -118,10 +125,10 @@ export class SessionBridge {
       }
     }
 
-    return this.db.listSessions().map((session) => this.toSummary(session, serverState));
+    return this.db.listSessions(userId).map((session) => this.toSummary(session, serverState));
   }
 
-  async create(args: CreateSessionArgs): Promise<Session> {
+  async create(args: CreateSessionArgs, userId: string = 'default'): Promise<Session> {
     if (args.runtime === 'server') {
       if (!args.serverId) throw new Error('缺少服务器 ID');
       const client = this.requireClient(args.serverId);
@@ -133,6 +140,7 @@ export class SessionBridge {
         runtime: 'server',
         serverId: args.serverId,
         remoteSessionId: remote.id,
+        userId,
       });
     }
 
@@ -143,6 +151,7 @@ export class SessionBridge {
       ...(args.workDir !== undefined ? { workDir: args.workDir } : {}),
       ...(args.projectId !== undefined ? { projectId: args.projectId } : {}),
       runtime: 'local',
+      userId,
     });
   }
 
@@ -233,8 +242,8 @@ export class SessionBridge {
     return client;
   }
 
-  private upsertRemoteRow(serverId: string, remoteId: string, remote: RemoteSession): void {
-    const existing = this.db.findSessionByRemote(serverId, remoteId);
+  private upsertRemoteRow(serverId: string, remoteId: string, remote: RemoteSession, userId: string = 'default'): void {
+    const existing = this.db.findSessionByRemote(serverId, remoteId, userId);
     const patch: { title?: string; updatedAt?: number } = {};
     if (typeof remote.title === 'string') patch.title = remote.title;
     if (typeof remote.time?.updated === 'number') patch.updatedAt = remote.time.updated;
@@ -244,8 +253,8 @@ export class SessionBridge {
       return;
     }
 
-    // 服务器删除后重建会换 server_id：按远端会话 ID 认领孤儿映射行，避免生成重复行。
-    const orphan = this.db.findSessionByRemoteId(remoteId);
+    // 服务器删除后重建会换 server_id：按远端会话 ID 认领同身份的孤儿映射行，避免生成重复行。
+    const orphan = this.db.findSessionByRemoteId(remoteId, userId);
     if (orphan) {
       this.db.reassignServerSession(orphan.id, serverId);
       const modelId = readRemoteModelId(remote);
@@ -260,6 +269,7 @@ export class SessionBridge {
       runtime: 'server',
       serverId,
       remoteSessionId: remoteId,
+      userId,
     });
   }
 

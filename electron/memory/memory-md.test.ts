@@ -6,7 +6,7 @@ const base: Memory = {
   id: 'm1', scope: 'project', scopeId: 'p1', kind: 'codebase',
   content: 'Agent 工具白名单：npm/node/git。禁止 sh/bash。',
   source: 'session:abc', importance: 0.8, confidence: 0.9,
-  accessCount: 3, tags: ['Agent', '安全'],
+  accessCount: 3, userId: 'default', tags: ['Agent', '安全'],
   createdAt: 1785974400000, updatedAt: 1785996000000,
 };
 

@@ -59,6 +59,8 @@ export interface ResponsesLoopOptions {
   planExtraTools?: ResponseFunctionTool[];
   /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
   memoryProjectId?: string;
+  /** 会话归属身份（记忆注入时按身份检索，缺省 default） */
+  memoryUserId?: string;
   /**
    * 危险工具被调用前的批准回调。
    * 返回 true 放行；false 拒绝。
@@ -185,6 +187,7 @@ export async function* runResponsesLoop(
     const { memories, promptBlock } = await retrieveMemoriesForInjection(userMessage, {
       maxMemories: 10,
       projectId: options.memoryProjectId,
+      userId: options.memoryUserId,
     });
     if (promptBlock) {
       systemPrompt += `\n\n${promptBlock}`;

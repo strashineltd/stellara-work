@@ -3,6 +3,7 @@ import log from 'electron-log/main';
 import type {
   CloudAccount,
   CloudAuthState,
+  CloudFailure,
   CloudPendingSignUp,
   CloudResult,
   CloudSignUpArgs,
@@ -18,6 +19,7 @@ import { redactAccountRef, redactSensitiveText } from '../security/redact';
 import { deleteLinkForLocalUser, getLinkForLocalUser, upsertCloudLink, type CloudLink } from '../store/cloud-links';
 import { getCurrentLocalUser } from '../store/local-users';
 import { toCloudAccount, type RawCloudUser } from './cloud-user';
+import { DEFAULT_USER_ID, getActiveUserId } from './local-auth-manager';
 
 /**
  * 云账号协调器（主进程）
@@ -62,8 +64,35 @@ function sweepPending(): void {
   }
 }
 
+/** H10：默认档（无本地身份）下云登录的统一拒绝结构 */
+const IDENTITY_REQUIRED_FAILURE: CloudFailure = {
+  code: 'identity_required',
+  message: '请先创建本地身份后再登录云账号',
+  hint: '在「设置 → 账号」新建或切换到本地身份后重试',
+};
+
+/** H10：默认档下拒绝云登录的哨兵错误（onAuthenticated 在落盘前抛出） */
+export class CloudIdentityRequiredError extends Error {
+  constructor() {
+    super(IDENTITY_REQUIRED_FAILURE.message);
+    this.name = 'CloudIdentityRequiredError';
+  }
+}
+
+/**
+ * H10：默认档没有可绑定的本地身份，云登录必须在主进程入口拦截。
+ * 返回固定失败结构；真实用户返回 null。main.ts 的登录类 `auth:cloud:*` handler 在入口调用。
+ */
+export function requireRealIdentityForCloud(): CloudFailure | null {
+  return getActiveUserId() === DEFAULT_USER_ID ? { ...IDENTITY_REQUIRED_FAILURE } : null;
+}
+
 /** SDK 抛错时统一包成 CloudResult */
 function fail(err: unknown): { ok: false; error: ReturnType<typeof describeCloudError> } {
+  // H10：默认档登录被拒是预期业务结果，返回固定文案（不透传内部错误原文）
+  if (err instanceof CloudIdentityRequiredError) {
+    return { ok: false, error: { ...IDENTITY_REQUIRED_FAILURE } };
+  }
   if (!(err instanceof Error) || err.name !== 'CloudNotConfiguredError') {
     // M5：只记录脱敏后的 message，避免服务端原文里的邮箱/uid 进日志
     log.warn('cloudAuth 操作失败', redactSensitiveText(err instanceof Error ? err.message : String(err)));
@@ -134,6 +163,9 @@ async function onAuthenticated(
   account: CloudAccount,
   session: { access_token?: string; refresh_token?: string } | null | undefined,
 ): Promise<void> {
+  // H10：必须在任何落盘之前拦截默认档 —— 否则 SDK 已登录但无本地身份绑定，
+  // 会留下 signedIn:true / account:null 的脏会话（token 落盘后 requireLocalUserId 才抛错）。
+  if (getActiveUserId() === DEFAULT_USER_ID) throw new CloudIdentityRequiredError();
   await persistSession(session);
   await setCloudSecret(SESSION_CLOUD_UID_KEY, account.uid);
   upsertCloudLink({

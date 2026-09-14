@@ -3,6 +3,7 @@ import { createRoot, Root } from 'react-dom/client';
 import { act, useState } from 'react';
 import { MainView } from './MainView';
 import { captureFocusTarget, restoreFocusTarget } from '../lib/presence-ui';
+import { runAutosaveFlush } from '../lib/autosave-flush';
 import type {
   AppInfo, AttachmentMeta, ConfiguredModel, Project, ProjectSummary, ServerAgentSummary, ServerEntry, ServerProvidersResult,
   ServerStatusEntry, Session, SessionSummary,
@@ -3145,5 +3146,79 @@ describe('MainView home project picker', () => {
     await view.rerender({ projects: [CREATED_PROJECT] });
     expect(view.querySelector('.home-composer__project')?.textContent).toContain('新项目');
     view.unmount();
+  });
+});
+
+describe('MainView autosave flush on unmount', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+    Element.prototype.scrollIntoView = () => {};
+    (window as any).electronAPI = {
+      models: { getAll: vi.fn().mockResolvedValue([]), list: vi.fn().mockResolvedValue({ presets: [], configured: null }) },
+      sessions: {
+        get: vi.fn().mockResolvedValue({ session: SESSIONS[0], messages: [] }),
+        delete: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([]),
+        saveMessages: vi.fn().mockResolvedValue(undefined),
+      },
+      chat: { start: vi.fn(), abort: vi.fn(), approve: vi.fn() },
+      skills: { list: vi.fn().mockResolvedValue([]) },
+      memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
+      app: { onSettingsChanged: vi.fn().mockReturnValue(() => {}), getGitBranch: vi.fn().mockResolvedValue(null) },
+      fs: { listTree: vi.fn().mockResolvedValue(null) },
+    };
+  });
+
+  it('flushes the pending debounce on unmount (identity remount)', async () => {
+    const api = (window as any).electronAPI;
+    api.sessions.get.mockResolvedValue({
+      session: SESSIONS[0],
+      messages: [{ sessionId: 'a', position: 0, role: 'user', content: '最后一条未落盘消息', createdAt: 1 }],
+    });
+
+    const { unmount } = await renderMainView();
+    await act(async () => {});
+
+    expect(api.sessions.saveMessages).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(api.sessions.saveMessages).toHaveBeenCalledTimes(1);
+    const [sessionId, messages] = api.sessions.saveMessages.mock.calls[0];
+    expect(sessionId).toBe('a');
+    expect(
+      (messages as Array<{ content?: string }>).some((m) => m.content === '最后一条未落盘消息'),
+    ).toBe(true);
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(api.sessions.saveMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists the pending debounce when flushed before identity switch, without double-writing on unmount', async () => {
+    const api = (window as any).electronAPI;
+    api.sessions.get.mockResolvedValue({
+      session: SESSIONS[0],
+      messages: [{ sessionId: 'a', position: 0, role: 'user', content: '切换前最后一条', createdAt: 1 }],
+    });
+
+    const { unmount } = await renderMainView();
+    await act(async () => {});
+    expect(api.sessions.saveMessages).not.toHaveBeenCalled();
+
+    await act(async () => { await runAutosaveFlush(); });
+
+    expect(api.sessions.saveMessages).toHaveBeenCalledTimes(1);
+    const [sessionId, messages] = api.sessions.saveMessages.mock.calls[0];
+    expect(sessionId).toBe('a');
+    expect(
+      (messages as Array<{ content?: string }>).some((m) => m.content === '切换前最后一条'),
+    ).toBe(true);
+
+    unmount();
+    expect(api.sessions.saveMessages).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(api.sessions.saveMessages).toHaveBeenCalledTimes(1);
   });
 });

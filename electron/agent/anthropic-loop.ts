@@ -32,6 +32,8 @@ export interface AnthropicLoopOptions {
   planExtraTools?: OpenAITool[];
   /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
   memoryProjectId?: string;
+  /** 会话归属身份（记忆注入时按身份检索，缺省 default） */
+  memoryUserId?: string;
   signal?: AbortSignal;
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
   /**
@@ -106,6 +108,7 @@ export async function* runAnthropicAgentLoop(
     const { memories, promptBlock } = await retrieveMemoriesForInjection(userMessage, {
       maxMemories: 10,
       projectId: options.memoryProjectId,
+      userId: options.memoryUserId,
     });
     if (promptBlock) {
       system += `\n\n${promptBlock}`;

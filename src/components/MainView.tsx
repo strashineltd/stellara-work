@@ -35,6 +35,7 @@ import { useShortcuts } from '../hooks/useShortcuts';
 import { useServers } from '../hooks/useServers';
 import { usePresence } from '../hooks/usePresence';
 import { captureFocusTarget, presenceRootProps, restoreFocusTarget } from '../lib/presence-ui';
+import { registerAutosaveFlusher } from '../lib/autosave-flush';
 
 interface MainViewProps {
   /** 可为 null：跳过引导后无模型配置；发送任务前会校验并提示打开设置 */
@@ -333,6 +334,8 @@ export function MainView(props: MainViewProps) {
 
   // ---- Session lifecycle ----
   const entriesSessionRef = useRef<string | null>(null);
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 切换会话时清空上一个会话残留的浏览器面板状态（发送新任务时也会重置）
@@ -421,6 +424,36 @@ export function MainView(props: MainViewProps) {
         .catch((e) => console.error('Auto-save failed:', e));
     }, 300);
   }, [entries, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 身份切换前由调用方 await runAutosaveFlush()：在主进程切换活动身份之前先落盘，
+  // 否则旧身份会话的写入会被 assertSessionOwned 拒绝，最后一条消息丢失。
+  useEffect(() => {
+    return registerAutosaveFlusher(async () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const sessionId = entriesSessionRef.current;
+      if (!sessionId) return;
+      await window.electronAPI.sessions.saveMessages(
+        sessionId,
+        entriesToMessages(entriesRef.current, sessionId),
+      );
+    });
+  }, []);
+
+  // 兜底：未经 runAutosaveFlush 的卸载（如退出应用）仍尝试落盘；
+  // 已 flush 过则定时器已清空，不会重复写。
+  useEffect(() => {
+    return () => {
+      if (!saveTimer.current || !entriesSessionRef.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      const sessionId = entriesSessionRef.current;
+      void window.electronAPI.sessions.saveMessages(sessionId, entriesToMessages(entriesRef.current, sessionId))
+        .catch((e) => console.error('Flush save failed:', e));
+    };
+  }, []);
 
   // Auto-scroll
   const chatRef = useRef<HTMLElement | null>(null);

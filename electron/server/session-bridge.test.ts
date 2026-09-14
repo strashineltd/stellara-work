@@ -3,21 +3,25 @@ import { SessionBridge } from './session-bridge';
 
 function makeDb() {
   const rows = new Map<string, Record<string, unknown>>();
+  const ownedBy = (row: Record<string, unknown>, userId?: string) =>
+    userId === undefined || (row.userId ?? 'default') === userId;
   return {
     rows,
-    listSessions: () => [...rows.values()],
+    listSessions: (userId?: string) => [...rows.values()].filter((r) => ownedBy(r, userId)),
     getSession: (id: string) => rows.get(id),
     createSession: (input: Record<string, unknown>) => {
-      const row = { ...input, messageCount: 0, createdAt: 1, updatedAt: 1 };
+      const row = { userId: 'default', ...input, messageCount: 0, createdAt: 1, updatedAt: 1 };
       rows.set(input.id as string, row);
       return row;
     },
-    findSessionByRemote: (sid: string, remote: string) => [...rows.values()].find((r) => r.serverId === sid && r.remoteSessionId === remote),
-    findSessionByRemoteId: (remote: string) =>
+    findSessionByRemote: (sid: string, remote: string, userId?: string) =>
+      [...rows.values()].find((r) => r.serverId === sid && r.remoteSessionId === remote && ownedBy(r, userId)),
+    findSessionByRemoteId: (remote: string, userId?: string) =>
       [...rows.values()]
-        .filter((r) => r.runtime === 'server' && r.remoteSessionId === remote)
+        .filter((r) => r.runtime === 'server' && r.remoteSessionId === remote && ownedBy(r, userId))
         .sort((a, b) => (b.updatedAt as number) - (a.updatedAt as number))[0],
-    listServerSessions: (sid: string) => [...rows.values()].filter((r) => r.serverId === sid),
+    listServerSessions: (sid: string, userId?: string) =>
+      [...rows.values()].filter((r) => r.serverId === sid && ownedBy(r, userId)),
     reassignServerSession: (id: string, sid: string) => { rows.set(id, { ...rows.get(id)!, serverId: sid }); },
     deleteSession: (id: string) => { rows.delete(id); },
     deleteSessionByRemote: (sid: string, remote: string) => {
@@ -373,5 +377,61 @@ describe('SessionBridge', () => {
     expect(db.rows.has('map')).toBe(false);
     bridge.removeByRemote('srv-1', 'ses_missing');
     expect(db.rows.size).toBe(0);
+  });
+
+  it('scopes listings and reconciliation to the active identity', async () => {
+    const db = makeDb();
+    db.createSession({ id: 'mine', title: '我的', modelId: 'm', runtime: 'local', userId: 'u1' });
+    db.createSession({ id: 'other', title: '他人', modelId: 'm', runtime: 'local', userId: 'u2' });
+    db.createSession({
+      id: 'other-stale', title: '他人远端', modelId: '', runtime: 'server',
+      serverId: 'srv-1', remoteSessionId: 'ses_gone', userId: 'u2',
+    });
+    const client = { listSessions: vi.fn(async () => [remoteSession]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'mine-remote' });
+    const list = await bridge.list('u1');
+    expect(list.map((s) => s.id).sort()).toEqual(['mine', 'mine-remote']);
+    expect(db.rows.get('mine-remote')).toMatchObject({ userId: 'u1', remoteSessionId: 'ses_1' });
+    // 他人的行既不展示，也不被本轮对账清理/改写
+    expect(db.rows.get('other')).toMatchObject({ userId: 'u2' });
+    expect(db.rows.get('other-stale')).toMatchObject({ userId: 'u2' });
+  });
+
+  it('creates a separate mapping row per identity for the same remote session', async () => {
+    const db = makeDb();
+    db.createSession({
+      id: 'a-map', title: 'A', modelId: '', runtime: 'server',
+      serverId: 'srv-1', remoteSessionId: 'ses_1', userId: 'u1',
+    });
+    const client = { listSessions: vi.fn(async () => [remoteSession]) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'b-map' });
+    const list = await bridge.list('u2');
+    expect(list.map((s) => s.id)).toEqual(['b-map']);
+    expect(db.rows.get('a-map')).toMatchObject({ userId: 'u1', title: 'A' });
+    expect(db.rows.get('b-map')).toMatchObject({ userId: 'u2', remoteSessionId: 'ses_1' });
+  });
+
+  it('tags created mappings with the active identity', async () => {
+    const db = makeDb();
+    const client = { createSession: vi.fn(async () => remoteSession) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'local-1' });
+    const session = await bridge.create({ runtime: 'server', serverId: 'srv-1' }, 'u2');
+    expect(session.userId).toBe('u2');
+    expect(db.rows.get('local-1')).toMatchObject({ userId: 'u2' });
+  });
+
+  it('tags local sessions created through the bridge with the active identity', async () => {
+    const db = makeDb();
+    const bridge = new SessionBridge({ manager: makeManager(null, 'error') as never, db: db as never, uuid: () => 'local-1' });
+    const session = await bridge.create({ title: '本地会话', modelId: 'm1' }, 'u3');
+    expect(session).toMatchObject({ userId: 'u3', runtime: 'local' });
+  });
+
+  it('defaults to the default identity when the caller omits userId', async () => {
+    const db = makeDb();
+    const client = { createSession: vi.fn(async () => remoteSession) };
+    const bridge = new SessionBridge({ manager: makeManager(client as never) as never, db: db as never, uuid: () => 'local-1' });
+    await bridge.create({ runtime: 'server', serverId: 'srv-1' });
+    expect(db.rows.get('local-1')).toMatchObject({ userId: 'default' });
   });
 });

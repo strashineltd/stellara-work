@@ -13,6 +13,8 @@ import type {
   ContextStateView,
   AppSettings,
   LocalUser,
+  LocalIdentity,
+  IdentitySwitchResult,
   CloudAccount,
   CloudAuthState,
 } from '../shared/ipc';
@@ -52,6 +54,38 @@ const previewLocalUsers: LocalUser[] = [
   { id: 'preview-local-1', displayName: 'Local User', createdAt: now - 86_400_000, updatedAt: now - 86_400_000 },
 ];
 let previewActiveLocalUserId = previewLocalUsers[0]!.id;
+
+// H10：身份切换（含默认档）与 identity-changed 订阅
+const previewIdentityListeners = new Set<(user: LocalIdentity) => void>();
+
+function previewIdentities(): LocalIdentity[] {
+  return [
+    { id: 'default', name: '本地默认', kind: 'default' },
+    ...previewLocalUsers.map((user): LocalIdentity => ({
+      id: user.id,
+      name: user.displayName,
+      kind: 'user',
+    })),
+  ];
+}
+
+function previewCurrentIdentity(): LocalIdentity {
+  return (
+    previewIdentities().find((item) => item.id === previewActiveLocalUserId) ?? {
+      id: 'default',
+      name: '本地默认',
+      kind: 'default',
+    }
+  );
+}
+
+function previewSetActiveIdentity(id: string): LocalIdentity {
+  if (id !== 'default' && !previewLocalUsers.some((user) => user.id === id)) {
+    throw new Error(`用户不存在: ${id}`);
+  }
+  previewActiveLocalUserId = id;
+  return previewCurrentIdentity();
+}
 
 // UI 预览用云账号（Phase 3）：设置「账号」面板可走通登录/登出/解绑流程
 let previewCloudAccount: CloudAccount | null = null;
@@ -316,7 +350,7 @@ export function installDevPreviewApi(): void {
     },
     memory: {
       search: async (): Promise<Memory[]> => [], list: async (): Promise<Memory[]> => [],
-      save: async (memory) => ({ ...memory, id: `memory-${Date.now()}`, accessCount: 0, createdAt: Date.now(), updatedAt: Date.now() }),
+      save: async (memory) => ({ ...memory, id: `memory-${Date.now()}`, accessCount: 0, userId: 'default', createdAt: Date.now(), updatedAt: Date.now() }),
       update: async () => {}, delete: async () => {}, stats: async () => ({ total: 0, byScope: {}, byKind: {}, recentCount: 0 }),
       exportSingle: async () => ({ path: 'Preview/export.md' }),
       exportAll: async () => ({ path: 'Preview/all.md', count: 1 }),
@@ -328,8 +362,12 @@ export function installDevPreviewApi(): void {
     },
     auth: {
       local: {
-        getCurrent: async () => ({ ...(previewLocalUsers.find((u) => u.id === previewActiveLocalUserId) ?? previewLocalUsers[0]!) }),
-        list: async () => previewLocalUsers.map((u) => ({ ...u })),
+        getCurrent: async () => {
+          const target = previewLocalUsers.find((u) => u.id === previewActiveLocalUserId);
+          if (!target) throw new Error('本地用户未初始化，请先调用 initLocalUsers()');
+          return { ...target };
+        },
+        list: async () => previewIdentities(),
         create: async (displayName?: string) => {
           const created: LocalUser = {
             id: `preview-local-${previewLocalUsers.length + 1}`,
@@ -341,16 +379,16 @@ export function installDevPreviewApi(): void {
           return { ...created };
         },
         update: async (patch: { displayName?: string; avatarPath?: string | null }) => {
-          const target = previewLocalUsers.find((u) => u.id === previewActiveLocalUserId) ?? previewLocalUsers[0]!;
+          const target = previewLocalUsers.find((u) => u.id === previewActiveLocalUserId);
+          if (!target) throw new Error('本地用户未初始化，请先调用 initLocalUsers()');
           if (patch.displayName !== undefined) target.displayName = patch.displayName;
           if (patch.avatarPath !== undefined) target.avatarPath = patch.avatarPath ?? undefined;
           target.updatedAt = Date.now();
           return { ...target };
         },
         switch: async (id: string) => {
-          const target = previewLocalUsers.find((u) => u.id === id) ?? previewLocalUsers[0]!;
-          previewActiveLocalUserId = target.id;
-          return { ...target };
+          previewSetActiveIdentity(id);
+          return previewLocalUsers.find((u) => u.id === id) ?? null;
         },
       },
       cloud: {
@@ -413,6 +451,21 @@ export function installDevPreviewApi(): void {
         },
         // 固定把 taken_user 当作已占用，便于在预览里看到「用户名已被占用」
         isUsernameRegistered: async (name: string) => ({ ok: true as const, data: name === 'taken_user' }),
+      },
+    },
+    identity: {
+      list: async () => previewIdentities(),
+      getCurrent: async () => previewCurrentIdentity(),
+      switch: async (userId: string, _force?: boolean): Promise<IdentitySwitchResult> => {
+        const user = previewSetActiveIdentity(userId);
+        previewIdentityListeners.forEach((listener) => listener(user));
+        return { ok: true, user };
+      },
+      onChanged: (callback: (user: LocalIdentity) => void) => {
+        previewIdentityListeners.add(callback);
+        return () => {
+          previewIdentityListeners.delete(callback);
+        };
       },
     },
   };

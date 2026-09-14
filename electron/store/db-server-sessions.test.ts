@@ -64,6 +64,23 @@ describe('server session rows', () => {
     expect(findSessionByRemoteId('ses_missing')).toBeUndefined();
   });
 
+  it('filters server mappings by owner when userId is provided', () => {
+    createSession({
+      id: 'a1', title: 'A', modelId: '', runtime: 'server',
+      serverId: 'srv-1', remoteSessionId: 'r1', userId: 'u1',
+    });
+    createSession({
+      id: 'b1', title: 'B', modelId: '', runtime: 'server',
+      serverId: 'srv-1', remoteSessionId: 'r2', userId: 'u2',
+    });
+    expect(listServerSessions('srv-1', 'u1').map((s) => s.id)).toEqual(['a1']);
+    expect(listServerSessions('srv-1').map((s) => s.id).sort()).toEqual(['a1', 'b1']);
+    expect(findSessionByRemote('srv-1', 'r1', 'u1')?.id).toBe('a1');
+    expect(findSessionByRemote('srv-1', 'r1', 'u2')).toBeUndefined();
+    expect(findSessionByRemoteId('r1', 'u1')?.id).toBe('a1');
+    expect(findSessionByRemoteId('r1', 'u2')).toBeUndefined();
+  });
+
   it('returns the most recent row when several map to the same remote id', () => {
     createSession({
       id: 'old', title: '旧', modelId: '', runtime: 'server',

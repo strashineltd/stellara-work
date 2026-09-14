@@ -39,6 +39,7 @@ function rowToMemory(row: Record<string, unknown>): Memory {
     importance: row.importance as number,
     confidence: row.confidence as number,
     accessCount: row.access_count as number,
+    userId: (row.user_id as string | null) ?? 'default',
     tags: row.tags ? JSON.parse(row.tags as string) : undefined,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
@@ -56,6 +57,7 @@ export function saveMemory(opts: {
   importance?: number;
   confidence?: number;
   tags?: string[];
+  userId?: string;
 }): Memory {
   const db = getDb();
   const now = Date.now();
@@ -70,16 +72,17 @@ export function saveMemory(opts: {
     importance: opts.importance ?? 0.5,
     confidence: opts.confidence ?? 0.8,
     accessCount: 0,
+    userId: opts.userId ?? 'default',
     tags: opts.tags,
     createdAt: now,
     updatedAt: now,
   };
 
   db.prepare(`
-    INSERT INTO memories (id, scope, scope_id, kind, content, source, importance, confidence, access_count, tags, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+    INSERT INTO memories (id, scope, scope_id, kind, content, source, importance, confidence, access_count, tags, created_at, updated_at, user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
   `).run(id, opts.scope, opts.scopeId ?? null, opts.kind, opts.content, opts.source ?? null,
-    memory.importance, memory.confidence, opts.tags ? JSON.stringify(opts.tags) : null, now, now);
+    memory.importance, memory.confidence, opts.tags ? JSON.stringify(opts.tags) : null, now, now, memory.userId);
 
   // FTS5 索引：使用 memory_id UNINDEXED 字段（UUID 不能作为 rowid）
   try {
@@ -97,7 +100,7 @@ export function searchMemories(opts: {
   scope?: Memory['scope'];
   kind?: Memory['kind'];
   limit?: number;
-}): Memory[] {
+}, userId: string = 'default'): Memory[] {
   const db = getDb();
   const limit = opts.limit ?? 10;
 
@@ -105,9 +108,9 @@ export function searchMemories(opts: {
   let sql = `
     SELECT m.* FROM memories m
     INNER JOIN memories_fts f ON f.memory_id = m.id
-    WHERE f MATCH ?
+    WHERE f MATCH ? AND m.user_id = ?
   `;
-  const params: unknown[] = [opts.query];
+  const params: unknown[] = [opts.query, userId];
 
   if (opts.scope) {
     sql += ' AND m.scope = ?';
@@ -126,8 +129,8 @@ export function searchMemories(opts: {
     return rows.map(rowToMemory);
   } catch {
     // FTS5 查询语法错误时回退到 LIKE 搜索
-    let fallback = `SELECT * FROM memories WHERE content LIKE ?`;
-    const fbParams: unknown[] = [`%${opts.query}%`];
+    let fallback = `SELECT * FROM memories WHERE content LIKE ? AND user_id = ?`;
+    const fbParams: unknown[] = [`%${opts.query}%`, userId];
     if (opts.scope) { fallback += ' AND scope = ?'; fbParams.push(opts.scope); }
     if (opts.kind) { fallback += ' AND kind = ?'; fbParams.push(opts.kind); }
     fallback += ' ORDER BY importance DESC LIMIT ?';
@@ -143,10 +146,10 @@ export function listMemories(opts?: {
   kind?: Memory['kind'];
   limit?: number;
   offset?: number;
-}): Memory[] {
+}, userId: string = 'default'): Memory[] {
   const db = getDb();
-  let sql = 'SELECT * FROM memories WHERE 1=1';
-  const params: unknown[] = [];
+  let sql = 'SELECT * FROM memories WHERE user_id = ?';
+  const params: unknown[] = [userId];
 
   if (opts?.scope) { sql += ' AND scope = ?'; params.push(opts.scope); }
   if (opts?.scopeId) { sql += ' AND scope_id = ?'; params.push(opts.scopeId); }
@@ -197,6 +200,14 @@ export function deleteMemory(id: string): void {
   try { db.prepare('DELETE FROM memories_fts WHERE memory_id = ?').run(id); } catch { /* ignore */ }
 }
 
+/** 校验记忆归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中记忆。 */
+export function assertMemoryOwned(id: string, userId: string): Memory {
+  const row = getDb().prepare('SELECT * FROM memories WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const memory = row ? rowToMemory(row) : undefined;
+  if (!memory || memory.userId !== userId) throw new Error('无权限访问该数据');
+  return memory;
+}
+
 /** 删除全部记忆，返回删除的条数。 */
 export function deleteAllMemories(): number {
   const db = getDb();
@@ -207,34 +218,46 @@ export function deleteAllMemories(): number {
   return deleteAll();
 }
 
+/** 删除某身份的全部记忆及其 FTS 索引，返回删除条数。 */
+export function deleteMemoriesByUser(userId: string): number {
+  const db = getDb();
+  const deleteByUser = db.transaction(() => {
+    try {
+      db.prepare('DELETE FROM memories_fts WHERE memory_id IN (SELECT id FROM memories WHERE user_id = ?)').run(userId);
+    } catch { /* FTS5 表可能不存在 */ }
+    return db.prepare('DELETE FROM memories WHERE user_id = ?').run(userId).changes;
+  });
+  return deleteByUser();
+}
+
 export function bumpAccess(id: string): void {
   const db = getDb();
   db.prepare('UPDATE memories SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?')
     .run(Date.now(), id);
 }
 
-export function getMemoryStats(): MemoryStats {
+export function getMemoryStats(userId: string = 'default'): MemoryStats {
   const db = getDb();
-  const total = (db.prepare('SELECT COUNT(*) as c FROM memories').get() as { c: number }).c;
+  const total = (db.prepare('SELECT COUNT(*) as c FROM memories WHERE user_id = ?').get(userId) as { c: number }).c;
 
   const byScope: Record<string, number> = {};
-  for (const row of db.prepare('SELECT scope, COUNT(*) as c FROM memories GROUP BY scope').all() as { scope: string; c: number }[]) {
+  for (const row of db.prepare('SELECT scope, COUNT(*) as c FROM memories WHERE user_id = ? GROUP BY scope').all(userId) as { scope: string; c: number }[]) {
     byScope[row.scope] = row.c;
   }
 
   const byKind: Record<string, number> = {};
-  for (const row of db.prepare('SELECT kind, COUNT(*) as c FROM memories GROUP BY kind').all() as { kind: string; c: number }[]) {
+  for (const row of db.prepare('SELECT kind, COUNT(*) as c FROM memories WHERE user_id = ? GROUP BY kind').all(userId) as { kind: string; c: number }[]) {
     byKind[row.kind] = row.c;
   }
 
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const recentCount = (db.prepare('SELECT COUNT(*) as c FROM memories WHERE created_at > ?').get(weekAgo) as { c: number }).c;
+  const recentCount = (db.prepare('SELECT COUNT(*) as c FROM memories WHERE user_id = ? AND created_at > ?').get(userId, weekAgo) as { c: number }).c;
 
   return { total, byScope, byKind, recentCount };
 }
 
 /** 检查是否有高度相似的记忆（FTS5 精确短语搜索 + LIKE 兜底） */
-export function findDuplicateMemory(content: string): Memory | null {
+export function findDuplicateMemory(content: string, userId: string = 'default'): Memory | null {
   const db = getDb();
 
   // 策略 1：FTS5 精确短语搜索（最高精度）
@@ -247,9 +270,9 @@ export function findDuplicateMemory(content: string): Memory | null {
       const rows = db.prepare(`
         SELECT m.* FROM memories m
         INNER JOIN memories_fts f ON f.memory_id = m.id
-        WHERE f MATCH ?
+        WHERE f MATCH ? AND m.user_id = ?
         LIMIT 1
-      `).all(`"${exactPhrase}"`) as Record<string, unknown>[];
+      `).all(`"${exactPhrase}"`, userId) as Record<string, unknown>[];
       if (rows.length > 0) return rowToMemory(rows[0]!);
     }
   } catch {
@@ -258,8 +281,8 @@ export function findDuplicateMemory(content: string): Memory | null {
 
   // 策略 2：LIKE 前缀匹配（兜底）
   const prefix = content.slice(0, 100);
-  const row = db.prepare('SELECT * FROM memories WHERE content LIKE ? LIMIT 1')
-    .get(`%${prefix}%`) as Record<string, unknown> | undefined;
+  const row = db.prepare('SELECT * FROM memories WHERE content LIKE ? AND user_id = ? LIMIT 1')
+    .get(`%${prefix}%`, userId) as Record<string, unknown> | undefined;
   return row ? rowToMemory(row) : null;
 }
 
@@ -271,11 +294,11 @@ export function searchMemoriesSafe(opts: {
   scope?: Memory['scope'];
   kind?: Memory['kind'];
   limit?: number;
-}): Memory[] | null {
+}, userId: string = 'default'): Memory[] | null {
   const db = getDbSafe();
   if (!db) return null;
   try {
-    return searchMemories(opts);
+    return searchMemories(opts, userId);
   } catch {
     return null;
   }

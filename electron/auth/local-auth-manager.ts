@@ -1,12 +1,15 @@
 import {
+  clearActiveLocalUser,
   createLocalUser,
   getCurrentLocalUser,
+  getLocalUser,
   listLocalUsers,
   switchLocalUser,
   updateLocalUser,
   type LocalUser,
   type LocalUserPatch,
 } from '../store/local-users';
+import type { LocalIdentity } from '../../shared/ipc';
 
 /**
  * 本地认证协调器（主进程）
@@ -28,6 +31,66 @@ function requireCurrent(): LocalUser {
   return user;
 }
 
+/** 虚拟「本地默认」档：固定 id，不写入 local_users，不可删除/重命名（H10） */
+export const DEFAULT_USER_ID = 'default';
+
+/** 「本地默认」档显示名 */
+export const DEFAULT_IDENTITY_NAME = '本地默认';
+
+/** 活动身份 id：未激活任何本地用户时返回默认档 */
+export function getActiveUserId(): string {
+  return getCurrentLocalUser()?.id ?? DEFAULT_USER_ID;
+}
+
+/** 身份列表：默认档固定排第一，随后按创建时间升序的本地用户 */
+export function listIdentities(): LocalIdentity[] {
+  return [
+    { id: DEFAULT_USER_ID, name: DEFAULT_IDENTITY_NAME, kind: 'default' },
+    ...listLocalUsers().map((user): LocalIdentity => ({
+      id: user.id,
+      name: user.displayName,
+      kind: 'user',
+    })),
+  ];
+}
+
+/** 按 id 取身份条目；未知 id 抛「用户不存在」（与 setActiveUserId 同一校验口径） */
+export function getIdentity(id: string): LocalIdentity {
+  const identity = listIdentities().find((item) => item.id === id);
+  if (!identity) throw new Error(`用户不存在: ${id}`);
+  return identity;
+}
+
+/**
+ * 当前活动身份条目；没有活动用户（或用户行已消失）时返回默认档。
+ * `identity:getCurrent` 契约要求永不抛错。
+ */
+export function getCurrentIdentity(): LocalIdentity {
+  return (
+    listIdentities().find((item) => item.id === getActiveUserId()) ?? {
+      id: DEFAULT_USER_ID,
+      name: DEFAULT_IDENTITY_NAME,
+      kind: 'default',
+    }
+  );
+}
+
+/**
+ * 设置活动身份。
+ *
+ * - `'default'` → 清空活动用户，回到默认档
+ * - 已存在的本地用户 id → 切换过去
+ * - 其他 → 抛 `用户不存在`，且不改变原活动身份
+ */
+export function setActiveUserId(id: string): void {
+  if (id === DEFAULT_USER_ID) {
+    clearActiveLocalUser();
+    return;
+  }
+  if (!getLocalUser(id)) throw new Error(`用户不存在: ${id}`);
+  switchLocalUser(id);
+}
+
 export const localAuth = {
   getCurrent(): LocalUser {
     return requireCurrent();
@@ -36,6 +99,9 @@ export const localAuth = {
   list(): LocalUser[] {
     return listLocalUsers();
   },
+
+  /** 身份列表（含默认档），供账号 UI / identity IPC 使用 */
+  listIdentities,
 
   create(displayName?: string): LocalUser {
     return createLocalUser(displayName);
@@ -46,7 +112,12 @@ export const localAuth = {
     return updateLocalUser(requireCurrent().id, patch);
   },
 
-  switch(id: string): LocalUser {
-    return switchLocalUser(id);
+  /**
+   * 切换活动身份；`'default'` 切回默认档并返回 null。
+   * 未知 id 抛 `用户不存在`（与 setActiveUserId 同一校验）。
+   */
+  switch(id: string): LocalUser | null {
+    setActiveUserId(id);
+    return getCurrentLocalUser();
   },
 };
