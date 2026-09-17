@@ -93,6 +93,17 @@ const GIT_CONFIG_WRITE_FLAGS = new Set([
   '--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section', '--edit', '-e',
 ]);
 
+/** sed 短选项簇中出现 i（-i / -i.bak / -ni）即为就地写；遇到取值型选项（e/f/l）后停止扫描，避免把脚本内容误判为旗标 */
+const SED_VALUE_FLAGS = new Set(['e', 'f', 'l']);
+
+function sedHasInPlaceShortFlag(arg: string): boolean {
+  for (const ch of arg.slice(1)) {
+    if (ch === 'i') return true;
+    if (SED_VALUE_FLAGS.has(ch)) return false;
+  }
+  return false;
+}
+
 function allowedCommands(): Set<string> {
   return process.platform === 'win32' ? ALLOWED_COMMANDS_WIN : ALLOWED_COMMANDS_POSIX;
 }
@@ -465,6 +476,7 @@ function findDisallowedUrlScheme(args: string[]): string | null {
  * - git --upload-pack/-u/--receive-pack：指定远端执行的程序（等价任意命令执行）
  * - find -exec/-execdir/-ok/-okdir：find 自行 execvp，绕过 executable 白名单
  * - cmake -D：取值可能指向工具链/预加载脚本（绝对路径或 .. 一律拒绝）
+ * - sed -i/--in-place：就地覆写文件，突破只读文本处理定位
  * 返回错误文案，null 表示通过。
  */
 function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
@@ -492,6 +504,16 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
       }
       if (arg === '--receive-pack' || arg.startsWith('--receive-pack=')) {
         return '不允许：git --receive-pack 可指定远端执行的程序。';
+      }
+    }
+  }
+  if (exeBase === 'sed') {
+    for (const arg of args) {
+      if (arg === '--in-place' || arg.startsWith('--in-place=')) {
+        return '不允许：sed --in-place 会就地覆写文件（sed 仅用于 stdin/stdout 只读处理）。';
+      }
+      if (arg.startsWith('-') && !arg.startsWith('--') && sedHasInPlaceShortFlag(arg)) {
+        return '不允许：sed -i 会就地覆写文件（sed 仅用于 stdin/stdout 只读处理）。';
       }
     }
   }

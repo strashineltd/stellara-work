@@ -565,6 +565,29 @@ describe('runCommand', () => {
     }
   });
 
+  it('rejects sed in-place writes (-i / --in-place) (P2)', async () => {
+    for (const cmd of [
+      "sed -i 's/a/b/' sample.txt",
+      "sed -i.bak 's/a/b/' sample.txt",
+      "sed --in-place 's/a/b/' sample.txt",
+      "sed --in-place=.bak 's/a/b/' sample.txt",
+      "sed -ni 's/a/b/p' sample.txt",
+      "sed -Ei 's/a/b/' sample.txt",
+    ]) {
+      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toContain('不允许');
+      expect(r.error ?? '', cmd).toContain('覆写');
+    }
+  });
+
+  (process.platform !== 'win32' ? it : it.skip)('keeps read-only sed usage allowed (P2)', async () => {
+    await fs.writeFile(path.join(tmpDir, 'sample.txt'), 'hello\nworld\n');
+    const r = await runCommand({ command: "sed -n '1p' sample.txt" }, tmpDir);
+    expect(r.ok).toBe(true);
+    expect(r.output).toContain('hello');
+  });
+
   it('rejects git -c/--config-env config injection (final re-review A4)', async () => {
     for (const cmd of [
       'git -c core.fsmonitor=/tmp/evil status',
