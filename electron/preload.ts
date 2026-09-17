@@ -350,6 +350,7 @@ const api: ElectronAPI = {
     remove: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:remove', id),
     toggle: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:toggle', id),
     runNow: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:runNow', id),
+    abort: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:abort', id),
     runs: (taskId: string): Promise<ScheduledRun[]> => ipcRenderer.invoke('scheduled:runs', taskId),
     onChanged: (callback: () => void): (() => void) => {
       const handler = () => callback();

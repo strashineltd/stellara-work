@@ -75,6 +75,8 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  /** 有未完成行操作的 task id：该行按钮禁用，防止连点（防重入的主进程侧另有守卫） */
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set());
   const [servers, setServers] = useState<ServerEntry[]>([]);
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -169,32 +171,71 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
     closeEditor();
   }
 
+  function beginTaskAction(taskId: string): boolean {
+    if (pendingActions.has(taskId)) return false;
+    setPendingActions((current) => new Set(current).add(taskId));
+    return true;
+  }
+
+  function endTaskAction(taskId: string): void {
+    setPendingActions((current) => {
+      if (!current.has(taskId)) return current;
+      const next = new Set(current);
+      next.delete(taskId);
+      return next;
+    });
+  }
+
   async function handleToggle(task: ScheduledTask) {
+    if (!beginTaskAction(task.id)) return;
     try {
       await window.electronAPI.scheduled.toggle(task.id);
       await loadTasks();
     } catch (error) {
       await loadTasks();
       setListError(errorMessage(error));
+    } finally {
+      endTaskAction(task.id);
     }
   }
 
   async function handleRunNow(task: ScheduledTask) {
+    if (!beginTaskAction(task.id)) return;
     setListError(null);
     try {
       await window.electronAPI.scheduled.runNow(task.id);
+      await loadTasks();
     } catch (error) {
       setListError(errorMessage(error));
+    } finally {
+      endTaskAction(task.id);
+    }
+  }
+
+  async function handleAbort(task: ScheduledTask) {
+    if (!beginTaskAction(task.id)) return;
+    setListError(null);
+    try {
+      await window.electronAPI.scheduled.abort(task.id);
+      await loadTasks();
+    } catch (error) {
+      setListError(errorMessage(error));
+    } finally {
+      endTaskAction(task.id);
     }
   }
 
   async function handleDelete(task: ScheduledTask) {
+    if (pendingActions.has(task.id)) return;
     if (!window.confirm(`删除任务「${task.name}」？该操作不可撤销。`)) return;
+    if (!beginTaskAction(task.id)) return;
     try {
       await window.electronAPI.scheduled.remove(task.id);
       await loadTasks();
     } catch (error) {
       setListError(errorMessage(error));
+    } finally {
+      endTaskAction(task.id);
     }
   }
 
@@ -259,62 +300,87 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
 
       {tasks.length > 0 && (
         <div className="scheduled-task-list">
-          {tasks.map((task) => (
-            <div
-              key={task.id}
-              className="scheduled-task-row"
-              data-task-id={task.id}
-              data-enabled={task.enabled}
-            >
-              <div className="scheduled-task-row__main">
-                <div className="scheduled-task-row__title">
-                  <strong>{task.name}</strong>
-                  <span className={`scheduled-badge scheduled-badge--${task.runtime}`}>
-                    {runtimeLabel(task)}
-                  </span>
-                  <span className="scheduled-badge scheduled-badge--kind">
-                    {KIND_LABELS[task.scheduleKind] ?? task.scheduleKind}
-                  </span>
+          {tasks.map((task) => {
+            const pending = pendingActions.has(task.id);
+            const running = task.running === true;
+            return (
+              <div
+                key={task.id}
+                className="scheduled-task-row"
+                data-task-id={task.id}
+                data-enabled={task.enabled}
+              >
+                <div className="scheduled-task-row__main">
+                  <div className="scheduled-task-row__title">
+                    <strong>{task.name}</strong>
+                    <span className={`scheduled-badge scheduled-badge--${task.runtime}`}>
+                      {runtimeLabel(task)}
+                    </span>
+                    <span className="scheduled-badge scheduled-badge--kind">
+                      {KIND_LABELS[task.scheduleKind] ?? task.scheduleKind}
+                    </span>
+                  </div>
+                  <p className="scheduled-task-row__prompt" title={task.prompt}>{task.prompt}</p>
+                  <div className="scheduled-task-row__meta">
+                    <span>下次运行：{nextRunLabel(task)}</span>
+                    <span>最近：{lastStatusLabel(task)}</span>
+                  </div>
                 </div>
-                <p className="scheduled-task-row__prompt" title={task.prompt}>{task.prompt}</p>
-                <div className="scheduled-task-row__meta">
-                  <span>下次运行：{nextRunLabel(task)}</span>
-                  <span>最近：{lastStatusLabel(task)}</span>
+                <div className="scheduled-task-row__actions">
+                  <button
+                    className="btn btn-ghost btn-small"
+                    type="button"
+                    onClick={() => void handleRunNow(task)}
+                    disabled={running || pending}
+                  >
+                    立即运行
+                  </button>
+                  {running && (
+                    <button
+                      className="btn btn-ghost btn-small"
+                      type="button"
+                      onClick={() => void handleAbort(task)}
+                      disabled={pending}
+                    >
+                      停止
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-ghost btn-small"
+                    type="button"
+                    onClick={(event) => openEditor(task, event.currentTarget)}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-small"
+                    type="button"
+                    onClick={() => void handleDelete(task)}
+                    disabled={pending}
+                  >
+                    删除
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-small"
+                    type="button"
+                    onClick={(event) => openHistory(task, event.currentTarget)}
+                  >
+                    历史
+                  </button>
+                  <button
+                    className={`settings-switch${task.enabled ? ' on' : ''}`}
+                    role="switch"
+                    aria-checked={task.enabled}
+                    aria-label={`${task.name}：启用或停用`}
+                    title={task.enabled ? '停用该任务' : '启用该任务'}
+                    type="button"
+                    onClick={() => void handleToggle(task)}
+                    disabled={pending}
+                  />
                 </div>
               </div>
-              <div className="scheduled-task-row__actions">
-                <button className="btn btn-ghost btn-small" type="button" onClick={() => void handleRunNow(task)}>
-                  立即运行
-                </button>
-                <button
-                  className="btn btn-ghost btn-small"
-                  type="button"
-                  onClick={(event) => openEditor(task, event.currentTarget)}
-                >
-                  编辑
-                </button>
-                <button className="btn btn-ghost btn-small" type="button" onClick={() => void handleDelete(task)}>
-                  删除
-                </button>
-                <button
-                  className="btn btn-secondary btn-small"
-                  type="button"
-                  onClick={(event) => openHistory(task, event.currentTarget)}
-                >
-                  历史
-                </button>
-                <button
-                  className={`settings-switch${task.enabled ? ' on' : ''}`}
-                  role="switch"
-                  aria-checked={task.enabled}
-                  aria-label={`${task.name}：启用或停用`}
-                  title={task.enabled ? '停用该任务' : '启用该任务'}
-                  type="button"
-                  onClick={() => void handleToggle(task)}
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

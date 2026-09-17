@@ -118,6 +118,8 @@ interface SchedulerRuntime {
   pause(): void;
   resume(): void;
   isPaused(): boolean;
+  /** 任务是否有进行中的运行（列表视图 `running` 字段 / 立即运行防重入） */
+  isRunning(taskId: string): boolean;
   /** 取消进行中的运行（本地 abort 信号 / 服务器 /abort） */
   abort(taskId: string): boolean;
 }
@@ -1314,7 +1316,11 @@ function registerIpcHandlers(): void {
   // v0.9.3 已安排（调度器）：读取一律按活动身份隔离，id 操作先校验归属（H10）。
   handle('scheduled:list', async (): Promise<ScheduledTask[]> => {
     const db = await import('./store/db');
-    return db.listScheduledTasks(getActiveUserId());
+    // running 为主进程注入的只读视图字段：渲染层据此把「立即运行」换成「停止」
+    return db.listScheduledTasks(getActiveUserId()).map((task) => ({
+      ...task,
+      running: schedulerRuntime?.isRunning(task.id) ?? false,
+    }));
   });
 
   handle('scheduled:create', async (_e, input: ScheduledTaskInput): Promise<ScheduledTask> => {
@@ -1359,6 +1365,15 @@ function registerIpcHandlers(): void {
   handle('scheduled:runNow', async (_e, id: string): Promise<void> => {
     if (!schedulerRuntime) throw new Error('调度器未初始化，无法立即运行');
     await schedulerRuntime.runNow(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:abort', async (_e, id: string): Promise<void> => {
+    const db = await import('./store/db');
+    // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
+    db.assertScheduledTaskOwned(id, getActiveUserId());
+    // 无进行中的运行时不报错（UI 停止按钮可能基于过期视图）
+    schedulerRuntime?.abort(id);
     broadcastScheduledChanged();
   });
 
@@ -2647,10 +2662,15 @@ app.whenReady().then(async () => {
       runNow: async (taskId) => {
         // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
         const task = db.assertScheduledTaskOwned(taskId, getActiveUserId());
+        // 防重入：立即运行与定时触发共用同一运行登记（快速双击 / 到点重触发都拒绝）
+        if (isRunning(taskId)) throw new Error('任务正在运行中，请稍后重试');
         // 后台执行：不阻塞 IPC / 托盘调用方（T4 广播 scheduled:changed 刷新列表）
         void executeTask(task, runnerDeps)
           .catch((err) => log.error('[scheduler] 立即运行失败', taskId, err))
           .finally(() => engine.reschedule());
+        // executeTask 在首个 await 前已同步登记运行中；立即重排把该任务移出堆，
+        // 避免旧的到期快照在手动运行期间再次触发（运行结束的 finally 会再重排一次）
+        engine.reschedule();
       },
       toggle: async (taskId) => {
         // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
@@ -2677,6 +2697,7 @@ app.whenReady().then(async () => {
         engine.start();
       },
       isPaused: () => paused,
+      isRunning: (taskId) => isRunning(taskId),
       abort: (taskId) => abortRun(taskId),
     };
   } catch (err) {

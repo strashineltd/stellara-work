@@ -920,6 +920,8 @@ export interface ScheduledTask {
   updatedAt: number;
   /** 归属身份（主进程内部字段，渲染层不传） */
   userId?: string;
+  /** 是否有进行中的运行（主进程注入的只读视图字段，渲染层不传） */
+  running?: boolean;
 }
 
 export interface ScheduledRun {
@@ -1388,6 +1390,8 @@ export interface ElectronAPI {
     remove: (id: string) => Promise<void>;
     toggle: (id: string) => Promise<void>;
     runNow: (id: string) => Promise<void>;
+    /** 中止进行中的运行（本地中断 Agent 循环 / 服务器发送 /abort）；无运行时不报错 */
+    abort: (id: string) => Promise<void>;
     runs: (taskId: string) => Promise<ScheduledRun[]>;
     /** 监听任务/执行记录变更（唯一事件 `scheduled:changed`）。返回取消监听函数。 */
     onChanged: (callback: () => void) => () => void;

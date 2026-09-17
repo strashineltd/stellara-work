@@ -47,6 +47,7 @@ function stubApi(tasks: ScheduledTask[], runs: ScheduledRun[] = []) {
       remove: vi.fn().mockResolvedValue(undefined),
       toggle: vi.fn().mockResolvedValue(undefined),
       runNow: vi.fn().mockResolvedValue(undefined),
+      abort: vi.fn().mockResolvedValue(undefined),
       runs: vi.fn().mockResolvedValue(runs),
       onChanged: vi.fn().mockReturnValue(unsubscribe),
     },
@@ -90,6 +91,12 @@ async function click(element: Element | null | undefined) {
   await act(async () => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
 }
 
 function setInput(element: HTMLInputElement | HTMLTextAreaElement | null, value: string) {
@@ -223,6 +230,49 @@ describe('ScheduledTasks 行操作', () => {
     const { container } = await renderScheduled();
     await click(exactButton(taskRow(container, 't1'), '立即运行'));
     expect(api.scheduled.runNow).toHaveBeenCalledWith('t1');
+  });
+
+  it('运行中的任务显示停止按钮并调用 scheduled.abort', async () => {
+    const { api } = stubApi([makeTask({ running: true })]);
+    const { container } = await renderScheduled();
+    const row = taskRow(container, 't1');
+
+    expect(exactButton(row, '停止')).toBeTruthy();
+    expect((exactButton(row, '立即运行') as HTMLButtonElement).disabled).toBe(true);
+
+    await click(exactButton(row, '停止'));
+    expect(api.scheduled.abort).toHaveBeenCalledWith('t1');
+  });
+
+  it('非运行任务不显示停止按钮', async () => {
+    stubApi([makeTask()]);
+    const { container } = await renderScheduled();
+    expect(exactButton(taskRow(container, 't1'), '停止')).toBeNull();
+    expect((exactButton(taskRow(container, 't1'), '立即运行') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('行操作进行中时该行按钮禁用（防连点）', async () => {
+    const { api } = stubApi([makeTask()]);
+    const gate = deferred<void>();
+    api.scheduled.toggle.mockReturnValueOnce(gate.promise);
+    const { container } = await renderScheduled();
+    const row = taskRow(container, 't1');
+
+    await click(row.querySelector('[role="switch"]'));
+    const runNowButton = exactButton(row, '立即运行') as HTMLButtonElement;
+    const removeButton = exactButton(row, '删除') as HTMLButtonElement;
+    const switchButton = row.querySelector('[role="switch"]') as HTMLButtonElement;
+    expect(runNowButton.disabled).toBe(true);
+    expect(removeButton.disabled).toBe(true);
+    expect(switchButton.disabled).toBe(true);
+
+    await act(async () => {
+      gate.resolve();
+      await gate.promise;
+    });
+    expect(runNowButton.disabled).toBe(false);
+    expect(removeButton.disabled).toBe(false);
+    expect(switchButton.disabled).toBe(false);
   });
 
   it('删除 requires a secondary confirmation before calling scheduled.remove', async () => {

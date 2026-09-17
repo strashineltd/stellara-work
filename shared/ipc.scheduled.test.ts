@@ -1,7 +1,7 @@
 // shared/ipc.scheduled.test.ts
 //
 // v0.9.3 调度器 IPC 契约回归：
-// - P6：scheduled 命名空间恰好暴露 list/create/update/remove/toggle/runNow/runs/onChanged
+// - P6：scheduled 命名空间恰好暴露 list/create/update/remove/toggle/runNow/abort/runs/onChanged
 // - H10：create/update 入参不含 userId（身份由主进程 getActiveUserId() 注入）
 // - 方法签名与 ScheduledTask / ScheduledRun 返回类型一致
 import { describe, expect, it } from 'vitest';
@@ -29,11 +29,12 @@ type ExpectedScheduledKeys =
   | 'remove'
   | 'toggle'
   | 'runNow'
+  | 'abort'
   | 'runs'
   | 'onChanged';
 
 describe('scheduled ipc contract (P6)', () => {
-  it('scheduled 命名空间恰好暴露 list/create/update/remove/toggle/runNow/runs/onChanged', () => {
+  it('scheduled 命名空间恰好暴露 list/create/update/remove/toggle/runNow/abort/runs/onChanged', () => {
     type Actual = keyof ScheduledNamespace;
     const exact: Equal<Actual, ExpectedScheduledKeys> = true;
     expect(exact).toBe(true);
@@ -46,10 +47,11 @@ describe('scheduled ipc contract (P6)', () => {
     const runs: Equal<ReturnType<ScheduledNamespace['runs']>, Promise<ScheduledRun[]>> = true;
     const toggle: Equal<ReturnType<ScheduledNamespace['toggle']>, Promise<void>> = true;
     const runNow: Equal<ReturnType<ScheduledNamespace['runNow']>, Promise<void>> = true;
+    const abort: Equal<ReturnType<ScheduledNamespace['abort']>, Promise<void>> = true;
     const remove: Equal<ReturnType<ScheduledNamespace['remove']>, Promise<void>> = true;
     const onChanged: Equal<ReturnType<ScheduledNamespace['onChanged']>, () => void> = true;
-    expect([list, create, update, runs, toggle, runNow, remove, onChanged]).toEqual([
-      true, true, true, true, true, true, true, true,
+    expect([list, create, update, runs, toggle, runNow, abort, remove, onChanged]).toEqual([
+      true, true, true, true, true, true, true, true, true,
     ]);
   });
 });
@@ -65,6 +67,13 @@ describe('scheduled ipc contract (H10)', () => {
   it('update 补丁不接受渲染层 userId', () => {
     const userId: HasKey<ScheduledTaskPatch, 'userId'> = false;
     expect(userId).toBe(false);
+  });
+
+  it('running 是可选的主进程注入视图字段（输入负载不接受）', () => {
+    const tag: Equal<Pick<ScheduledTask, 'running'>, { running?: boolean }> = true;
+    const createInput: HasKey<ScheduledTaskInput, 'running'> = false;
+    const updatePatch: HasKey<ScheduledTaskPatch, 'running'> = false;
+    expect([tag, createInput, updatePatch]).toEqual([true, false, false]);
   });
 
   it('create 负载可表达一次性 / 间隔 / cron 三种调度', () => {

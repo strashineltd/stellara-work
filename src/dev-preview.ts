@@ -151,6 +151,7 @@ let previewScheduledTasks: ScheduledTask[] = [
     scheduleKind: 'cron', scheduleExpr: '0 9 * * *', enabled: true,
     nextRunAt: now + 3_600_000, lastRunAt: now - 43_200_000, lastStatus: 'success',
     allowDangerous: false, createdAt: now - 86_400_000, updatedAt: now - 43_200_000,
+    running: true,
   },
   {
     id: 'scheduled-preview-2', name: '间隔值班',
@@ -573,6 +574,7 @@ export function installDevPreviewApi(): void {
           : task));
       },
       runNow: async () => {},
+      abort: async () => {},
       runs: async (taskId) => previewScheduledRuns.filter((run) => run.taskId === taskId),
       onChanged: () => () => {},
     },
