@@ -2520,6 +2520,7 @@ app.whenReady().then(async () => {
         createSession: db.createSession,
         recordRun: db.recordRun,
         pruneRuns: db.pruneRuns,
+        getScheduledTask: db.getScheduledTask,
         updateScheduledTask: db.updateScheduledTask,
         appendMessage: db.appendMessage,
       },

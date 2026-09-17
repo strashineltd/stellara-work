@@ -92,6 +92,8 @@ interface Harness {
   chatStarts: Array<{ sessionId: string; text: string; model?: { providerID: string; modelID: string }; agent?: string }>;
   chatAborts: string[];
   emit(streamId: string, event: ChatStreamEvent): void;
+  /** 模拟运行期间任务行被编辑 / 删除（完成补丁必须重读该行） */
+  setTaskRow(task: ScheduledTask | null): void;
 }
 
 function createHarness(options: {
@@ -100,6 +102,8 @@ function createHarness(options: {
   isDirectory?: (path: string) => Promise<boolean>;
   createServerSession?: (args: CreateSessionArgs, userId?: string) => Promise<{ id: string }>;
   serverTimeoutMs?: number;
+  /** 任务表当前行（默认 makeTask()；null 表示任务已被删除） */
+  taskRow?: ScheduledTask | null;
 } = {}): Harness {
   const runs = new Map<string, ScheduledRun>();
   const runCalls: ScheduledRun[] = [];
@@ -114,8 +118,10 @@ function createHarness(options: {
   const chatAborts: string[] = [];
   const watchers = new Map<string, Set<(event: ChatStreamEvent) => void>>();
   let seq = 0;
+  let taskRow: ScheduledTask | null = options.taskRow === undefined ? makeTask() : options.taskRow;
 
   const db: RunnerDb = {
+    getScheduledTask: () => taskRow,
     createSession: (input) => {
       localSessions.push({ input });
       return { id: input.id };
@@ -191,6 +197,9 @@ function createHarness(options: {
     chatAborts,
     emit: (streamId, event) => {
       for (const listener of [...(watchers.get(streamId) ?? [])]) listener(event);
+    },
+    setTaskRow: (task) => {
+      taskRow = task;
     },
   };
 }
@@ -294,18 +303,46 @@ describe('runLocalTask', () => {
   });
 
   it('disables a once task after it runs', async () => {
-    const h = createHarness();
     const task = makeTask({
       scheduleKind: 'once',
       scheduleExpr: '2026-01-05T09:00:00.000Z',
       nextRunAt: T0.getTime() + 3_600_000,
     });
+    const h = createHarness({ taskRow: task });
 
     await runLocalTask(task, h.deps);
 
     expect(h.taskPatches).toEqual([
       { id: 't1', patch: { lastRunAt: T0.getTime(), lastStatus: 'success', enabled: false, nextRunAt: null } },
     ]);
+  });
+
+  it('does not overwrite a schedule edit made during the run when completing', async () => {
+    const h = createHarness({ loop: pendingUntilAbortedLoop });
+    const promise = runLocalTask(makeTask(), h.deps);
+    await vi.waitFor(() => expect(isRunning('t1')).toBe(true));
+
+    h.setTaskRow(makeTask({ scheduleExpr: '20' }));
+    abortRun('t1');
+    await promise;
+
+    expect(h.taskPatches).toEqual([
+      { id: 't1', patch: { lastRunAt: T0.getTime(), lastStatus: 'aborted', nextRunAt: T0.getTime() + 20 * 60_000 } },
+    ]);
+  });
+
+  it('skips the lifecycle update when the task was deleted mid-run', async () => {
+    const h = createHarness({ loop: pendingUntilAbortedLoop });
+    const promise = runLocalTask(makeTask(), h.deps);
+    await vi.waitFor(() => expect(isRunning('t1')).toBe(true));
+
+    h.setTaskRow(null);
+    abortRun('t1');
+    const run = await promise;
+
+    expect(run.status).toBe('aborted');
+    expect(h.taskPatches).toEqual([]);
+    expect(h.notifications).toEqual([{ completed: false, failed: false, aborted: true }]);
   });
 
   it('abortRun cancels an in-flight local run', async () => {
@@ -398,7 +435,7 @@ describe('runServerTask', () => {
     expect(h.notifications).toEqual([{ completed: false, failed: false, aborted: true }]);
   });
 
-  it('times out the server run as an error', async () => {
+  it('times out the server run as an error and aborts the remote prompt', async () => {
     vi.useFakeTimers();
     try {
       const h = createHarness({ serverTimeoutMs: 60_000 });
@@ -410,6 +447,7 @@ describe('runServerTask', () => {
 
       expect(run.status).toBe('error');
       expect(run.error).toContain('超时');
+      expect(h.chatAborts).toEqual(['stream-1']);
     } finally {
       vi.useRealTimers();
     }

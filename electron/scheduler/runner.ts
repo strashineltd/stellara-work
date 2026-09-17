@@ -58,6 +58,8 @@ export interface RunnerDb {
   createSession(input: RunnerSessionInput): { id: string };
   recordRun(taskId: string, run: ScheduledRun): void;
   pruneRuns(taskId: string, keep?: number): number;
+  /** 读取任务当前行：完成补丁前重读，避免覆盖运行期间的调度编辑；已被删除返回 null */
+  getScheduledTask(id: string): ScheduledTask | null;
   updateScheduledTask(id: string, patch: SchedulerTaskPatch): unknown;
   appendMessage(message: RunnerMessage): void;
 }
@@ -244,14 +246,19 @@ async function runWithLifecycle(
   deps.db.recordRun(task.id, run);
   deps.db.pruneRuns(task.id, RUN_HISTORY_KEEP);
 
-  const once = task.scheduleKind === 'once';
-  deps.db.updateScheduledTask(task.id, {
-    lastRunAt: startedAt,
-    lastStatus: outcome.status,
-    ...(once
-      ? { enabled: false, nextRunAt: null }
-      : { nextRunAt: computeNextRun(task.scheduleKind, task.scheduleExpr, deps.now())?.getTime() ?? null }),
-  });
+  // 完成补丁前重读任务行：运行期间用户可能已改调度 / 停用（用运行前快照会覆盖这些编辑）；
+  // 任务已被删除时跳过生命周期更新，执行记录与通知照常保留。
+  const current = deps.db.getScheduledTask(task.id);
+  if (current !== null) {
+    const once = current.scheduleKind === 'once';
+    deps.db.updateScheduledTask(task.id, {
+      lastRunAt: startedAt,
+      lastStatus: outcome.status,
+      ...(once
+        ? { enabled: false, nextRunAt: null }
+        : { nextRunAt: computeNextRun(current.scheduleKind, current.scheduleExpr, deps.now())?.getTime() ?? null }),
+    });
+  }
 
   deps.notify({
     completed: outcome.status === 'success',
@@ -381,6 +388,8 @@ function waitForServerTerminal(
       }
     });
     const timer = setTimeout(() => {
+      // 超时后不再等待远端：中止远端提示词，避免会话在服务器上继续空跑（fire-and-forget）
+      void deps.chat.abort(streamId).catch(() => {});
       finish({
         status: 'error',
         sessionId,
