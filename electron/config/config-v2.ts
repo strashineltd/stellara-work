@@ -93,6 +93,8 @@ export interface AppConfig {
     };
     servers?: ServerConfigEntry[];
     defaultServerId?: string | null;
+    /** v0.9.3: 关闭窗口后保持后台运行（调度继续），默认开启 */
+    backgroundScheduling?: boolean;
   };
   mcpServers: McpServerConfig[];
   schemaVersion: 1;
@@ -109,7 +111,13 @@ function defaultConfig(): AppConfig {
 }
 
 // workDirDefault 不带入白名单：工作目录信任只来自原生选择器授权（C2）
-const SETTINGS_PATCH_WHITELIST: readonly string[] = ['shortcuts', 'theme', 'workspaceMode', 'browser'];
+const SETTINGS_PATCH_WHITELIST: readonly string[] = [
+  'shortcuts',
+  'theme',
+  'workspaceMode',
+  'browser',
+  'backgroundScheduling',
+];
 
 /**
  * 过滤 settings:update 的越权字段：仅保留白名单键。

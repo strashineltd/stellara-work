@@ -90,6 +90,12 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
     onChanged?.();
   }
 
+  function applyBackgroundScheduling(enabled: boolean) {
+    setSettings((s) => ({ ...s, backgroundScheduling: enabled }));
+    void window.electronAPI.settings.update({ backgroundScheduling: enabled });
+    onChanged?.();
+  }
+
   async function handleCopyDiagnostics() {
     setCopyingDiag(true);
     try {
@@ -117,6 +123,7 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
 
   const theme = settings.theme ?? 'dark';
   const workspaceMode = settings.workspaceMode ?? 'sidebar';
+  const backgroundScheduling = settings.backgroundScheduling !== false;
 
   return (
     <div className="settings-panel-root">
@@ -179,6 +186,21 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
                 </button>
               ))}
             </div>
+          </div>
+          <div className="settings-item">
+            <div className="settings-item__grow">
+              <div className="settings-item__label">关闭窗口后保持后台运行（调度继续）</div>
+              <div className="settings-item__hint">关闭主窗口后驻留系统托盘，调度任务照常执行</div>
+            </div>
+            <button
+              className={`settings-switch ${backgroundScheduling ? 'on' : ''}`}
+              role="switch"
+              aria-checked={backgroundScheduling}
+              aria-label="关闭窗口后保持后台运行（调度继续）"
+              title={backgroundScheduling ? '关闭后退出应用' : '关闭后驻留托盘，调度继续'}
+              onClick={() => applyBackgroundScheduling(!backgroundScheduling)}
+              type="button"
+            />
           </div>
         </div>
       </div>

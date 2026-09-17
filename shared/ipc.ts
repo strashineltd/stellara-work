@@ -683,6 +683,8 @@ export interface AppSettings {
   theme?: ThemeName;
   /** 工作区模式：sidebar（紧凑 sidebar）或 tabs（Tab 栏） */
   workspaceMode?: 'sidebar' | 'tabs';
+  /** 关闭窗口后保持后台运行（调度继续），默认开启 */
+  backgroundScheduling?: boolean;
   /** 默认服务器 id（只读：仅能经 servers:setDefault 修改） */
   defaultServerId?: string | null;
   // 预留：language

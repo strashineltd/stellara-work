@@ -21,6 +21,7 @@ import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engi
 import { enableNextRunAt, nextRunPatchForUpdate } from './scheduler/next-run';
 import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
 import { installAppMenu } from './menu';
+import { createAppTray, shouldHideOnClose, type TrayHandle } from './tray';
 import { notifyTaskEnd } from './notifications';
 import { isMainWindowWebContents, isSafeExternalUrl, isSameOrigin } from './security/url-guard';
 import { isTrustedIpcSender } from './security/ipc-guard';
@@ -72,6 +73,13 @@ log.initialize();
 log.info('Stellara Work 启动中...');
 
 let mainWindow: BrowserWindow | null = null;
+
+// v0.9.3: 托盘驻留 —— 退出中标志（Cmd+Q / 托盘「退出」在 before-quit 置位，放行 close 拦截）
+let isQuitting = false;
+// v0.9.3: close 事件必须同步判断，故缓存 backgroundScheduling（启动与 settings:update 时刷新）
+let backgroundSchedulingEnabled = true;
+// v0.9.3: 系统托盘（app.whenReady 后创建，退出流程销毁）
+let appTray: TrayHandle | null = null;
 
 // M2.4: open-file 事件在窗口创建前到达时暂存，窗口就绪后处理
 let pendingOpenFile: string | null = null;
@@ -169,6 +177,16 @@ function broadcastIdentityChanged(identity: LocalIdentity): void {
 function broadcastScheduledChanged(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('scheduled:changed');
+  }
+}
+
+/** v0.9.3：刷新 close 拦截缓存的 backgroundScheduling（清空数据后配置回到默认，未设置视为开启） */
+async function refreshBackgroundSchedulingCache(): Promise<void> {
+  try {
+    const { loadConfig } = await import('./config/config-v2');
+    backgroundSchedulingEnabled = (await loadConfig()).app.backgroundScheduling !== false;
+  } catch (err) {
+    log.warn('刷新 backgroundScheduling 缓存失败（沿用当前值）', err);
   }
 }
 
@@ -296,6 +314,13 @@ function createWindow(): void {
       log.warn(`blocked window.open for unsafe url: ${url}`);
     }
     return { action: 'deny' };
+  });
+
+  // v0.9.3: 托盘驻留（P12）—— 开启后台调度时关闭窗口改为隐藏；退出流程（Cmd+Q / 托盘退出）放行
+  mainWindow.on('close', (event) => {
+    if (!shouldHideOnClose(backgroundSchedulingEnabled, isQuitting)) return;
+    event.preventDefault();
+    mainWindow?.hide();
   });
 
   mainWindow.on('closed', () => {
@@ -995,6 +1020,8 @@ function registerIpcHandlers(): void {
     const cfg = await loadConfig();
     cfg.app = { ...cfg.app, ...patch };
     await saveConfig(cfg);
+    // v0.9.3: close 拦截需同步判断，缓存最新值（未设置视为开启）
+    backgroundSchedulingEnabled = cfg.app.backgroundScheduling !== false;
     broadcastSettingsChanged();
   });
 
@@ -1007,6 +1034,7 @@ function registerIpcHandlers(): void {
     } catch (e) {
       log.warn('清理浏览器分区失败（忽略）', e);
     }
+    await refreshBackgroundSchedulingCache();
     broadcastSettingsChanged();
   });
 
@@ -1022,6 +1050,7 @@ function registerIpcHandlers(): void {
       } catch (e) {
         log.warn('清理浏览器分区失败（忽略）', e);
       }
+      await refreshBackgroundSchedulingCache();
       broadcastSettingsChanged();
       return { cleared: 'all' as const };
     }
@@ -2658,13 +2687,15 @@ app.whenReady().then(async () => {
   mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(mainWindow, cfg));
 
   registerIpcHandlers();
+  // v0.9.3: 托盘驻留 —— close 事件同步读取配置，先加载并缓存（未设置视为开启）
+  const { loadConfig } = await import('./config/config-v2');
+  const cfg0 = await loadConfig();
+  backgroundSchedulingEnabled = cfg0.app?.backgroundScheduling !== false;
   createWindow();
   installAppMenu(() => mainWindow);
 
   // 浏览器：启动时注入 execJsEnabled（Agent 执行 browser_exec_js 的开关）
-  const { loadConfig } = await import('./config/config-v2');
   const { browserService } = await import('./browser/service');
-  const cfg0 = await loadConfig();
   browserService.setExecJsEnabled(cfg0.app?.browser?.execJsEnabled);
   // 单分区清理失败只记日志不阻断（Spec §5）。service.ts 不直接依赖 electron-log：
   // 其顶层 require('electron') 会破坏 vitest，日志回调在此注入。
@@ -2705,10 +2736,42 @@ app.whenReady().then(async () => {
 
   // v0.9.3: 调度器启动（错过补偿先于引擎启动，避免引擎二次触发过期任务）
   void schedulerRuntime?.reload();
+
+  // v0.9.3: 系统托盘驻留（P11/P12/P13）—— 左键开窗，右键菜单（暂停/恢复调度仅内存态）
+  try {
+    appTray = createAppTray({
+      onOpen: () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          createWindow();
+        } else {
+          focusMainWindow();
+        }
+      },
+      onTogglePause: () => {
+        if (!schedulerRuntime) return;
+        if (schedulerRuntime.isPaused()) {
+          schedulerRuntime.resume();
+        } else {
+          schedulerRuntime.pause();
+        }
+        appTray?.refreshMenu();
+      },
+      onQuit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+      // 调度器初始化失败时视为未暂停
+      isPaused: () => schedulerRuntime?.isPaused() ?? false,
+    });
+  } catch (err) {
+    log.error('托盘创建失败', err);
+  }
 });
 
 let browserQuitCleanupDone = false;
 app.on('before-quit', (e) => {
+  // v0.9.3: 进入退出流程后放行 close 拦截（Cmd+Q / 托盘退出必须真正退出）
+  isQuitting = true;
   if (browserQuitCleanupDone) return;
   e.preventDefault();
   browserQuitCleanupDone = true;
@@ -2722,6 +2785,8 @@ app.on('before-quit', (e) => {
     } catch (err) {
       log.warn('退出时清理 Cookie 失败（忽略）', err);
     } finally {
+      appTray?.destroy();
+      appTray = null;
       app.quit();
     }
   })();
@@ -2749,6 +2814,9 @@ app.on('activate', () => {
       mainWindow?.webContents.send('menu:action', 'open-path:' + pendingOpenFile);
       pendingOpenFile = null;
     }
+  } else {
+    // v0.9.3: 关闭窗口改为隐藏后，点 Dock 图标需重新显示（窗口仍存在但已隐藏）
+    focusMainWindow();
   }
 });
 
