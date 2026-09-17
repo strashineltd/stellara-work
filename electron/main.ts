@@ -18,7 +18,7 @@ import { ServerManager } from './server/server-manager';
 import { SessionBridge, type RemoteSessionUpdate } from './server/session-bridge';
 import { ServerChatBridge } from './server/chat-bridge';
 import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engine';
-import { abortRun, executeTask, type SchedulerRunnerDeps } from './scheduler/runner';
+import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
 import { isMainWindowWebContents, isSafeExternalUrl, isSameOrigin } from './security/url-guard';
@@ -2496,7 +2496,8 @@ app.whenReady().then(async () => {
     };
 
     const engine = new SchedulerEngine({
-      listDue: () => db.listScheduledTasks(getActiveUserId()),
+      // 运行中的任务 nextRunAt 尚未推进，必须过滤：任何重排都不能重复触发同一到期周期
+      listDue: () => db.listScheduledTasks(getActiveUserId()).filter((task) => !isRunning(task.id)),
       onFire: async (task) => {
         try {
           await executeTask(task, runnerDeps);
@@ -2515,7 +2516,8 @@ app.whenReady().then(async () => {
     const reload = async (): Promise<void> => {
       engine.stop();
       const userId = getActiveUserId();
-      const tasks = db.listScheduledTasks(userId);
+      // 运行中的任务不算「错过」（其补偿/推进由当前运行的生命周期负责）
+      const tasks = db.listScheduledTasks(userId).filter((task) => !isRunning(task.id));
       const nowDate = now();
       for (const task of computeMissed(tasks, nowDate)) {
         db.recordRun(task.id, {
@@ -2538,16 +2540,16 @@ app.whenReady().then(async () => {
     schedulerRuntime = {
       reload,
       runNow: async (taskId) => {
-        const task = db.getScheduledTask(taskId);
-        if (!task) throw new Error('任务不存在或已被删除');
+        // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
+        const task = db.assertScheduledTaskOwned(taskId, getActiveUserId());
         // 后台执行：不阻塞 IPC / 托盘调用方（T4 广播 scheduled:changed 刷新列表）
         void executeTask(task, runnerDeps)
           .catch((err) => log.error('[scheduler] 立即运行失败', taskId, err))
           .finally(() => engine.reschedule());
       },
       toggle: async (taskId) => {
-        const task = db.getScheduledTask(taskId);
-        if (!task) throw new Error('任务不存在或已被删除');
+        // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
+        const task = db.assertScheduledTaskOwned(taskId, getActiveUserId());
         if (task.enabled) {
           db.updateScheduledTask(taskId, { enabled: false, nextRunAt: null });
         } else {

@@ -4,6 +4,7 @@ import {
   _resetActiveRunsForTests,
   abortRun,
   executeTask,
+  isRunning,
   runLocalTask,
   runServerTask,
   type LocalLoopRequest,
@@ -14,6 +15,7 @@ import {
   type SchedulerTaskPatch,
   type TaskEndNotificationState,
 } from './runner';
+import { SchedulerEngine } from './engine';
 
 const T0 = new Date('2026-01-05T08:00:00.000Z');
 
@@ -411,6 +413,69 @@ describe('runServerTask', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('in-flight protection (duplicate re-fire)', () => {
+  it('isRunning reflects in-flight tasks and clears after completion', async () => {
+    const h = createHarness({ loop: pendingUntilAbortedLoop });
+    const promise = runLocalTask(makeTask(), h.deps);
+    await vi.waitFor(() => expect(isRunning('t1')).toBe(true));
+    expect(isRunning('t2')).toBe(false);
+
+    abortRun('t1');
+    await promise;
+
+    expect(isRunning('t1')).toBe(false);
+  });
+
+  it('does not re-fire a still-running task when the heap is rebuilt', async () => {
+    const h = createHarness({ loop: pendingUntilAbortedLoop });
+    const task = makeTask({ nextRunAt: T0.getTime() - 60_000 });
+    const timers: Array<() => void> = [];
+    const setTimer = vi.fn((fn: () => void) => {
+      timers.push(fn);
+      return timers.length;
+    });
+    const clearTimer = vi.fn();
+    const fired: string[] = [];
+    let running: Promise<unknown> | undefined;
+
+    const engine = new SchedulerEngine({
+      // 与 main.ts 接线一致：重排前过滤运行中的任务
+      listDue: () => [task].filter((candidate) => !isRunning(candidate.id)),
+      onFire: async (firedTask) => {
+        fired.push(firedTask.id);
+        try {
+          running = runLocalTask(firedTask, h.deps);
+          await running;
+        } finally {
+          engine.reschedule();
+        }
+      },
+      now: () => new Date(T0),
+      setTimer,
+      clearTimer,
+    });
+
+    engine.start();
+    expect(setTimer).toHaveBeenCalledTimes(1);
+
+    // 到点触发一次（定时器只有一个，且指向过期任务）
+    timers[0]!();
+    await vi.waitFor(() => expect(isRunning('t1')).toBe(true));
+    expect(fired).toEqual(['t1']);
+
+    // 运行期间重建堆（等价于其它任务完成 / runNow / toggle / reload）：不得重排该任务
+    engine.reschedule();
+    expect(setTimer).toHaveBeenCalledTimes(1);
+    expect(fired).toEqual(['t1']);
+
+    abortRun('t1');
+    await running;
+    engine.stop();
+    expect(isRunning('t1')).toBe(false);
+    expect(fired).toEqual(['t1']);
   });
 });
 

@@ -150,6 +150,15 @@ export function abortRun(taskId: string): boolean {
   return true;
 }
 
+/**
+ * 任务是否正在运行。运行期间其 DB 行的 nextRunAt 仍是过去值，因此调用方在
+ * 重排 / 错过补偿前必须用它过滤，否则同一个到期周期会被重复触发（并发会话 / 通知，
+ * once 任务还会重复执行）。
+ */
+export function isRunning(taskId: string): boolean {
+  return activeRuns.has(taskId);
+}
+
 /** 仅供测试：清空进行中运行登记（模块级状态） */
 export function _resetActiveRunsForTests(): void {
   activeRuns.clear();
