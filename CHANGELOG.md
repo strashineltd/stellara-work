@@ -2,11 +2,21 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.9.3.2] - 2026-09-14
 
 ### Added · 新增
 
 - 本地身份数据隔离：项目/会话/记忆按身份隔离，默认档与多用户切换（运行中切换需确认）
+- 上下文压缩与 checkpoint 恢复：迭代边界同步压缩（软/硬阈值）、准确 Token 预算、单条工具输出上限、事件溯源前缀指针与崩溃幂等恢复，压缩与 checkpoint 在 UI 可见
+
+### Security · 安全
+
+- `web_fetch` 连接期 IP Pinning：自定义 undici 连接 lookup 在 TCP 建连时校验真实 Socket IP，私网/保留 IP 与云元数据即时拒绝，封堵 DNS Rebinding 时间窗
+- MCP HTTP 服务器：拦截云元数据地址，并封堵 IPv4-mapped/compatible IPv6 字面量（`[::ffff:a9fe:a9fe]` 等）绕过
+- `run_command`：移除 `awk`；`sed` 拦截 `-i`/`--in-place` 就地写（含 `-ni`、`-i.bak` 与 GNU 长选项缩写 `--i`/`--in-p`）
+- macOS：启用 hardened runtime 并关联主进程/子进程 entitlements（为后续公证做准备）
+- 全局阻断 `<webview>` 标签附加
+- safeStorage 不可用时（含 Linux `basic_text`），设置 → 模型面板显示「凭据明文存储」警示横幅
 
 ## [0.9.2.1] - 2026-09-10
 
