@@ -80,6 +80,11 @@ describe('computeNextRun', () => {
     expect(computeNextRun('interval', '', T0)).toBeNull();
   });
 
+  it('returns null when the computed interval overflows the Date range', () => {
+    expect(computeNextRun('interval', '999999999999999', T0)).toBeNull();
+    expect(computeNextRun('interval', '1e300', T0)).toBeNull();
+  });
+
   it('finds the next minute for an every-minute cron expression regardless of timezone', () => {
     expect(computeNextRun('cron', '* * * * *', T0)?.toISOString()).toBe('2026-01-05T08:01:00.000Z');
   });

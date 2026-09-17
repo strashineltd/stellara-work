@@ -27,7 +27,8 @@ export function computeNextRun(
   if (kind === 'interval') {
     const minutes = Number(expr);
     if (!Number.isFinite(minutes) || minutes <= 0) return null;
-    return new Date(from.getTime() + minutes * 60_000);
+    const next = new Date(from.getTime() + minutes * 60_000);
+    return Number.isFinite(next.getTime()) ? next : null;
   }
   try {
     return new Cron(expr).nextRun(from);
