@@ -18,6 +18,7 @@ import { ServerManager } from './server/server-manager';
 import { SessionBridge, type RemoteSessionUpdate } from './server/session-bridge';
 import { ServerChatBridge } from './server/chat-bridge';
 import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engine';
+import { enableNextRunAt, nextRunPatchForUpdate } from './scheduler/next-run';
 import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
 import { installAppMenu } from './menu';
 import { notifyTaskEnd } from './notifications';
@@ -1303,25 +1304,9 @@ function registerIpcHandlers(): void {
   handle('scheduled:update', async (_e, id: string, patch: ScheduledTaskPatch): Promise<ScheduledTask> => {
     const db = await import('./store/db');
     const current = db.assertScheduledTaskOwned(id, getActiveUserId());
-    const next: ScheduledTaskPatch & { nextRunAt?: number | null } = { ...patch };
-    const scheduleChanged =
-      (patch.scheduleKind !== undefined && patch.scheduleKind !== current.scheduleKind) ||
-      (patch.scheduleExpr !== undefined && patch.scheduleExpr !== current.scheduleExpr);
-    const enabledChanged = patch.enabled !== undefined && patch.enabled !== current.enabled;
-    if ((patch.enabled ?? current.enabled) === false) {
-      // P19：停用时清空排期
-      if (enabledChanged || scheduleChanged) next.nextRunAt = null;
-    } else if (enabledChanged || scheduleChanged) {
-      // P19：启用 / 改排期时重算；非法表达式拒绝
-      const nextRunAt = computeNextRun(
-        patch.scheduleKind ?? current.scheduleKind,
-        patch.scheduleExpr ?? current.scheduleExpr,
-        new Date(),
-      );
-      if (!nextRunAt) throw new Error('调度表达式无效或时间已过，请检查后重试');
-      next.nextRunAt = nextRunAt.getTime();
-    }
-    const task = db.updateScheduledTask(id, next);
+    // P19：排期 / 启停变化时无条件校验表达式（含停用操作），再按最终启用状态落 nextRunAt
+    const recalc = nextRunPatchForUpdate(current, patch, new Date());
+    const task = db.updateScheduledTask(id, recalc.changed ? { ...patch, nextRunAt: recalc.nextRunAt } : patch);
     broadcastScheduledChanged();
     return task;
   });
@@ -2641,10 +2626,13 @@ app.whenReady().then(async () => {
         if (task.enabled) {
           db.updateScheduledTask(taskId, { enabled: false, nextRunAt: null });
         } else {
-          db.updateScheduledTask(taskId, {
-            enabled: true,
-            nextRunAt: computeNextRun(task.scheduleKind, task.scheduleExpr, now())?.getTime() ?? null,
-          });
+          // P21：无法算出下一次运行时间时保持停用（不制造 enabled 却永不触发的死任务）
+          const nextRunAt = enableNextRunAt(task, now());
+          if (nextRunAt === null) {
+            log.warn('[scheduler] 任务无法排期，保持停用', taskId);
+          } else {
+            db.updateScheduledTask(taskId, { enabled: true, nextRunAt });
+          }
         }
         engine.reschedule();
       },
