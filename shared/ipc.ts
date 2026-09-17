@@ -932,6 +932,39 @@ export interface ScheduledRun {
   userId?: string;
 }
 
+/**
+ * 新建任务的渲染层负载：id / userId / nextRunAt 一律由主进程注入，
+ * 渲染层不得提供（P19 / H10）。
+ */
+export interface ScheduledTaskInput {
+  name: string;
+  prompt: string;
+  projectId?: string;
+  workDir?: string;
+  runtime: 'local' | 'server';
+  serverId?: string;
+  modelId?: string;
+  scheduleKind: ScheduledTaskKind;
+  scheduleExpr: string;
+  enabled?: boolean;
+  allowDangerous?: boolean;
+}
+
+/** 局部更新任务（不含 userId；归属由主进程按活动身份校验） */
+export interface ScheduledTaskPatch {
+  name?: string;
+  prompt?: string;
+  projectId?: string | null;
+  workDir?: string | null;
+  runtime?: 'local' | 'server';
+  serverId?: string | null;
+  modelId?: string | null;
+  scheduleKind?: ScheduledTaskKind;
+  scheduleExpr?: string;
+  enabled?: boolean;
+  allowDangerous?: boolean;
+}
+
 // ============================================
 // W4: 文件树 / 文件预览
 // ============================================
@@ -1344,6 +1377,18 @@ export interface ElectronAPI {
     switch: (userId: string, force?: boolean) => Promise<IdentitySwitchResult>;
     /** 监听身份变更（payload 为新身份）。返回取消监听函数。 */
     onChanged: (callback: (user: LocalIdentity) => void) => () => void;
+  };
+  /** 已安排（调度器，v0.9.3）：数据按活动身份隔离，变更广播 `scheduled:changed` */
+  scheduled: {
+    list: () => Promise<ScheduledTask[]>;
+    create: (input: ScheduledTaskInput) => Promise<ScheduledTask>;
+    update: (id: string, patch: ScheduledTaskPatch) => Promise<ScheduledTask>;
+    remove: (id: string) => Promise<void>;
+    toggle: (id: string) => Promise<void>;
+    runNow: (id: string) => Promise<void>;
+    runs: (taskId: string) => Promise<ScheduledRun[]>;
+    /** 监听任务/执行记录变更（唯一事件 `scheduled:changed`）。返回取消监听函数。 */
+    onChanged: (callback: () => void) => () => void;
   };
 }
 

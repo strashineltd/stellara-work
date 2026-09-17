@@ -57,6 +57,10 @@ import type {
   ServerProvidersResult,
   ServerVcsResult,
   ServerAgentSummary,
+  ScheduledRun,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskPatch,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -157,6 +161,13 @@ function broadcastSettingsChanged(): void {
 function broadcastIdentityChanged(identity: LocalIdentity): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('identity-changed', identity);
+  }
+}
+
+/** v0.9.3：调度任务变更 / 执行完成后广播（P20，渲染层刷新已安排列表） */
+function broadcastScheduledChanged(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('scheduled:changed');
   }
 }
 
@@ -1266,6 +1277,79 @@ function registerIpcHandlers(): void {
       userId,
       force,
     );
+  });
+
+  // v0.9.3 已安排（调度器）：读取一律按活动身份隔离，id 操作先校验归属（H10）。
+  handle('scheduled:list', async (): Promise<ScheduledTask[]> => {
+    const db = await import('./store/db');
+    return db.listScheduledTasks(getActiveUserId());
+  });
+
+  handle('scheduled:create', async (_e, input: ScheduledTaskInput): Promise<ScheduledTask> => {
+    const [db, { v4: uuid }] = await Promise.all([import('./store/db'), import('uuid')]);
+    // P19：排期非法 / once 时间已过一律拒绝；id / userId / nextRunAt 由主进程注入
+    const nextRunAt = computeNextRun(input.scheduleKind, input.scheduleExpr, new Date());
+    if (!nextRunAt) throw new Error('调度表达式无效或时间已过，请检查后重试');
+    const task = db.createScheduledTask({
+      ...input,
+      id: uuid(),
+      userId: getActiveUserId(),
+      nextRunAt: nextRunAt.getTime(),
+    });
+    broadcastScheduledChanged();
+    return task;
+  });
+
+  handle('scheduled:update', async (_e, id: string, patch: ScheduledTaskPatch): Promise<ScheduledTask> => {
+    const db = await import('./store/db');
+    const current = db.assertScheduledTaskOwned(id, getActiveUserId());
+    const next: ScheduledTaskPatch & { nextRunAt?: number | null } = { ...patch };
+    const scheduleChanged =
+      (patch.scheduleKind !== undefined && patch.scheduleKind !== current.scheduleKind) ||
+      (patch.scheduleExpr !== undefined && patch.scheduleExpr !== current.scheduleExpr);
+    const enabledChanged = patch.enabled !== undefined && patch.enabled !== current.enabled;
+    if ((patch.enabled ?? current.enabled) === false) {
+      // P19：停用时清空排期
+      if (enabledChanged || scheduleChanged) next.nextRunAt = null;
+    } else if (enabledChanged || scheduleChanged) {
+      // P19：启用 / 改排期时重算；非法表达式拒绝
+      const nextRunAt = computeNextRun(
+        patch.scheduleKind ?? current.scheduleKind,
+        patch.scheduleExpr ?? current.scheduleExpr,
+        new Date(),
+      );
+      if (!nextRunAt) throw new Error('调度表达式无效或时间已过，请检查后重试');
+      next.nextRunAt = nextRunAt.getTime();
+    }
+    const task = db.updateScheduledTask(id, next);
+    broadcastScheduledChanged();
+    return task;
+  });
+
+  handle('scheduled:remove', async (_e, id: string): Promise<void> => {
+    const db = await import('./store/db');
+    db.assertScheduledTaskOwned(id, getActiveUserId());
+    db.deleteScheduledTask(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:toggle', async (_e, id: string): Promise<void> => {
+    // 调度器初始化失败（schedulerRuntime 为空）时降级为明确错误
+    if (!schedulerRuntime) throw new Error('调度器未初始化，无法切换任务');
+    await schedulerRuntime.toggle(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:runNow', async (_e, id: string): Promise<void> => {
+    if (!schedulerRuntime) throw new Error('调度器未初始化，无法立即运行');
+    await schedulerRuntime.runNow(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:runs', async (_e, taskId: string): Promise<ScheduledRun[]> => {
+    const db = await import('./store/db');
+    db.assertScheduledTaskOwned(taskId, getActiveUserId());
+    return db.listRuns(taskId, 20);
   });
 
   // 云账号体系（Phase 3 · 腾讯云 CloudBase）
@@ -2490,7 +2574,11 @@ app.whenReady().then(async () => {
           return false;
         }
       },
-      notify: (state) => notifyTaskEnd(state, () => focusMainWindow()),
+      // P20：执行记录落库后广播（notify 在 recordRun / updateScheduledTask 之后调用）
+      notify: (state) => {
+        notifyTaskEnd(state, () => focusMainWindow());
+        broadcastScheduledChanged();
+      },
       uuid,
       now,
     };
