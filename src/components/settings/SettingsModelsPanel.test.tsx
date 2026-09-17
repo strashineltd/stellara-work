@@ -46,7 +46,10 @@ const MODELS: ModelListItem[] = [
   },
 ];
 
-function installApi(models: ModelListItem[] = MODELS) {
+function installApi(
+  models: ModelListItem[] = MODELS,
+  secretStorage: 'encrypted' | 'plaintext' = 'encrypted',
+) {
   const mocks = {
     list: vi.fn().mockResolvedValue({ presets: PRESETS, configured: null }),
     getAll: vi.fn().mockResolvedValue(models),
@@ -61,7 +64,13 @@ function installApi(models: ModelListItem[] = MODELS) {
   Object.defineProperty(window, 'electronAPI', {
     value: {
       app: {
-        getInfo: vi.fn().mockResolvedValue({ version: '0.9.0-test', platform: 'darwin', appDataPath: '/tmp', envPath: '/tmp' }),
+        getInfo: vi.fn().mockResolvedValue({
+          version: '0.9.0-test',
+          platform: 'darwin',
+          appDataPath: '/tmp',
+          envPath: '/tmp',
+          secretStorage,
+        }),
         onSettingsChanged: vi.fn().mockReturnValue(() => {}),
       },
       models: mocks,
@@ -222,5 +231,18 @@ describe('SettingsModelsPanel', () => {
     const dangerDelete = container.querySelectorAll('.settings-danger-zone .btn-danger')[0];
     await fireClick(dangerDelete);
     expect(mocks.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a plaintext-storage warning when safeStorage is unavailable', async () => {
+    installApi(MODELS, 'plaintext');
+    const { container } = await render(<SettingsModelsPanel onChanged={vi.fn()} />);
+    const banner = byText(container, '明文存储');
+    expect(banner).toBeTruthy();
+    expect(banner?.textContent).toContain('系统加密服务');
+  });
+
+  it('hides the plaintext-storage warning when encryption is available', async () => {
+    const { container } = await render(<SettingsModelsPanel onChanged={vi.fn()} />);
+    expect(byText(container, '明文存储')).toBeNull();
   });
 });

@@ -26,6 +26,7 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [presets, setPresets] = useState<ModelPreset[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [secretStorage, setSecretStorage] = useState<'encrypted' | 'plaintext' | null>(null);
 
   const [showSwitch, setShowSwitch] = useState(false);
 
@@ -47,12 +48,14 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
   useEffect(() => {
     void (async () => {
       try {
-        const [m, list] = await Promise.all([
+        const [m, list, info] = await Promise.all([
           window.electronAPI.models.getAll(),
           window.electronAPI.models.list(),
+          window.electronAPI.app.getInfo(),
         ]);
         setModels(m);
         setPresets(list.presets);
+        setSecretStorage(info.secretStorage);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -176,6 +179,20 @@ export function SettingsModelsPanel({ onChanged, refreshKey = 0 }: SettingsModel
         <div className="error-banner" role="alert">
           <span className="error-icon"><Icon name="alert" size={17} /></span>
           <div className="error-text">{error}</div>
+        </div>
+      )}
+
+      {secretStorage === 'plaintext' && (
+        <div className="error-banner" role="alert">
+          <span className="error-icon"><Icon name="alert" size={17} /></span>
+          <div>
+            <div className="error-text">
+              当前运行环境缺少系统加密服务，API key 以受限权限明文存储（仅当前用户可读）。
+            </div>
+            <div className="error-banner-hint">
+              建议配置系统凭据服务（如 Linux 的 gnome-keyring / kwallet）后重新保存密钥。
+            </div>
+          </div>
         </div>
       )}
 

@@ -11,6 +11,7 @@ const INFO: AppInfo = {
   platform: 'win32',
   appDataPath: 'C:/stellara',
   envPath: 'C:/stellara/.env',
+  secretStorage: 'encrypted',
 };
 
 const CONFIG: ConfiguredModel = {

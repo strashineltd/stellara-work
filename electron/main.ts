@@ -270,11 +270,13 @@ function registerIpcHandlers(): void {
   handle('app:getInfo', async (): Promise<AppInfo> => {
     const appDataPath = app.getPath('userData');
     await fs.mkdir(appDataPath, { recursive: true });
+    const { isEncryptionEnabled } = await import('./config/secrets');
     return {
       version: app.getVersion(),
       platform: process.platform,
       appDataPath,
       envPath: getEnvPath(),
+      secretStorage: isEncryptionEnabled() ? 'encrypted' : 'plaintext',
     };
   });
 

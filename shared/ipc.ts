@@ -483,6 +483,11 @@ export interface AppInfo {
   platform: NodeJS.Platform;
   appDataPath: string;
   envPath: string;
+  /**
+   * 密钥存储模式：encrypted = 系统加密可用（safeStorage/DPAPI）；
+   * plaintext = 降级明文（.env 权限 0600，仅当前用户可读）。
+   */
+  secretStorage: 'encrypted' | 'plaintext';
 }
 
 // ============================================
