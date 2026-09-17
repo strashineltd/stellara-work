@@ -277,6 +277,18 @@ describe('McpManager', () => {
     });
   });
 
+  describe('cloud metadata guard wiring', () => {
+    it('addServer/testConnection 拒绝 IPv6 映射形式的云元数据地址', async () => {
+      const metaUrl = 'http://[::ffff:169.254.169.254]/mcp';
+      await expect(mcpManager.addServer({ ...httpCfg, url: metaUrl })).rejects.toThrow(/云元数据/);
+      expect(await mcpManager.listServers()).toEqual([]);
+      const res = await mcpManager.testConnection({ ...httpCfg, url: metaUrl });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain('云元数据');
+      expect(mockClient).not.toHaveBeenCalled();
+    });
+  });
+
   it('removeServer removes by id and tolerates missing id', async () => {
     await seed(stdioCfg);
     await mcpManager.removeServer('s1');

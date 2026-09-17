@@ -259,6 +259,23 @@ describe('checkMcpHttpUrl', () => {
     expect(checkMcpHttpUrl('http://instance-data/').ok).toBe(false);
   });
 
+  it('rejects IPv4-mapped/compatible IPv6 metadata literals (final review)', () => {
+    for (const url of [
+      'http://[::ffff:169.254.169.254]/latest/meta-data',
+      'http://[::ffff:a9fe:a9fe]/',
+      'http://[::169.254.169.254]/latest/meta-data',
+      'http://[::a9fe:a9fe]/',
+    ]) {
+      expect(checkMcpHttpUrl(url).ok, url).toBe(false);
+    }
+  });
+
+  it('still allows mapped/compatible IPv6 literals for local dev and public hosts', () => {
+    for (const url of ['http://[::ffff:127.0.0.1]/', 'http://[::7f00:1]/', 'http://[::ffff:8.8.8.8]/']) {
+      expect(checkMcpHttpUrl(url).ok, url).toBe(true);
+    }
+  });
+
   it('rejects non-http/https protocols', () => {
     expect(checkMcpHttpUrl('ftp://example.com/mcp').ok).toBe(false);
     expect(checkMcpHttpUrl('file:///etc/passwd').ok).toBe(false);
