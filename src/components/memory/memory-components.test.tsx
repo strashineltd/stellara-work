@@ -18,6 +18,7 @@ function makeMemory(overrides: Partial<Memory> = {}): Memory {
     importance: 0.5,
     confidence: 0.9,
     accessCount: 3,
+    userId: 'default',
     createdAt: Date.now() - DAY,
     updatedAt: Date.now() - DAY,
     ...overrides,

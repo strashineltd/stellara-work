@@ -82,16 +82,12 @@ export function initLocalUsers(): void {
     db.prepare('DELETE FROM active_local_user').run();
   }
 
-  // 已有用户但激活行丢失 → 复活最早创建的那个
-  const existing = db
-    .prepare('SELECT id FROM local_users ORDER BY created_at ASC LIMIT 1')
-    .get() as IdRow | undefined;
-  if (existing) {
-    db.prepare('INSERT INTO active_local_user (id) VALUES (?)').run(existing.id);
-    return;
-  }
+  // 已有用户但无激活行 → H10 起视为「本地默认」档：不再自动复活历史用户，
+  // 否则用户切回默认档后重启会被悄悄拉回某个本地身份。
+  const existing = db.prepare('SELECT id FROM local_users LIMIT 1').get() as IdRow | undefined;
+  if (existing) return;
 
-  // 全新安装 → 创建默认用户
+  // 全新安装 → 创建首个本地用户（云账号绑定等流程需要可用主体）
   const id = uuid();
   const now = Date.now();
   const tx = db.transaction(() => {
@@ -101,6 +97,13 @@ export function initLocalUsers(): void {
     db.prepare('INSERT INTO active_local_user (id) VALUES (?)').run(id);
   });
   tx();
+}
+
+/** 按 id 取本地用户；不存在返回 null */
+export function getLocalUser(id: string): LocalUser | null {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM local_users WHERE id = ?').get(id) as LocalUserRow | undefined;
+  return row ? rowToUser(row) : null;
 }
 
 /** 当前激活的本地用户；极端情况下（表未初始化）返回 null */
@@ -174,4 +177,10 @@ export function switchLocalUser(id: string): LocalUser {
   tx();
 
   return rowToUser(row);
+}
+
+/** 清空激活身份：回到「本地默认」档（H10，默认档是虚拟档案，不写 local_users） */
+export function clearActiveLocalUser(): void {
+  const db = getDb();
+  db.prepare('DELETE FROM active_local_user').run();
 }

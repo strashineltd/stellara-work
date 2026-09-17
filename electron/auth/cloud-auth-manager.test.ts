@@ -6,6 +6,7 @@ import os from 'node:os';
 const { sdkAuth, resetCloudClientMock, logInfoMock, logWarnMock } = vi.hoisted(() => ({
   sdkAuth: {
     signOut: vi.fn(async () => ({ error: null })),
+    signUp: vi.fn(),
     signInWithPassword: vi.fn(),
     setSession: vi.fn(),
     getUser: vi.fn(),
@@ -30,11 +31,13 @@ vi.mock('../cloud/cloudbase-client', () => ({
   }),
 }));
 
-import { cloudAuth } from './cloud-auth-manager';
+import { cloudAuth, requireRealIdentityForCloud } from './cloud-auth-manager';
 import { _setDbPath, getDb } from '../store/db';
-import { createLocalUser, getCurrentLocalUser, initLocalUsers, switchLocalUser } from '../store/local-users';
+import { clearActiveLocalUser, createLocalUser, getCurrentLocalUser, initLocalUsers, switchLocalUser } from '../store/local-users';
 import { getLinkForLocalUser, initCloudLinks, upsertCloudLink } from '../store/cloud-links';
 import { _setSecretsDir, getCloudSecret, setCloudSecret } from '../config/secrets';
+import * as secretsModule from '../config/secrets';
+import * as cloudLinksModule from '../store/cloud-links';
 
 let tmpDir: string;
 
@@ -52,6 +55,7 @@ beforeEach(async () => {
   initLocalUsers();
   initCloudLinks();
   sdkAuth.signOut.mockClear();
+  sdkAuth.signUp.mockReset();
   sdkAuth.signInWithPassword.mockReset();
   sdkAuth.setSession.mockReset();
   sdkAuth.getUser.mockReset();
@@ -134,19 +138,26 @@ describe('cloudAuth.reconcileLocalIdentitySwitch (H10)', () => {
 
 describe('cloudAuth session bookkeeping', () => {
   it('records the session subject uid on sign-in', async () => {
-    sdkAuth.signInWithPassword.mockResolvedValue({
-      data: {
-        user: { id: 'uid-signin', user_metadata: {} },
-        session: { access_token: 'a', refresh_token: 'r' },
-      },
-    });
+    const setSecretSpy = vi.spyOn(secretsModule, 'setCloudSecret');
+    try {
+      sdkAuth.signInWithPassword.mockResolvedValue({
+        data: {
+          user: { id: 'uid-signin', user_metadata: {} },
+          session: { access_token: 'a', refresh_token: 'r' },
+        },
+      });
 
-    const res = await cloudAuth.signInWithPassword({ identifier: 'alice@example.com', password: 'pw' });
+      const res = await cloudAuth.signInWithPassword({ identifier: 'alice@example.com', password: 'pw' });
 
-    expect(res.ok).toBe(true);
-    expect(getCloudSecret('SESSION_CLOUD_UID')).toBe('uid-signin');
-    const user = getCurrentLocalUser()!;
-    expect(getLinkForLocalUser(user.id)?.cloudUid).toBe('uid-signin');
+      expect(res.ok).toBe(true);
+      // 证明对模块命名空间的 spy 能截获内部调用（guard 测试的 not.toHaveBeenCalled 才有意义）
+      expect(setSecretSpy).toHaveBeenCalledWith('ACCESS_TOKEN', 'a');
+      expect(getCloudSecret('SESSION_CLOUD_UID')).toBe('uid-signin');
+      const user = getCurrentLocalUser()!;
+      expect(getLinkForLocalUser(user.id)?.cloudUid).toBe('uid-signin');
+    } finally {
+      setSecretSpy.mockRestore();
+    }
   });
 
   it('signOut clears tokens and the recorded uid but keeps the link', async () => {
@@ -180,5 +191,60 @@ describe('cloudAuth session bookkeeping', () => {
     expect(logged).not.toContain('alice@example.com');
     expect(logged).not.toContain('uid-signin');
     expect(logged).toContain('云账号登录成功');
+  });
+});
+
+describe('cloudAuth identity guard (H10)', () => {
+  const IDENTITY_REQUIRED = {
+    code: 'identity_required',
+    message: '请先创建本地身份后再登录云账号',
+    hint: expect.any(String),
+  };
+
+  it('requireRealIdentityForCloud rejects the default profile and passes real users', () => {
+    expect(requireRealIdentityForCloud()).toBeNull();
+
+    clearActiveLocalUser();
+    expect(requireRealIdentityForCloud()).toEqual(IDENTITY_REQUIRED);
+  });
+
+  it('rejects password sign-in on the default profile before persisting tokens, session uid or link', async () => {
+    const user = getCurrentLocalUser()!;
+    clearActiveLocalUser();
+    const setSecretSpy = vi.spyOn(secretsModule, 'setCloudSecret');
+    const linkSpy = vi.spyOn(cloudLinksModule, 'upsertCloudLink');
+    sdkAuth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: { id: 'uid-blocked', user_metadata: {} },
+        session: { access_token: 'a', refresh_token: 'r' },
+      },
+    });
+
+    const res = await cloudAuth.signInWithPassword({ identifier: 'alice@example.com', password: 'pw' });
+
+    expect(res).toEqual({ ok: false, error: IDENTITY_REQUIRED });
+    expect(setSecretSpy).not.toHaveBeenCalled();
+    expect(linkSpy).not.toHaveBeenCalled();
+    expect(getCloudSecret('ACCESS_TOKEN')).toBeNull();
+    expect(getCloudSecret('REFRESH_TOKEN')).toBeNull();
+    expect(getCloudSecret('SESSION_CLOUD_UID')).toBeNull();
+    expect(getLinkForLocalUser(user.id)).toBeNull();
+  });
+
+  it('rejects sign-up completion on the default profile before persisting', async () => {
+    clearActiveLocalUser();
+    const setSecretSpy = vi.spyOn(secretsModule, 'setCloudSecret');
+    sdkAuth.signUp.mockResolvedValue({
+      data: {
+        user: { id: 'uid-signup-blocked', user_metadata: {} },
+        session: { access_token: 'a', refresh_token: 'r' },
+      },
+    });
+
+    const res = await cloudAuth.sendSignUpCode({ email: 'alice@example.com', password: 'pw12345' });
+
+    expect(res).toEqual({ ok: false, error: IDENTITY_REQUIRED });
+    expect(setSecretSpy).not.toHaveBeenCalled();
+    expect(getCloudSecret('ACCESS_TOKEN')).toBeNull();
   });
 });

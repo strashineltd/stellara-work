@@ -26,6 +26,9 @@ interface SettingsCloudAccountSectionProps {
   onChanged?: () => void;
   /** 外部变更信号（递增时重新拉取状态） */
   refreshKey?: number;
+  /** H10：默认档不可登录云账号（需先创建本地身份） */
+  disabled?: boolean;
+  disabledHint?: string;
 }
 
 type Mode = 'signin' | 'signup';
@@ -103,7 +106,7 @@ const FIELD_BY_CODE: Record<string, FieldKey> = {
   verification_failed: 'code',
 };
 
-export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: SettingsCloudAccountSectionProps) {
+export function SettingsCloudAccountSection({ onChanged, refreshKey = 0, disabled = false, disabledHint }: SettingsCloudAccountSectionProps) {
   const [state, setState] = useState<CloudAuthState | null>(null);
   const [mode, setMode] = useState<Mode>('signin');
   // 有未完成的注册会话时直接回到验证码步骤，避免切页签后进度丢失
@@ -301,6 +304,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
   // ---------- 用户名占用预检 ----------
 
   async function checkUsernameAvailability() {
+    if (disabled) return;
     const name = username.trim();
     if (!name || !USERNAME_PATTERN.test(name)) {
       setUsernameCheck('idle');
@@ -326,7 +330,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
   // ---------- 动作 ----------
 
   async function handleSignIn() {
-    if (busy) return;
+    if (disabled || busy) return;
     resetMessages();
     if (!validateSigninForm()) return;
 
@@ -352,7 +356,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
    * 否则「用户名不合规」会拖到用户填完验证码才报错。
    */
   async function handleSendCode(opts: { resend?: boolean } = {}) {
-    if (busy) return;
+    if (disabled || busy) return;
     if (opts.resend && resendLeft > 0) return;
     resetMessages();
 
@@ -401,7 +405,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
   }
 
   async function handleVerify() {
-    if (busy || !pendingId) return;
+    if (disabled || busy || !pendingId) return;
     resetMessages();
     clearFieldErrors('code');
     if (codeValue.length < CODE_LENGTH) {
@@ -544,8 +548,15 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
   const otpComplete = codeValue.length === CODE_LENGTH;
 
   return (
-    <div className="settings-section">
+    <div className="settings-section" data-disabled={disabled || undefined}>
       <div className="settings-section__title">云账号</div>
+
+      {disabled && (
+        <div className="cloud-note" role="note">
+          <Icon name="shield" size={14} />
+          <span>{disabledHint ?? '请先创建本地身份后再登录云账号'}</span>
+        </div>
+      )}
 
       {notice && (
         <div className="cloud-note" role="status">
@@ -624,6 +635,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
               type="button"
               role="tab"
               aria-selected={mode === 'signin'}
+              disabled={disabled}
               onClick={() => switchMode('signin')}
             >
               登录
@@ -633,6 +645,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
               type="button"
               role="tab"
               aria-selected={mode === 'signup'}
+              disabled={disabled}
               onClick={() => switchMode('signup')}
             >
               注册
@@ -686,6 +699,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                   <button
                     className="cloud-link"
                     type="button"
+                    disabled={disabled}
                     onClick={() => setShowSigninPassword((prev) => !prev)}
                     aria-label={showSigninPassword ? '隐藏密码' : '显示密码'}
                   >
@@ -706,7 +720,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                 <button
                   className="btn btn-primary"
                   type="button"
-                  disabled={busy || !identifier.trim() || !signinPassword}
+                  disabled={disabled || busy || !identifier.trim() || !signinPassword}
                   onClick={() => void handleSignIn()}
                 >
                   {busy ? '登录中…' : '登录'}
@@ -828,6 +842,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                   <button
                     className="cloud-link"
                     type="button"
+                    disabled={disabled}
                     onClick={() => setShowSignupPassword((prev) => !prev)}
                     aria-label={showSignupPassword ? '隐藏密码' : '显示密码'}
                   >
@@ -886,7 +901,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                     CloudBase 要求注册必须验证邮箱；点下一步会向该邮箱发送验证码。
                   </div>
                 </div>
-                <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void handleSendCode()}>
+                <button className="btn btn-primary" type="button" disabled={disabled || busy} onClick={() => void handleSendCode()}>
                   {busy ? '发送中…' : '发送验证码'}
                 </button>
               </div>
@@ -912,7 +927,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                   <div className="cloud-recap__label">验证码已发送至</div>
                   <div className="cloud-recap__value">{email.trim()}</div>
                 </div>
-                <button className="cloud-link" type="button" disabled={busy} onClick={backToForm}>
+                <button className="cloud-link" type="button" disabled={disabled || busy} onClick={backToForm}>
                   修改
                 </button>
               </div>
@@ -940,7 +955,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                       value={digit}
                       aria-label={`验证码第 ${index + 1} 位`}
                       aria-invalid={Boolean(fieldErrors.code)}
-                      disabled={busy}
+                      disabled={disabled || busy}
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
                       onPaste={handleOtpPaste}
@@ -958,7 +973,7 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                   <button
                     className="cloud-link"
                     type="button"
-                    disabled={busy || resendLeft > 0}
+                    disabled={disabled || busy || resendLeft > 0}
                     onClick={() => void handleSendCode({ resend: true })}
                   >
                     {resendLeft > 0 ? `重新发送 ${resendLeft}s` : '重新发送'}
@@ -972,13 +987,13 @@ export function SettingsCloudAccountSection({ onChanged, refreshKey = 0 }: Setti
                     注册成功后会自动登录，并把云账号绑定到当前本地身份。
                   </div>
                 </div>
-                <button className="btn btn-secondary" type="button" disabled={busy} onClick={backToForm}>
+                <button className="btn btn-secondary" type="button" disabled={disabled || busy} onClick={backToForm}>
                   返回
                 </button>
                 <button
                   className="btn btn-primary"
                   type="button"
-                  disabled={busy || !otpComplete || !pendingId || !remaining}
+                  disabled={disabled || busy || !otpComplete || !pendingId || !remaining}
                   onClick={() => void handleVerify()}
                 >
                   {busy ? '验证中…' : remaining ? '完成注册' : '验证码已过期'}

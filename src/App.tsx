@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
-  AppInfo, ConfiguredModel, ModelPreset, SessionSummary, ProjectSummary, ThemeName,
+  AppInfo, ConfiguredModel, LocalIdentity, ModelPreset, SessionSummary, ProjectSummary, ThemeName,
 } from '../shared/ipc';
 import { DEFAULT_SHORTCUTS, type ShortcutBindings } from '../shared/shortcuts';
 import { useShortcuts } from './hooks/useShortcuts';
@@ -41,6 +41,8 @@ function focusToggleBeforePanelClose(panelSelector: string, toggleSelector: stri
 export default function App() {
   usePageVisibilityMotion();
   const [state, setState] = useState<AppState>({ kind: 'loading' });
+  // H10：当前本地身份（含默认档）；身份变化时重载按身份过滤的列表
+  const [activeUser, setActiveUser] = useState<LocalIdentity | null>(null);
 
   // 原生菜单（macOS）动作 → 渲染层 UI
   useEffect(() => {
@@ -142,8 +144,10 @@ export default function App() {
       window.electronAPI.sessions.list(),
       window.electronAPI.projects.list(),
       window.electronAPI.settings.get(),
+      window.electronAPI.identity.getCurrent(),
     ])
-      .then(([info, modelList, sessions, projects, settings]) => {
+      .then(([info, modelList, sessions, projects, settings, identity]) => {
+        setActiveUser(identity);
         if (settings.shortcuts) setShortcuts({ ...DEFAULT_SHORTCUTS, ...settings.shortcuts });
         if (settings.theme) setTheme(settings.theme);
         if (settings.workspaceMode) setWorkspaceMode(settings.workspaceMode);
@@ -170,6 +174,28 @@ export default function App() {
 
   // Tab 快捷键需要的 closed-tab history
   const [closedTabHistory, setClosedTabHistory] = useState<string[]>([]);
+
+  // H10：身份切换广播 → 更新当前身份、清空活动会话并重载列表。
+  // MainView 以 activeUser.id 为 key 重挂载，一并重置 entries / attachments / 工作区 / 上下文等会话派生状态。
+  useEffect(() => {
+    return window.electronAPI.identity.onChanged((identity) => {
+      setActiveUser(identity);
+      setClosedTabHistory([]);
+      setState((s) => s.kind === 'ready'
+        ? { ...s, sessions: [], projects: [], activeSessionId: null }
+        : s);
+      void Promise.all([
+        window.electronAPI.sessions.list(),
+        window.electronAPI.projects.list(),
+      ])
+        .then(([sessions, projects]) => {
+          setState((s) => s.kind === 'ready' ? { ...s, sessions, projects } : s);
+        })
+        .catch(() => {
+          // 重载失败时保持空列表，避免展示上一个身份的数据
+        });
+    });
+  }, []);
 
   function toggleSidebar() {
     if (state.kind !== 'ready') return;
@@ -295,6 +321,7 @@ export default function App() {
         />
       )}
       <MainView
+        key={activeUser?.id ?? 'default'}
         config={state.config}
         info={state.info}
         sidebarOpen={state.sidebarOpen}

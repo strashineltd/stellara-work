@@ -7,6 +7,9 @@ import { bestEffortChmodSync } from '../security/file-permissions';
 let dbPathOverride: string | null = null;
 let _db: Database.Database | null = null;
 
+/** 按身份隔离归属的三张表（H10 本地身份隔离） */
+const IDENTITY_TABLES = ['projects', 'sessions', 'memories'] as const;
+
 /** 测试 hook：指定 db 路径；传 null 恢复默认 */
 export function _setDbPath(p: string | null): void {
   if (_db) {
@@ -122,6 +125,12 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_relations_source ON knowledge_relations(source_id);
     CREATE INDEX IF NOT EXISTS idx_relations_target ON knowledge_relations(target_id);
+
+    -- H10：键值元数据（一次性回填标记等）
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // 迁移必须先于 project_id 索引创建。旧版 sessions 表没有该列；
@@ -160,6 +169,15 @@ export function getDb(): Database.Database {
     _db.exec('ALTER TABLE messages ADD COLUMN attachments TEXT');
   }
 
+  // H10 本地身份隔离：三表补 user_id（幂等），旧数据默认归 'default' 档
+  for (const table of IDENTITY_TABLES) {
+    const columns = _db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'user_id')) {
+      _db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'`);
+    }
+    _db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_user ON ${table}(user_id, updated_at DESC)`);
+  }
+
   // Memory OS: FTS5 全文搜索表（使用 memory_id UNINDEXED 关联，而非 rowid）
   try {
     _db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, content, tags, tokenize='unicode61')");
@@ -191,6 +209,7 @@ export interface Session {
   modelId: string;
   workDir?: string;
   projectId?: string;
+  userId: string;
   createdAt: number;
   updatedAt: number;
   messageCount: number;
@@ -204,6 +223,7 @@ export interface Project {
   name: string;
   workDir?: string;
   entryFile?: string;
+  userId: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -230,6 +250,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     modelId: (row.model_id as string | null) ?? '',
     workDir: (row.work_dir as string | null) ?? undefined,
     projectId: (row.project_id as string | null) ?? undefined,
+    userId: (row.user_id as string | null) ?? 'default',
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     messageCount: (row.message_count as number | null) ?? 0,
@@ -245,6 +266,7 @@ function rowToProject(row: Record<string, unknown>): Project {
     name: row.name as string,
     workDir: (row.work_dir as string | null) ?? undefined,
     entryFile: (row.entry_file as string | null) ?? undefined,
+    userId: (row.user_id as string | null) ?? 'default',
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   };
@@ -266,10 +288,10 @@ function rowToMessage(row: Record<string, unknown>): MessageRow {
   };
 }
 
-export function listSessions(): Session[] {
+export function listSessions(userId: string = 'default'): Session[] {
   const rows = getDb()
-    .prepare('SELECT * FROM sessions ORDER BY updated_at DESC')
-    .all() as Record<string, unknown>[];
+    .prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC')
+    .all(userId) as Record<string, unknown>[];
   return rows.map(rowToSession);
 }
 
@@ -277,7 +299,7 @@ export function listSessions(): Session[] {
  * 内容搜索会话：在 messages 表里 LIKE 匹配（标题、消息内容），
  * 返回匹配的 session id（按 updated_at 倒序）。query 空返回 []。
  */
-export function searchSessions(query: string): string[] {
+export function searchSessions(query: string, userId: string = 'default'): string[] {
   const q = query.trim();
   if (!q) return [];
   const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -291,13 +313,58 @@ export function searchSessions(query: string): string[] {
     )
     .all(pattern, pattern) as Array<{ session_id: string }>;
   const ids = new Set(rows.map((r) => r.session_id));
-  // 按更新时间倒序（listSessions 已排序）
-  return listSessions().filter((s) => ids.has(s.id)).map((s) => s.id);
+  // 按更新时间倒序（listSessions 已排序）；同时过滤掉其他身份的命中
+  return listSessions(userId).filter((s) => ids.has(s.id)).map((s) => s.id);
 }
 
 export function getSession(id: string): Session | null {
   const row = getDb().prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : null;
+}
+
+/** 按 id 取会话；归属不匹配（跨身份访问）时返回 undefined */
+export function getOwnedSession(id: string, userId: string): Session | undefined {
+  const session = getSession(id);
+  return session && session.userId === userId ? session : undefined;
+}
+
+/** 校验会话归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中会话。 */
+export function assertSessionOwned(id: string, userId: string): Session {
+  const session = getOwnedSession(id, userId);
+  if (!session) throw new Error('无权限访问该数据');
+  return session;
+}
+
+/**
+ * 把仍归属 'default' 的历史数据回填给指定身份，返回总变更行数。
+ * 目标为 'default' 时视为无需回填，直接返回 0；重复调用因无匹配行返回 0（幂等）。
+ */
+export function migrateIdentityOwnership(userId: string): number {
+  if (userId === 'default') return 0;
+  const db = getDb();
+  const run = db.transaction(() => {
+    let changes = 0;
+    for (const table of IDENTITY_TABLES) {
+      changes += db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = 'default'`).run(userId).changes;
+    }
+    return changes;
+  });
+  return run();
+}
+
+const IDENTITY_BACKFILL_KEY = 'identity_backfill_done';
+
+/** H10：历史数据回填是否已完成（跨重启一次性标记）。 */
+export function isIdentityBackfillDone(): boolean {
+  const row = getDb().prepare('SELECT value FROM meta WHERE key = ?').get(IDENTITY_BACKFILL_KEY) as { value: string } | undefined;
+  return row?.value === '1';
+}
+
+/** H10：回填成功后写入一次性标记。 */
+export function markIdentityBackfillDone(): void {
+  getDb()
+    .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(IDENTITY_BACKFILL_KEY, '1');
 }
 
 export function createSession(s: {
@@ -309,16 +376,18 @@ export function createSession(s: {
   runtime?: 'local' | 'server';
   serverId?: string;
   remoteSessionId?: string;
+  userId?: string;
 }): Session {
   const now = Date.now();
   const runtime = s.runtime === 'server' ? 'server' : 'local';
+  const userId = s.userId ?? 'default';
   getDb()
     .prepare(
-      'INSERT INTO sessions (id, title, model_id, work_dir, project_id, created_at, updated_at, message_count, runtime, server_id, remote_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
+      'INSERT INTO sessions (id, title, model_id, work_dir, project_id, created_at, updated_at, message_count, runtime, server_id, remote_session_id, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)',
     )
     .run(
       s.id, s.title, s.modelId, s.workDir ?? null, s.projectId ?? null, now, now,
-      runtime, s.serverId ?? null, s.remoteSessionId ?? null,
+      runtime, s.serverId ?? null, s.remoteSessionId ?? null, userId,
     );
   return {
     id: s.id,
@@ -326,6 +395,7 @@ export function createSession(s: {
     modelId: s.modelId,
     workDir: s.workDir,
     projectId: s.projectId,
+    userId,
     createdAt: now,
     updatedAt: now,
     messageCount: 0,
@@ -335,18 +405,33 @@ export function createSession(s: {
   };
 }
 
-export function findSessionByRemote(serverId: string, remoteSessionId: string): Session | undefined {
-  const row = getDb()
-    .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ?')
-    .get(serverId, remoteSessionId) as Record<string, unknown> | undefined;
+/**
+ * 按服务器 + 远端会话查找映射行。
+ * 传入 userId 时仅命中该身份的映射行（H10：服务器会话按身份隔离）。
+ */
+export function findSessionByRemote(serverId: string, remoteSessionId: string, userId?: string): Session | undefined {
+  const row = (userId === undefined
+    ? getDb()
+        .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ?')
+        .get(serverId, remoteSessionId)
+    : getDb()
+        .prepare('SELECT * FROM sessions WHERE server_id = ? AND remote_session_id = ? AND user_id = ?')
+        .get(serverId, remoteSessionId, userId)) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : undefined;
 }
 
-/** 按远端会话 ID 查找映射行（不限 server_id），用于认领服务器重建后的孤儿映射。 */
-export function findSessionByRemoteId(remoteSessionId: string): Session | undefined {
-  const row = getDb()
-    .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? ORDER BY updated_at DESC LIMIT 1")
-    .get(remoteSessionId) as Record<string, unknown> | undefined;
+/**
+ * 按远端会话 ID 查找映射行（不限 server_id），用于认领服务器重建后的孤儿映射。
+ * 传入 userId 时仅命中该身份的映射行（避免认领他人行）。
+ */
+export function findSessionByRemoteId(remoteSessionId: string, userId?: string): Session | undefined {
+  const row = (userId === undefined
+    ? getDb()
+        .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? ORDER BY updated_at DESC LIMIT 1")
+        .get(remoteSessionId)
+    : getDb()
+        .prepare("SELECT * FROM sessions WHERE runtime = 'server' AND remote_session_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1")
+        .get(remoteSessionId, userId)) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : undefined;
 }
 
@@ -355,10 +440,13 @@ export function reassignServerSession(id: string, serverId: string): void {
   getDb().prepare('UPDATE sessions SET server_id = ? WHERE id = ?').run(serverId, id);
 }
 
-export function listServerSessions(serverId: string): Session[] {
-  const rows = getDb()
-    .prepare('SELECT * FROM sessions WHERE server_id = ? ORDER BY updated_at DESC')
-    .all(serverId) as Record<string, unknown>[];
+/** 某服务器的映射行；传入 userId 时仅返回该身份的行（H10）。 */
+export function listServerSessions(serverId: string, userId?: string): Session[] {
+  const rows = (userId === undefined
+    ? getDb().prepare('SELECT * FROM sessions WHERE server_id = ? ORDER BY updated_at DESC').all(serverId)
+    : getDb()
+        .prepare('SELECT * FROM sessions WHERE server_id = ? AND user_id = ? ORDER BY updated_at DESC')
+        .all(serverId, userId)) as Record<string, unknown>[];
   return rows.map(rowToSession);
 }
 
@@ -477,10 +565,10 @@ export function countAllMessages(): number {
 
 // ---- Project CRUD ----
 
-export function listProjects(): Project[] {
+export function listProjects(userId: string = 'default'): Project[] {
   const rows = getDb()
-    .prepare('SELECT * FROM projects ORDER BY updated_at DESC')
-    .all() as Record<string, unknown>[];
+    .prepare('SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC')
+    .all(userId) as Record<string, unknown>[];
   return rows.map(rowToProject);
 }
 
@@ -489,12 +577,20 @@ export function getProject(id: string): Project | null {
   return row ? rowToProject(row) : null;
 }
 
-export function createProject(p: { id: string; name: string; workDir?: string; entryFile?: string }): Project {
+/** 校验项目归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中项目。 */
+export function assertProjectOwned(id: string, userId: string): Project {
+  const project = getProject(id);
+  if (!project || project.userId !== userId) throw new Error('无权限访问该数据');
+  return project;
+}
+
+export function createProject(p: { id: string; name: string; workDir?: string; entryFile?: string; userId?: string }): Project {
   const now = Date.now();
+  const userId = p.userId ?? 'default';
   getDb()
-    .prepare('INSERT INTO projects (id, name, work_dir, entry_file, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(p.id, p.name, p.workDir ?? null, p.entryFile ?? null, now, now);
-  return { id: p.id, name: p.name, workDir: p.workDir, entryFile: p.entryFile, createdAt: now, updatedAt: now };
+    .prepare('INSERT INTO projects (id, name, work_dir, entry_file, created_at, updated_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(p.id, p.name, p.workDir ?? null, p.entryFile ?? null, now, now, userId);
+  return { id: p.id, name: p.name, workDir: p.workDir, entryFile: p.entryFile, userId, createdAt: now, updatedAt: now };
 }
 
 export function updateProjectFile(id: string, workDir: string, entryFile: string): Project {
@@ -524,6 +620,11 @@ export function deleteProject(id: string): void {
 export function deleteAllSessions(): number {
   const result = getDb().prepare('DELETE FROM sessions').run();
   return result.changes;
+}
+
+/** 删除某身份的全部会话及其消息（CASCADE），返回删除的会话数。 */
+export function deleteSessionsByUser(userId: string): number {
+  return getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId).changes;
 }
 
 /** 删除所有项目（会话的 project_id 置 NULL） */

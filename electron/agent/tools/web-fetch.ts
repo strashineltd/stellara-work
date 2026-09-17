@@ -1,6 +1,7 @@
 import type { OpenAITool, ToolResult } from '../../../shared/ipc';
 import type { WebFetchArgs } from '../../../shared/ipc';
 import { checkUrlDestination } from '../../security/net-policy';
+import { safeFetch, describeFetchError } from '../../security/pinned-fetch';
 
 const VALID_PROTOCOLS = ['https:', 'http:'];
 
@@ -34,6 +35,7 @@ const ALLOWED_CONTENT_TYPES = [
 /**
  * 校验 URL 是否安全（hostname + DNS）。
  * IP/主机名判定统一走 security/net-policy（含 IPv6 规范化，见 H3）。
+ * 注意：这里只是预检；连接期还会由 safeFetch 的 lookup 再次校验真实 Socket IP（防 DNS Rebinding）。
  */
 export async function validateUrl(urlStr: string): Promise<{ ok: boolean; error?: string }> {
   let parsed: URL;
@@ -77,7 +79,7 @@ export async function webFetch(args: WebFetchArgs, _cwd: string): Promise<ToolRe
 
       let response: Response;
       try {
-        response = await fetch(currentUrl, {
+        response = await safeFetch(currentUrl, {
           method: 'GET',
           headers: { 'User-Agent': 'Stellara-Work/0.9' },
           redirect: 'manual',
@@ -180,7 +182,7 @@ export async function webFetch(args: WebFetchArgs, _cwd: string): Promise<ToolRe
     if (err instanceof Error && err.name === 'AbortError') {
       return { ok: false, output: '', error: `请求超时（${FETCH_TIMEOUT_MS}ms）` };
     }
-    return { ok: false, output: '', error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, output: '', error: describeFetchError(err) };
   }
 }
 

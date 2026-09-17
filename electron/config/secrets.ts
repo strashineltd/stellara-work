@@ -39,6 +39,11 @@ export function _setCipher(cipher: KeyCipher | null): void {
   _cipher = cipher;
 }
 
+/** 当前是否有可用的密钥加密器（safeStorage/DPAPI）；false 表示 .env 中的密钥为明文存储。 */
+export function isEncryptionEnabled(): boolean {
+  return _cipher !== null;
+}
+
 /** 加密值 → 明文；明文 → 原样返回。 */
 function decodeStored(value: string): string | null {
   if (value.startsWith(ENC_PREFIX)) {

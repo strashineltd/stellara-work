@@ -177,7 +177,7 @@ describe('SettingsPanel', () => {
     document.documentElement.dataset.platform = 'test-platform';
 
     await act(async () => {
-      resolveInfo({ version: '0.9.0-test', platform: 'win32', appDataPath: '/tmp', envPath: '/tmp' });
+      resolveInfo({ version: '0.9.0-test', platform: 'win32', appDataPath: '/tmp', envPath: '/tmp', secretStorage: 'encrypted' });
       await infoPromise;
     });
 

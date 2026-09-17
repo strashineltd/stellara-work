@@ -12,6 +12,8 @@ export interface MemoryInjectionConfig {
   enabled: boolean;
   maxMemories: number;
   projectId?: string;
+  /** 身份归属（缺省默认档，调用方应显式传活动身份） */
+  userId?: string;
 }
 
 const DEFAULT_CONFIG: MemoryInjectionConfig = {
@@ -32,6 +34,7 @@ export async function retrieveMemoriesForInjection(
 ): Promise<{ memories: Memory[]; promptBlock: string | null }> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   if (!cfg.enabled) return { memories: [], promptBlock: null };
+  const userId = cfg.userId ?? 'default';
 
   try {
     const allMemories: Memory[] = [];
@@ -42,7 +45,7 @@ export async function retrieveMemoriesForInjection(
         query: userMessage.slice(0, 200), // 截断避免太长
         scope: 'personal',
         limit: 3,
-      });
+      }, userId);
       if (personalResults) allMemories.push(...personalResults);
     }
 
@@ -52,7 +55,7 @@ export async function retrieveMemoriesForInjection(
         scope: 'project',
         scopeId: cfg.projectId,
         limit: 5,
-      });
+      }, userId);
       allMemories.push(...projectMemories);
     }
 
@@ -60,7 +63,7 @@ export async function retrieveMemoriesForInjection(
     const workspaceMemories = listMemories({
       scope: 'workspace',
       limit: 3,
-    });
+    }, userId);
     allMemories.push(...workspaceMemories);
 
     // 4. 获取高重要性的个人记忆（用户偏好等）
@@ -68,7 +71,7 @@ export async function retrieveMemoriesForInjection(
       scope: 'personal',
       kind: 'preference',
       limit: 3,
-    });
+    }, userId);
     allMemories.push(...highImportance);
 
     // 去重（按 ID）

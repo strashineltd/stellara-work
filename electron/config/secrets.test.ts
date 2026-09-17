@@ -5,7 +5,7 @@ import os from 'node:os';
 import {
   getKey, setKey, deleteKey, listKeys, migrateLegacyKeys,
   getServerPassword, setServerPassword, getCloudSecret, setCloudSecret,
-  _setSecretsDir, _setCipher, type KeyCipher,
+  _setSecretsDir, _setCipher, isEncryptionEnabled, type KeyCipher,
 } from './secrets';
 
 /** 可逆的 fake cipher：前缀 X + base64（仅测试用，生产用 safeStorage） */
@@ -224,5 +224,16 @@ describe('secrets with cipher (safeStorage mode)', () => {
     expect(getKey('m1')).toBe('line1\nline2');
     const raw = await fs.readFile(path.join(tmpDir, '.env'), 'utf-8');
     expect(raw.split('\n').filter((line) => line.trim() !== '')).toHaveLength(1);
+  });
+});
+
+describe('isEncryptionEnabled', () => {
+  it('未注入 cipher 时为 false（明文降级）', () => {
+    expect(isEncryptionEnabled()).toBe(false);
+  });
+
+  it('注入 cipher 后为 true', () => {
+    _setCipher(fakeCipher);
+    expect(isEncryptionEnabled()).toBe(true);
   });
 });

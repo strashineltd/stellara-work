@@ -21,6 +21,8 @@ import type {
   McpServerConfig,
   ViewportRect,
   LocalUser,
+  LocalIdentity,
+  IdentitySwitchResult,
   CloudAuthState,
   CloudResult,
   CloudPendingSignUp,
@@ -271,7 +273,7 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('memory:search', query, options),
     list: (options?: { scope?: Memory['scope']; kind?: Memory['kind']; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('memory:list', options),
-    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount'>) =>
+    save: (memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt' | 'accessCount' | 'userId'>) =>
       ipcRenderer.invoke('memory:save', memory),
     update: (id: string, patch: { content?: string; importance?: number; tags?: string[] }) =>
       ipcRenderer.invoke('memory:update', id, patch),
@@ -302,12 +304,12 @@ const api: ElectronAPI = {
   auth: {
     local: {
       getCurrent: (): Promise<LocalUser> => ipcRenderer.invoke('auth:local:getCurrent'),
-      list: (): Promise<LocalUser[]> => ipcRenderer.invoke('auth:local:list'),
+      list: (): Promise<LocalIdentity[]> => ipcRenderer.invoke('auth:local:list'),
       create: (displayName?: string): Promise<LocalUser> =>
         ipcRenderer.invoke('auth:local:create', displayName),
       update: (patch: { displayName?: string; avatarPath?: string | null }): Promise<LocalUser> =>
         ipcRenderer.invoke('auth:local:update', patch),
-      switch: (id: string): Promise<LocalUser> => ipcRenderer.invoke('auth:local:switch', id),
+      switch: (id: string): Promise<LocalUser | null> => ipcRenderer.invoke('auth:local:switch', id),
     },
     cloud: {
       getState: (): Promise<CloudAuthState> => ipcRenderer.invoke('auth:cloud:getState'),
@@ -321,6 +323,19 @@ const api: ElectronAPI = {
       unlink: (): Promise<CloudResult<CloudAuthState>> => ipcRenderer.invoke('auth:cloud:unlink'),
       isUsernameRegistered: (username: string): Promise<CloudResult<boolean>> =>
         ipcRenderer.invoke('auth:cloud:isUsernameRegistered', username),
+    },
+  },
+  identity: {
+    list: (): Promise<LocalIdentity[]> => ipcRenderer.invoke('identity:list'),
+    getCurrent: (): Promise<LocalIdentity> => ipcRenderer.invoke('identity:getCurrent'),
+    switch: (userId: string, force?: boolean): Promise<IdentitySwitchResult> =>
+      ipcRenderer.invoke('identity:switch', userId, force),
+    onChanged: (callback: (user: LocalIdentity) => void): (() => void) => {
+      const handler = (_e: unknown, user: LocalIdentity) => callback(user);
+      ipcRenderer.on('identity-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('identity-changed', handler);
+      };
     },
   },
 };

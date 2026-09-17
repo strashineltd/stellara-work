@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   checkUrlDestination,
+  checkMcpHttpUrl,
   isBlockedDestinationUrl,
   isPrivateOrReservedIp,
   isRestrictedHostname,
@@ -242,5 +243,28 @@ describe('checkUrlDestination (async DNS)', () => {
   it('reports invalid URLs', async () => {
     const r = await checkUrlDestination('http://[');
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('checkMcpHttpUrl', () => {
+  it('allows localhost and local IP for development', () => {
+    expect(checkMcpHttpUrl('http://localhost:3000/mcp').ok).toBe(true);
+    expect(checkMcpHttpUrl('http://127.0.0.1:8000/mcp').ok).toBe(true);
+    expect(checkMcpHttpUrl('https://api.example.com/mcp').ok).toBe(true);
+  });
+
+  it('rejects cloud metadata endpoints', () => {
+    expect(checkMcpHttpUrl('http://169.254.169.254/latest/meta-data').ok).toBe(false);
+    expect(checkMcpHttpUrl('http://metadata.google.internal/').ok).toBe(false);
+    expect(checkMcpHttpUrl('http://instance-data/').ok).toBe(false);
+  });
+
+  it('rejects non-http/https protocols', () => {
+    expect(checkMcpHttpUrl('ftp://example.com/mcp').ok).toBe(false);
+    expect(checkMcpHttpUrl('file:///etc/passwd').ok).toBe(false);
+  });
+
+  it('rejects invalid URLs', () => {
+    expect(checkMcpHttpUrl('not a url').ok).toBe(false);
   });
 });

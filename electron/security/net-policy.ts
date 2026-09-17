@@ -261,3 +261,30 @@ export async function checkUrlDestination(
   }
   return { ok: true };
 }
+
+/**
+ * 针对 MCP HTTP 服务器 URL 的安全校验：
+ * 允许访问公网及本地开发服务（localhost/127.0.0.1 等），
+ * 但严格拦截云元数据服务（169.254.169.254 / metadata.google.internal 等）。
+ */
+export function checkMcpHttpUrl(raw: string): { ok: boolean; error?: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { ok: false, error: `无效的 URL: ${raw}` };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, error: `不支持的协议: ${parsed.protocol}（只允许 http/https）` };
+  }
+  const host = normalizeHostname(parsed.hostname);
+  if (
+    host === '169.254.169.254' ||
+    host.startsWith('169.254.') ||
+    host === 'metadata.google.internal' ||
+    host === 'instance-data'
+  ) {
+    return { ok: false, error: `不允许访问受限的云元数据地址: ${host}` };
+  }
+  return { ok: true };
+}

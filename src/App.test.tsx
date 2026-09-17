@@ -1,14 +1,17 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppInfo, ConfiguredModel, SessionSummary } from '../shared/ipc';
+import type { AppInfo, ConfiguredModel, LocalIdentity, SessionSummary } from '../shared/ipc';
 import App from './App';
+
+const DEFAULT_IDENTITY: LocalIdentity = { id: 'default', name: '本地默认', kind: 'default' };
 
 const INFO: AppInfo = {
   version: '0.9.2',
   platform: 'win32',
   appDataPath: 'C:/stellara',
   envPath: 'C:/stellara/.env',
+  secretStorage: 'encrypted',
 };
 
 const CONFIG: ConfiguredModel = {
@@ -31,6 +34,7 @@ const SESSION: SessionSummary = {
 
 let mounted: { container: HTMLDivElement; root: Root } | null = null;
 let fullscreenListener: ((fullscreen: boolean) => void) | null = null;
+let identityListeners: Set<(user: LocalIdentity) => void> = new Set();
 
 async function renderApp() {
   const container = document.createElement('div');
@@ -59,6 +63,7 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   Element.prototype.scrollIntoView = () => {};
   fullscreenListener = null;
+  identityListeners = new Set();
   (window as any).electronAPI = {
     menu: { onAction: vi.fn().mockReturnValue(() => {}) },
     app: {
@@ -89,6 +94,17 @@ beforeEach(() => {
     skills: { list: vi.fn().mockResolvedValue([]) },
     memory: { onExtracted: vi.fn().mockReturnValue(() => {}) },
     fs: { listTree: vi.fn().mockResolvedValue(null) },
+    identity: {
+      getCurrent: vi.fn().mockResolvedValue(DEFAULT_IDENTITY),
+      list: vi.fn().mockResolvedValue([DEFAULT_IDENTITY]),
+      switch: vi.fn().mockResolvedValue({ ok: true, user: DEFAULT_IDENTITY }),
+      onChanged: vi.fn((callback: (user: LocalIdentity) => void) => {
+        identityListeners.add(callback);
+        return () => {
+          identityListeners.delete(callback);
+        };
+      }),
+    },
   };
 });
 
@@ -278,5 +294,43 @@ describe('App Settings presence and focus management', () => {
 
     expect(document.activeElement).toBe(opener);
     expect(originalFocus).toHaveBeenCalledOnce();
+  });
+});
+
+describe('App identity change', () => {
+  it('clears the active session and reloads lists when identity changes', async () => {
+    const nextSession: SessionSummary = {
+      id: 'session-b',
+      title: 'Session B',
+      modelId: CONFIG.id,
+      messageCount: 0,
+      updatedAt: 2,
+    };
+    const api = (window as any).electronAPI;
+    let switched = false;
+    api.sessions.list.mockImplementation(async () => (switched ? [nextSession] : [SESSION]));
+    api.projects.list.mockImplementation(async () =>
+      switched
+        ? [{ id: 'project-b', name: '项目 B', workDir: 'D:/b', updatedAt: 2, sessionCount: 1 }]
+        : [],
+    );
+
+    const container = await renderApp();
+    expect(container.textContent).toContain('Session A');
+    expect(container.querySelector('.session-row--active')?.getAttribute('data-session-id')).toBe('session-a');
+
+    switched = true;
+    await act(async () => {
+      identityListeners.forEach((listener) =>
+        listener({ id: 'u2', name: 'Ada', kind: 'user' }),
+      );
+    });
+    await act(async () => {});
+
+    expect(api.identity.onChanged).toHaveBeenCalled();
+    expect(container.textContent).toContain('Session B');
+    expect(container.textContent).not.toContain('Session A');
+    expect(container.textContent).toContain('项目 B');
+    expect(container.querySelector('.session-row--active')).toBeNull();
   });
 });
