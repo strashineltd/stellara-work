@@ -21,7 +21,8 @@ import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engi
 import { enableNextRunAt, nextRunPatchForUpdate } from './scheduler/next-run';
 import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
 import { installAppMenu } from './menu';
-import { createAppTray, shouldHideOnClose, type TrayHandle } from './tray';
+import { createAppTray, type TrayHandle } from './tray';
+import { shouldHideOnClose } from './tray-logic';
 import { notifyTaskEnd } from './notifications';
 import { isMainWindowWebContents, isSafeExternalUrl, isSameOrigin } from './security/url-guard';
 import { isTrustedIpcSender } from './security/ipc-guard';
@@ -316,9 +317,10 @@ function createWindow(): void {
     return { action: 'deny' };
   });
 
-  // v0.9.3: 托盘驻留（P12）—— 开启后台调度时关闭窗口改为隐藏；退出流程（Cmd+Q / 托盘退出）放行
+  // v0.9.3: 托盘驻留（P12）—— 开启后台调度时关闭窗口改为隐藏；退出流程（Cmd+Q / 托盘退出）放行。
+  // 托盘不可用（创建失败 / 未创建）时绝不拦截，否则窗口关闭后进程失联。
   mainWindow.on('close', (event) => {
-    if (!shouldHideOnClose(backgroundSchedulingEnabled, isQuitting)) return;
+    if (!shouldHideOnClose(backgroundSchedulingEnabled, isQuitting, appTray !== null)) return;
     event.preventDefault();
     mainWindow?.hide();
   });
