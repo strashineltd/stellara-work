@@ -207,6 +207,17 @@ describe('ScheduledTasks 行操作', () => {
     expect(api.scheduled.toggle).toHaveBeenCalledWith('t1');
   });
 
+  it('shows the error banner when toggle fails, even after the reload settles', async () => {
+    const { api } = stubApi([makeTask()]);
+    api.scheduled.toggle.mockRejectedValueOnce(new Error('无法启用：执行时间已过期'));
+    const { container } = await renderScheduled();
+
+    await click(taskRow(container, 't1').querySelector('[role="switch"]'));
+
+    const banner = container.querySelector<HTMLElement>('.error-banner');
+    expect(banner?.textContent).toContain('无法启用：执行时间已过期');
+  });
+
   it('立即运行 calls scheduled.runNow', async () => {
     const { api } = stubApi([makeTask()]);
     const { container } = await renderScheduled();

@@ -174,8 +174,8 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
       await window.electronAPI.scheduled.toggle(task.id);
       await loadTasks();
     } catch (error) {
-      setListError(errorMessage(error));
       await loadTasks();
+      setListError(errorMessage(error));
     }
   }
 
