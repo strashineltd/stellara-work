@@ -119,6 +119,7 @@ interface WorkspacePanelProps extends PresenceMotionProps {
   contextWindow?: number;
   subagents?: SubagentInfo[];
   onCreateCheckpoint?: () => Promise<void>;
+  onCompact?: () => Promise<{ ok: boolean; busy?: boolean; compacted?: boolean }>;
 }
 
 const MIN_WIDTH = 200;
@@ -128,7 +129,7 @@ const DEFAULT_WIDTH = 280;
 export function WorkspacePanel({
   workDir, goal, progress, deliverables, touchedFiles,
   stepStatus, onStepToggle, initialWidth, onWidthChange, memoryContext, contextStats, contextState,
-  contextWindow, subagents, onCreateCheckpoint, presence,
+  contextWindow, subagents, onCreateCheckpoint, onCompact, presence,
 }: WorkspacePanelProps) {
   const [width, setWidth] = useState(initialWidth ?? DEFAULT_WIDTH);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -214,6 +215,7 @@ export function WorkspacePanel({
         staleEvidence={contextState?.staleEvidence}
         taskGate={contextState?.taskGate}
         onCreateCheckpoint={onCreateCheckpoint}
+        onCompact={onCompact}
       />
       <SubagentsSection subagents={subagents} />
       <DeliverablesSection deliverables={deliverables} />
@@ -425,14 +427,18 @@ function ContextCheckpointSection({
   staleEvidence,
   taskGate,
   onCreateCheckpoint,
+  onCompact,
 }: {
   checkpoint?: { id: string; objective: string; createdAt: string } | null;
   unverifiedFiles?: string[];
   staleEvidence?: Array<{ id: string; summary: string }>;
   taskGate?: { ok: boolean; reasons: string[] };
   onCreateCheckpoint?: () => Promise<void>;
+  onCompact?: () => Promise<{ ok: boolean; busy?: boolean; compacted?: boolean }>;
 }) {
   const [creating, setCreating] = useState(false);
+  const [compacting, setCompacting] = useState(false);
+  const [compactNotice, setCompactNotice] = useState<string | null>(null);
   return (
     <details className="workspace-section">
       <summary className="workspace-section-header">
@@ -458,6 +464,30 @@ function ContextCheckpointSection({
         >
           {creating ? '正在创建…' : '创建当前检查点'}
         </button>
+      )}
+      {onCompact && (
+        <>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small checkpoint-create"
+            disabled={compacting}
+            onClick={() => {
+              setCompacting(true);
+              setCompactNotice(null);
+              void onCompact()
+                .then((res) => {
+                  if (res.ok && res.compacted === false) setCompactNotice('无需压缩');
+                  else if (res.ok) setCompactNotice('已压缩');
+                  else if (res.busy) setCompactNotice('任务运行中，将在下一轮自动压缩');
+                })
+                .catch(() => setCompactNotice('压缩失败'))
+                .finally(() => setCompacting(false));
+            }}
+          >
+            {compacting ? '正在压缩…' : '立即压缩'}
+          </button>
+          {compactNotice && <div className="empty-hint">{compactNotice}</div>}
+        </>
       )}
       {unverifiedFiles && unverifiedFiles.length > 0 && (
         <div className="checkpoint-unverified">

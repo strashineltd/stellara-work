@@ -13,7 +13,6 @@
 export {
   CONTEXT_WINDOW_OPTIONS,
   DEFAULT_CONTEXT_WINDOW,
-  defaultThresholdTokens,
 } from './context-window';
 export type { ContextWindowValue } from './context-window';
 
@@ -688,6 +687,8 @@ export interface AppSettings {
   theme?: ThemeName;
   /** 工作区模式：sidebar（紧凑 sidebar）或 tabs（Tab 栏） */
   workspaceMode?: 'sidebar' | 'tabs';
+  /** 上下文压缩时是否调用模型生成对话摘要（默认开；false = 仅确定性剪枝） */
+  contextCompactionSummaryEnabled?: boolean;
   /** 默认服务器 id（只读：仅能经 servers:setDefault 修改） */
   defaultServerId?: string | null;
   // 预留：language
@@ -1038,6 +1039,15 @@ export interface ContextStateView {
   }>;
 }
 
+/** 手动立即压缩的结果（v0.9.3）。 */
+export interface ContextCompactResult {
+  ok: boolean;
+  /** true = 该会话有运行中的任务，已拒绝手动压缩 */
+  busy?: boolean;
+  compacted?: boolean;
+  snapshot?: ContextStateView;
+}
+
 /** 文件修改证据 */
 export interface FileModificationEvidence {
   filePath: string;
@@ -1127,6 +1137,8 @@ export interface ElectronAPI {
     getSnapshot: (sessionId: string) => Promise<ContextStateView>;
     /** 在当前 revision 创建一个可恢复检查点。 */
     createCheckpoint: (sessionId: string) => Promise<ContextStateView>;
+    /** 手动立即压缩当前会话上下文；会话有运行中任务时返回 busy。 */
+    compact: (sessionId: string) => Promise<ContextCompactResult>;
   };
   tools: {
     /** 直接调一个 tool（不通过 LLM，用于开发期 / 测试） */

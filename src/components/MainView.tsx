@@ -1322,6 +1322,11 @@ export function MainView(props: MainViewProps) {
               const snapshot = await window.electronAPI.context.createCheckpoint(activeSessionId);
               setContextState(snapshot);
             } : undefined}
+            onCompact={activeSessionId ? async () => {
+              const result = await window.electronAPI.context.compact(activeSessionId);
+              if (result.ok && result.snapshot) setContextState(result.snapshot);
+              return { ok: result.ok, busy: result.busy, compacted: result.compacted };
+            } : undefined}
           />
         )}
       </div>

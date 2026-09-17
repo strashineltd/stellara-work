@@ -32,6 +32,8 @@ import type {
   ContextCheckpoint,
 } from '../../shared/ipc';
 import type { ResponseItem } from '../../shared/responses';
+import { compact, buildSummaryTranscript, digestItem } from './compactor';
+import { estimateItemsTokens } from './token-estimator';
 
 // ============================================
 // TaskContext 状态结构
@@ -54,6 +56,9 @@ export interface TaskContext {
   verification: VerificationContext;
   memory: MemoryContext;
   subagents: SubagentContextState[];
+  compactionWindowStartIndex: number;
+  compactionWindowDigest?: string;
+  compactionSummary?: string;
   usage: ContextUsage;
 }
 
@@ -166,6 +171,15 @@ export interface ContextUsage {
   lastCompactedAt?: string;
 }
 
+export interface EnsureBudgetResult {
+  compacted: boolean;
+  hardLimited: boolean;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  compressedCount?: number;
+  summary?: string;
+}
+
 // ============================================
 // Context Hub 类
 // ============================================
@@ -178,6 +192,10 @@ export class ContextHub {
   private listeners: Array<(event: ContextEventEnvelope) => void> = [];
   private replaying = false;
   private responseItemSequence = 0;
+  private extraTokens = 0;
+  private calibrationRatio = 1;
+  private lastEstimatedTokens = 0;
+  private compactionInFlight = false;
 
   constructor(
     private sessionId: string,
@@ -192,6 +210,7 @@ export class ContextHub {
     if (this.shouldPersist) {
       this.replayEvents();
       this.restoreResponseItems();
+      this.applyCompactionPointer();
     }
   }
 
@@ -230,6 +249,7 @@ export class ContextHub {
         injected: [],
       },
       subagents: [],
+      compactionWindowStartIndex: 0,
       usage: this.calculateUsage(),
     };
   }
@@ -249,7 +269,7 @@ export class ContextHub {
 
   private restoreResponseItems(): void {
     const rows = getResponseItemsBySession(this.sessionId);
-    this.responseItemSequence = rows.length;
+    this.responseItemSequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0);
     const persisted = rows.map((row) => row.itemData as ResponseItem);
     const hasPersistedUser = persisted.some((item) => item.type === 'message' && item.role === 'user');
     if (hasPersistedUser) {
@@ -259,6 +279,28 @@ export class ContextHub {
       // 用户消息，避免升级后丢失旧会话上下文。
       this.context.responseItems.push(...persisted);
     }
+    this.context.usage = this.calculateUsage();
+  }
+
+  private applyCompactionPointer(): void {
+    const start = this.context.compactionWindowStartIndex;
+    if (start <= 0) return;
+    const items = this.context.responseItems;
+    if (start > items.length) {
+      log.warn(`Context Hub: 压缩指针越界 (${start} > ${items.length})，忽略`);
+      this.context.compactionWindowStartIndex = 0;
+      this.context.compactionWindowDigest = undefined;
+      return;
+    }
+    if (start < items.length && this.context.compactionWindowDigest) {
+      if (digestItem(items[start]!) !== this.context.compactionWindowDigest) {
+        log.warn('Context Hub: 压缩指针 digest 不匹配，忽略并保持全量窗口');
+        this.context.compactionWindowStartIndex = 0;
+        this.context.compactionWindowDigest = undefined;
+        return;
+      }
+    }
+    this.context.responseItems = items.slice(start);
     this.context.usage = this.calculateUsage();
   }
 
@@ -272,10 +314,11 @@ export class ContextHub {
     const softThreshold = usableInputBudget * 0.75;
     const hardThreshold = usableInputBudget * 0.90;
 
-    const currentInputTokens = this.context?.responseItems.reduce(
-      (total, item) => total + Math.max(1, Math.ceil(JSON.stringify(item).length / 4)),
-      0,
-    ) || 0;
+    const itemsTokens = this.context?.responseItems
+      ? estimateItemsTokens(this.context.responseItems)
+      : 0;
+    const currentInputTokens = Math.round(itemsTokens * this.calibrationRatio) + this.extraTokens;
+    this.lastEstimatedTokens = currentInputTokens;
     const inputUsageRatio = usableInputBudget > 0 ? currentInputTokens / usableInputBudget : 1;
 
     return {
@@ -689,15 +732,13 @@ export class ContextHub {
   }
 
   private handleContextCompacted(event: ContextEventEnvelope): void {
-    const data = event.data as {
-      tokensBefore: number;
-      tokensAfter: number;
-      compressedCount: number;
-      summary: string;
-    };
-
+    const data = event.data as { windowStartIndex?: number; windowDigest?: string; summary?: string };
+    if (typeof data.windowStartIndex === 'number') {
+      this.context.compactionWindowStartIndex = data.windowStartIndex;
+    }
+    this.context.compactionWindowDigest = data.windowDigest;
+    if (data.summary) this.context.compactionSummary = data.summary;
     this.context.usage.lastCompactedAt = event.createdAt;
-    this.context.usage.currentInputTokens = data.tokensAfter;
   }
 
   private handleCheckpointCreated(event: ContextEventEnvelope): void {
@@ -822,6 +863,101 @@ export class ContextHub {
    */
   isNearLimit(): boolean {
     return this.context.usage.nearLimit;
+  }
+
+  async ensureContextBudget(opts: {
+    extraTokens?: number;
+    summarize?: (transcript: string) => Promise<string | undefined>;
+    force?: boolean;
+    signal?: AbortSignal;
+  }): Promise<EnsureBudgetResult> {
+    if (this.compactionInFlight) {
+      this.context.usage = this.calculateUsage();
+      return { compacted: false, hardLimited: this.context.usage.hardLimited };
+    }
+    this.compactionInFlight = true;
+    try {
+      if (typeof opts.extraTokens === 'number') this.extraTokens = opts.extraTokens;
+      this.context.usage = this.calculateUsage();
+      if (!opts.force && !this.context.usage.nearLimit) {
+        return { compacted: false, hardLimited: this.context.usage.hardLimited };
+      }
+
+      const usage = this.context.usage;
+      let checkpoint: ContextCheckpoint;
+      try {
+        checkpoint = this.createCheckpoint();
+      } catch (err) {
+        log.warn('上下文检查点创建失败，跳过本次压缩:', err);
+        this.context.usage = this.calculateUsage();
+        return { compacted: false, hardLimited: this.context.usage.hardLimited };
+      }
+      const activeItems = [...this.context.responseItems];
+      const result = compact(activeItems, {
+        targetTokens: Math.floor(usage.usableInputBudget * 0.6),
+        hardLimitTokens: usage.hardThreshold,
+        previousWindowStartIndex: this.context.compactionWindowStartIndex,
+        reason: opts.force ? 'manual' : usage.hardLimited ? 'hard_threshold' : 'soft_threshold',
+      });
+      if (!result.ok) {
+        this.context.usage = this.calculateUsage();
+        return { compacted: false, hardLimited: this.context.usage.hardLimited };
+      }
+
+      let summary: string | undefined;
+      if (opts.summarize) {
+        try {
+          const transcript = buildSummaryTranscript(
+            activeItems.slice(0, result.droppedCount),
+            this.context.compactionSummary,
+          );
+          const text = await opts.summarize(transcript);
+          if (text && text.trim()) summary = text.trim();
+        } catch (err) {
+          log.warn('上下文压缩摘要失败，保留确定性压缩结果:', err);
+        }
+      }
+
+      // 摘要 await 期间可能追加了新 items（append-only），不能丢弃
+      const appended = this.context.responseItems.slice(activeItems.length);
+      this.context.responseItems = result.keptItems.concat(appended);
+      await this.commitEvent('context_compacted', {
+        windowStartIndex: result.windowStartIndex,
+        droppedCount: result.droppedCount,
+        windowDigest: result.windowDigest,
+        checkpointId: checkpoint.id,
+        tokensBefore: result.tokensBefore,
+        tokensAfter: result.tokensAfter,
+        compressedCount: result.droppedCount,
+        summary,
+        reason: result.reason,
+      });
+      return {
+        compacted: true,
+        hardLimited: this.context.usage.hardLimited,
+        tokensBefore: result.tokensBefore,
+        tokensAfter: result.tokensAfter,
+        compressedCount: result.droppedCount,
+        summary,
+      };
+    } finally {
+      this.compactionInFlight = false;
+    }
+  }
+
+  recordReportedInputTokens(reported: number): void {
+    if (!Number.isFinite(reported) || reported <= 0) return;
+    const estimated = this.lastEstimatedTokens > 0 ? this.lastEstimatedTokens : this.calculateUsage().currentInputTokens;
+    if (estimated <= 0) return;
+    const sample = reported / estimated;
+    if (!Number.isFinite(sample) || sample <= 0) return;
+    const next = this.calibrationRatio * 0.7 + sample * 0.3;
+    this.calibrationRatio = Math.min(2, Math.max(0.5, next));
+    this.context.usage = this.calculateUsage();
+  }
+
+  getCompactionSummary(): string | undefined {
+    return this.context.compactionSummary;
   }
 
   /**

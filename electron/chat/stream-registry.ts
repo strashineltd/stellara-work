@@ -6,20 +6,29 @@
  */
 export class ChatStreamRegistry {
   private readonly controllers = new Map<string, AbortController>();
+  private readonly sessions = new Map<string, string>();
   private readonly approvals = new Map<string, {
     streamId: string;
     resolve: (approved: boolean) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
 
-  start(streamId: string): AbortController {
+  start(streamId: string, sessionId?: string): AbortController {
     const controller = new AbortController();
     this.controllers.set(streamId, controller);
+    if (sessionId) this.sessions.set(streamId, sessionId);
     return controller;
   }
 
   getSignal(streamId: string): AbortSignal | undefined {
     return this.controllers.get(streamId)?.signal;
+  }
+
+  isSessionActive(sessionId: string): boolean {
+    for (const sid of this.sessions.values()) {
+      if (sid === sessionId) return true;
+    }
+    return false;
   }
 
   /** 当前所有活跃流的 id（级联取消子代理流用） */
@@ -68,6 +77,7 @@ export class ChatStreamRegistry {
   cleanup(streamId: string): void {
     this.settleApprovalsForStream(streamId, false);
     this.controllers.delete(streamId);
+    this.sessions.delete(streamId);
   }
 
   private settleApprovalsForStream(streamId: string, approved: boolean): void {

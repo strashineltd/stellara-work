@@ -6,6 +6,7 @@ import { runResponsesLoop } from './responses-loop';
 import { ContextHub } from '../context/context-hub';
 import { _setDbPath, getDb, createSession, initContextTables } from '../store/db';
 import type { ModelConfig } from '../../shared/ipc';
+import type { ResponseItem } from '../../shared/responses';
 
 let tmpDir: string;
 
@@ -67,7 +68,7 @@ const { mockRequiresApproval, mockMcpCallTool, mockRetrieveMemories, streamQueue
     mockRetrieveMemories: vi.fn().mockResolvedValue({ memories: [], promptBlock: null }),
     streamQueue: [] as Array<() => Array<Record<string, unknown>>>,
     defaultStreamEvents,
-    responseRequests: [] as Array<{ tools?: Array<{ name: string }> }>,
+    responseRequests: [] as Array<{ tools?: Array<{ name: string }>; input?: unknown[] }>,
   };
 });
 
@@ -79,7 +80,7 @@ vi.mock('../llm/responses', () => {
   return {
     ResponsesClient: class {
       async *createStream(request: unknown) {
-        if (request && typeof request === 'object') responseRequests.push(request as { tools?: Array<{ name: string }> });
+        if (request && typeof request === 'object') responseRequests.push(request as { tools?: Array<{ name: string }>; input?: unknown[] });
         const events = streamQueue.length > 0 ? streamQueue.shift()!() : defaultStreamEvents;
         for (const event of events) yield event;
       }
@@ -153,11 +154,11 @@ describe('runResponsesLoop', () => {
     expect(addSpy).toHaveBeenCalled();
   });
 
-  it('检查硬阈值', async () => {
-    // 使用足够大的 context window，但通过添加大量 items 使 usage 超限
+  it('压缩后仍超硬阈值时报错终止且不调用模型', async () => {
+    // 极小 context window / 大 max_output_tokens 使可用预算为 0：
+    // 预填充 items 必超硬阈值，且压缩无法把窗口降到阈值以下（硬阈值压缩失败路径）
     const hub = new ContextHub('sess-001', tmpDir, 4000, 500);
 
-    // 添加大量 response items 使 usage 超限
     for (let i = 0; i < 50; i++) {
       hub.addResponseItem({
         type: 'message',
@@ -165,8 +166,10 @@ describe('runResponsesLoop', () => {
         content: [{ type: 'input_text', text: 'x'.repeat(500) }],
       });
     }
+    expect(hub.isHardLimited()).toBe(true);
 
     const events: string[] = [];
+    const errors: Array<{ error?: string; errorMeta?: { kind?: string } }> = [];
     const gen = runResponsesLoop('test', {
       model: DEFAULT_MODEL,
       cwd: tmpDir,
@@ -176,11 +179,15 @@ describe('runResponsesLoop', () => {
 
     for await (const event of gen) {
       events.push(event.type);
+      if (event.type === 'error') errors.push(event);
     }
 
-    // 由于模拟的 client 总是返回 completed，不会触发硬阈值错误
-    // 但可以验证 contextHub.isHardLimited() 被检查
-    expect(hub.isHardLimited()).toBe(true);
+    // 压缩失败 → 明确报错终止，且未向模型发起请求
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.error).toContain('上下文压缩后仍超出硬阈值');
+    expect(errors[0]!.errorMeta?.kind).toBe('context_too_long');
+    expect(events).not.toContain('done');
+    expect(responseRequests).toHaveLength(0);
   });
 
   it('处理中断信号', async () => {
@@ -664,5 +671,158 @@ describe('runResponsesLoop', () => {
     const firstRequest = responseRequests[0]!;
     expect(firstRequest.tools!.some((t) => t.name === 'mcp__s1__read')).toBe(true);
     expect(firstRequest.tools!.some((t) => t.name === 'write_file')).toBe(false);
+  });
+});
+
+describe('上下文压缩接线', () => {
+  function toolCallStream(name: string, args: string): Array<Record<string, unknown>> {
+    return [
+      {
+        type: 'response.output_item.done',
+        output_index: 0,
+        item: { type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: args, status: 'in_progress' },
+      },
+      {
+        type: 'response.completed',
+        response: {
+          id: 'resp-001',
+          object: 'response',
+          model: 'test',
+          status: 'completed',
+          output: [{ type: 'function_call', id: 'fc-1', call_id: 'fc-1', name, arguments: args, status: 'completed' }],
+        },
+      },
+    ];
+  }
+
+  it('压缩后发出 summary 事件并可继续', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const budgetSpy = vi.spyOn(hub, 'ensureContextBudget').mockResolvedValue({
+      compacted: true,
+      hardLimited: false,
+      tokensBefore: 900,
+      tokensAfter: 300,
+      compressedCount: 5,
+      summary: '早前对话摘要',
+    });
+    const events: Array<{ type: string; summary?: string; compressedCount?: number }> = [];
+
+    for await (const event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      events.push(event);
+    }
+
+    expect(budgetSpy).toHaveBeenCalled();
+    expect(events.find((e) => e.type === 'summary')).toMatchObject({
+      compressedCount: 5,
+      summary: '早前对话摘要',
+    });
+    expect(events.map((e) => e.type)).toContain('done');
+  });
+
+  it('压缩后仍超硬阈值 → 明确错误并终止', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    vi.spyOn(hub, 'ensureContextBudget').mockResolvedValue({ compacted: false, hardLimited: true });
+    const events: string[] = [];
+
+    for await (const event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      events.push(event.type);
+    }
+
+    expect(events).toContain('error');
+    expect(events).not.toContain('done');
+  });
+
+  it('开启摘要开关时传入 summarize 回调', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const spy = vi.spyOn(hub, 'ensureContextBudget').mockResolvedValue({ compacted: false, hardLimited: false });
+
+    for await (const _event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+      compactionSummaryEnabled: true,
+    })) {
+    }
+
+    expect(typeof spy.mock.calls[0]![0]!.summarize).toBe('function');
+  });
+
+  it('工具结果超限时以 stub 进入上下文', async () => {
+    const marker = 'UNIQUE-MARKER-20000';
+    const content = Array.from({ length: 30_000 }, (_, i) => (i === 20_000 ? marker : `line ${i}`)).join('\n');
+    await fs.writeFile(path.join(tmpDir, 'big.txt'), content);
+    streamQueue.push(() => toolCallStream('read_file', '{"path":"big.txt"}'));
+
+    const hub = new ContextHub('sess-001', tmpDir);
+    for await (const _event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+    }
+
+    const outputs = hub.getResponseItems().filter((item) => item.type === 'function_call_output');
+    const parsed = outputs.map((item) => JSON.parse((item as { output: string }).output) as { truncation?: { kind?: string } });
+    expect(parsed.some((p) => p?.truncation?.kind === 'read_file')).toBe(true);
+    expect(JSON.stringify(outputs)).not.toContain(marker);
+  });
+
+  it('真实 hub 在首个请求前自动压缩，且被保留的调用不丢紧邻 reasoning', async () => {
+    // window=8000 时 instructions+工具 schema 的 extraTokens（≈4.6k）高于硬阈值（3.15k），
+    // 压缩后仍会 hardLimited；用 40k 窗口（同长会话集成测试）验证真实 happy path。
+    const hub = new ContextHub('sess-001', tmpDir, 40_000, 500);
+
+    const prefill: ResponseItem[] = [];
+    for (let i = 0; i < 100; i++) {
+      prefill.push({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `${i}:${'x'.repeat(2000)}` }],
+      });
+    }
+    // 大 reasoning 使自然切点恰好落在它身上：修复前 reasoning 会被丢弃而 function_call 被保留
+    prefill.push({ type: 'reasoning', content: [{ type: 'reasoning_text', text: 'r'.repeat(44_000) }] });
+    prefill.push({ type: 'function_call', call_id: 'call-1', name: 'read_file', arguments: '{}', status: 'completed' });
+    prefill.push({ type: 'function_call_output', call_id: 'call-1', output: 'file content' });
+    for (const item of prefill) hub.addResponseItem(item);
+
+    const events: Array<{ type: string; compressedCount?: number }> = [];
+    for await (const event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      events.push(event);
+    }
+
+    const summaries = events.filter((e) => e.type === 'summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.compressedCount).toBeGreaterThan(0);
+
+    expect(responseRequests.length).toBeGreaterThan(0);
+    const input = responseRequests[0]!.input as ResponseItem[];
+    expect(Array.isArray(input)).toBe(true);
+    expect(input.length).toBeLessThan(prefill.length);
+
+    const kept = new Set<ResponseItem>(input);
+    for (let i = 0; i < prefill.length; i++) {
+      const item = prefill[i]!;
+      if (item.type !== 'function_call' || !kept.has(item)) continue;
+      const prev = prefill[i - 1];
+      if (prev && prev.type === 'reasoning') expect(kept.has(prev)).toBe(true);
+    }
   });
 });

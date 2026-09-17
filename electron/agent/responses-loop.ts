@@ -27,6 +27,9 @@ import { mcpManager } from '../mcp/mcp-manager';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { ContextHub, type TaskContext, type PlanStep } from '../context/context-hub';
 import { parsePlanFromContent } from './plan-parser';
+import { capToolOutput, COMPACTION_SUMMARY_PROMPT } from '../context/compactor';
+import { estimateRequestTokens } from '../context/token-estimator';
+import { summarizeWithModel } from '../llm/client-factory';
 
 // ============================================
 // 接口定义
@@ -84,6 +87,8 @@ export interface ResponsesLoopOptions {
   requireApprovalAfterLimit?: boolean;
   /** 子代理内部关闭再次分派，避免递归任务树。 */
   allowSubagents?: boolean;
+  /** 压缩时是否调用 LLM 生成对话摘要（默认 false；主会话由配置传 true） */
+  compactionSummaryEnabled?: boolean;
 }
 
 // ============================================
@@ -249,19 +254,40 @@ export async function* runResponsesLoop(
       return;
     }
 
-    // 检查硬阈值
-    if (contextHub.isHardLimited()) {
+    // 上下文预算检查：达到软阈值时在迭代边界同步压缩
+    const context = contextHub.getContext();
+    let instructions = buildInstructions(systemPrompt, context);
+    const budget = await contextHub.ensureContextBudget({
+      extraTokens: estimateRequestTokens({ items: [], instructions, tools }),
+      signal,
+      summarize:
+        options.compactionSummaryEnabled === true
+          ? (transcript) => summarizeWithModel(model, COMPACTION_SUMMARY_PROMPT, transcript, signal)
+          : undefined,
+    });
+    if (budget.compacted) {
+      yield {
+        type: 'summary',
+        tokensBefore: budget.tokensBefore,
+        tokensAfter: budget.tokensAfter,
+        compressedCount: budget.compressedCount,
+        summary: budget.summary,
+      };
+      instructions = buildInstructions(systemPrompt, contextHub.getContext());
+    }
+    if (budget.hardLimited) {
       yield {
         type: 'error',
-        error: '上下文达到硬阈值，请压缩后再继续',
-        errorMeta: { kind: 'context_too_long', hint: '上下文达到硬阈值，请压缩后再继续', retryable: false },
+        error: '上下文压缩后仍超出硬阈值，请新开会话或降低单次任务规模',
+        errorMeta: {
+          kind: 'context_too_long',
+          hint: '上下文压缩后仍超出硬阈值，请新开会话或降低单次任务规模',
+          retryable: false,
+        },
       };
       return;
     }
 
-    // 构建请求
-    const context = contextHub.getContext();
-    const instructions = buildInstructions(systemPrompt, context);
     const inputItems = contextHub.getResponseItems();
 
     const request: CreateResponseRequest = {
@@ -306,6 +332,7 @@ export async function* runResponsesLoop(
             if (item.type === 'function_call') functionCalls.set(item.call_id, item);
           }
           if (result.usage) {
+            contextHub.recordReportedInputTokens(result.usage.input_tokens);
             totalInputTokens += result.usage.input_tokens;
             totalOutputTokens += result.usage.output_tokens;
             yield {
@@ -537,11 +564,12 @@ export async function* runResponsesLoop(
         };
 
         const result = await invokeTool(fc.name as ToolName, args, cwd, toolContext);
+        const cappedResult = capToolOutput(fc.name, args, result);
 
         toolResults.push({
           type: 'function_call_output',
           call_id: fc.call_id,
-          output: JSON.stringify(result),
+          output: JSON.stringify(cappedResult),
         });
 
         // 记录工具调用完成
@@ -693,6 +721,11 @@ function buildInstructions(systemPrompt: string, context: TaskContext): string {
   // 注入未验证文件
   if (context.workspace.unverifiedFiles.size > 0) {
     instructions += `\n\n## 未验证文件\n以下文件已修改但未验证：\n${Array.from(context.workspace.unverifiedFiles).map(f => `- ${f}`).join('\n')}`;
+  }
+
+  // 注入压缩摘要（早期对话已移出活跃窗口）
+  if (context.compactionSummary) {
+    instructions += `\n\n## 早期对话摘要（已压缩）\n${context.compactionSummary}`;
   }
 
   return instructions;

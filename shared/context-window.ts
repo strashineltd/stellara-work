@@ -11,9 +11,4 @@ export const CONTEXT_WINDOW_OPTIONS = [
 
 export const DEFAULT_CONTEXT_WINDOW = 256_000;
 
-/** 默认压缩阈值 = contextWindow × 90% */
-export function defaultThresholdTokens(contextWindow: number): number {
-  return Math.floor(contextWindow * 0.9);
-}
-
 export type ContextWindowValue = (typeof CONTEXT_WINDOW_OPTIONS)[number]['value'];

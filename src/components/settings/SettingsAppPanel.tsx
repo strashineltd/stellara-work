@@ -90,6 +90,12 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
     onChanged?.();
   }
 
+  function applyCompactionSummary(enabled: boolean) {
+    setSettings((s) => ({ ...s, contextCompactionSummaryEnabled: enabled }));
+    void window.electronAPI.settings.update({ contextCompactionSummaryEnabled: enabled });
+    onChanged?.();
+  }
+
   async function handleCopyDiagnostics() {
     setCopyingDiag(true);
     try {
@@ -117,6 +123,7 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
 
   const theme = settings.theme ?? 'dark';
   const workspaceMode = settings.workspaceMode ?? 'sidebar';
+  const compactionSummaryEnabled = settings.contextCompactionSummaryEnabled !== false;
 
   return (
     <div className="settings-panel-root">
@@ -178,6 +185,34 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
                   {opt.label}
                 </button>
               ))}
+            </div>
+          </div>
+          <div className="settings-item">
+            <div className="settings-item__grow">
+              <div className="settings-item__label">压缩对话摘要</div>
+              <div className="settings-item__hint">上下文压缩时调用一次模型生成摘要（默认开）</div>
+            </div>
+            <div className="radio-group">
+              <button
+                className={`radio-card ${compactionSummaryEnabled ? 'on' : ''}`}
+                role="radio"
+                aria-checked={compactionSummaryEnabled}
+                aria-label="压缩对话摘要：开"
+                onClick={() => applyCompactionSummary(true)}
+                type="button"
+              >
+                开
+              </button>
+              <button
+                className={`radio-card ${!compactionSummaryEnabled ? 'on' : ''}`}
+                role="radio"
+                aria-checked={!compactionSummaryEnabled}
+                aria-label="压缩对话摘要：关"
+                onClick={() => applyCompactionSummary(false)}
+                type="button"
+              >
+                关
+              </button>
             </div>
           </div>
         </div>
