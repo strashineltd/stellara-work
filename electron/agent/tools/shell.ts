@@ -509,7 +509,10 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
   }
   if (exeBase === 'sed') {
     for (const arg of args) {
-      if (arg === '--in-place' || arg.startsWith('--in-place=')) {
+      // GNU getopt_long 接受无歧义长选项缩写：sed 中以 i 开头的长选项只有 --in-place，
+      // 故 --i / --in / --in-p / --i=.bak 等都会被解析为 --in-place，必须一并拒绝。
+      const longName = arg.split('=')[0]!;
+      if (longName.startsWith('--') && longName.length > 2 && '--in-place'.startsWith(longName)) {
         return '不允许：sed --in-place 会就地覆写文件（sed 仅用于 stdin/stdout 只读处理）。';
       }
       if (arg.startsWith('-') && !arg.startsWith('--') && sedHasInPlaceShortFlag(arg)) {

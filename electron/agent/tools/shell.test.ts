@@ -565,12 +565,14 @@ describe('runCommand', () => {
     }
   });
 
-  it('rejects sed in-place writes (-i / --in-place) (P2)', async () => {
+  (process.platform !== 'win32' ? it : it.skip)('rejects sed in-place writes (-i / --in-place) (P2)', async () => {
     for (const cmd of [
       "sed -i 's/a/b/' sample.txt",
       "sed -i.bak 's/a/b/' sample.txt",
       "sed --in-place 's/a/b/' sample.txt",
       "sed --in-place=.bak 's/a/b/' sample.txt",
+      "sed --i 's/a/b/' sample.txt",
+      "sed --in-p=.bak 's/a/b/' sample.txt",
       "sed -ni 's/a/b/p' sample.txt",
       "sed -Ei 's/a/b/' sample.txt",
     ]) {
