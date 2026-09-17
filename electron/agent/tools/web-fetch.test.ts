@@ -1,16 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { webFetch, validateUrl, UNTRUSTED_MARKER, resolveMaxBytes } from './web-fetch';
 
-// Mock dns/promises
+// Mock dns/promises（URL 预检）
 vi.mock('node:dns/promises', () => ({
   default: {
     lookup: vi.fn(),
   },
 }));
 
+// Mock 传输层：本文件只验证 web_fetch 的编排逻辑，连接期校验由 pinned-fetch.test.ts 覆盖
+vi.mock('../../security/pinned-fetch', () => ({
+  safeFetch: vi.fn(),
+  describeFetchError: (err: unknown) => (err instanceof Error ? err.message : String(err)),
+}));
+
 import dns from 'node:dns/promises';
+import { safeFetch } from '../../security/pinned-fetch';
 
 const mockDns = vi.mocked(dns);
+const mockSafeFetch = vi.mocked(safeFetch);
 
 function mockFetch(body: string, init?: ResponseInit & { headers?: Record<string, string> }) {
   const headers = new Headers(init?.headers);
@@ -19,19 +27,16 @@ function mockFetch(body: string, init?: ResponseInit & { headers?: Record<string
     statusText: init?.statusText ?? 'OK',
     headers,
   });
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(resp));
-}
-
-function mockFetchError(err: Error) {
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err));
+  mockSafeFetch.mockResolvedValue(resp);
 }
 
 beforeEach(() => {
-  vi.restoreAllMocks();
+  mockSafeFetch.mockReset();
+  mockDns.lookup.mockReset();
 });
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  mockSafeFetch.mockReset();
 });
 
 describe('webFetch', () => {
@@ -137,12 +142,22 @@ describe('webFetch', () => {
       status: 302,
       headers: { location: 'http://localhost/secret' },
     });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(redirectResp));
+    mockSafeFetch.mockResolvedValue(redirectResp);
     mockDns.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
 
     const result = await webFetch({ url: 'https://example.com' }, '/tmp');
     expect(result.ok).toBe(false);
     expect(result.error).toContain('受限');
+  });
+
+  it('连接期被拦截时返回底层原因（DNS Rebinding 防护）', async () => {
+    mockDns.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    mockSafeFetch.mockRejectedValue(
+      new Error('域名 evil.example 在连接时解析到私网/保留 IP（127.0.0.1），已拒绝连接'),
+    );
+    const result = await webFetch({ url: 'https://evil.example.com' }, '/tmp');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('私网/保留 IP');
   });
 
   it('truncates body exceeding maxBytes', async () => {
