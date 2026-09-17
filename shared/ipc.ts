@@ -887,6 +887,52 @@ export interface ServerAgentSummary {
 }
 
 // ============================================
+// 已安排（调度器，v0.9.3）
+// ============================================
+
+/** 调度方式：一次性 ISO 时间 / 间隔分钟数 / cron 表达式 */
+export type ScheduledTaskKind = 'once' | 'interval' | 'cron';
+
+export type ScheduledRunStatus = 'running' | 'success' | 'error' | 'missed' | 'aborted';
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  prompt: string;
+  projectId?: string;
+  workDir?: string;
+  /** 执行端：local（本机）或 server（远端 OpenCode server） */
+  runtime: 'local' | 'server';
+  /** 执行端为 server 时使用的服务器 */
+  serverId?: string;
+  modelId?: string;
+  scheduleKind: ScheduledTaskKind;
+  scheduleExpr: string;
+  enabled: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastStatus: string | null;
+  /** 无交互调度运行中是否允许危险工具（UI 风险确认；运行时沿用失败关闭） */
+  allowDangerous: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** 归属身份（主进程内部字段，渲染层不传） */
+  userId?: string;
+}
+
+export interface ScheduledRun {
+  id: string;
+  taskId: string;
+  startedAt: number;
+  finishedAt?: number | null;
+  status: ScheduledRunStatus;
+  sessionId?: string;
+  error?: string;
+  /** 归属身份（主进程内部字段） */
+  userId?: string;
+}
+
+// ============================================
 // W4: 文件树 / 文件预览
 // ============================================
 

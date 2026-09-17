@@ -3,6 +3,7 @@ import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import { getAppDataDir } from '../config/data-dir';
 import { bestEffortChmodSync } from '../security/file-permissions';
+import type { ScheduledRun, ScheduledTask } from '@shared/ipc';
 
 let dbPathOverride: string | null = null;
 let _db: Database.Database | null = null;
@@ -130,6 +131,42 @@ export function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    -- 已安排（调度器，v0.9.3）
+    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      project_id TEXT,
+      work_dir TEXT,
+      runtime TEXT NOT NULL DEFAULT 'local',
+      server_id TEXT,
+      model_id TEXT,
+      schedule_kind TEXT NOT NULL,      -- 'once' | 'interval' | 'cron'
+      schedule_expr TEXT NOT NULL,      -- ISO 时间 / 分钟数 / cron 表达式
+      enabled INTEGER NOT NULL DEFAULT 1,
+      next_run_at INTEGER,
+      last_run_at INTEGER,
+      last_status TEXT,
+      allow_dangerous INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      user_id TEXT NOT NULL DEFAULT 'default'
+    );
+    CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_due ON scheduled_tasks(next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_user ON scheduled_tasks(user_id);
+
+    CREATE TABLE IF NOT EXISTS scheduled_runs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      finished_at INTEGER,
+      status TEXT NOT NULL,             -- 'running' | 'success' | 'error' | 'missed' | 'aborted'
+      session_id TEXT,
+      error TEXT,
+      user_id TEXT NOT NULL DEFAULT 'default',
+      FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE
     );
   `);
 
@@ -1069,4 +1106,230 @@ export function getSubagentRunsBySession(sessionId: string): Array<{
     createdAt: row.created_at as string,
     completedAt: (row.completed_at as string | null) ?? undefined,
   }));
+}
+
+// ============================================
+// 调度器（已安排）仓储（v0.9.3）
+// ============================================
+
+function rowToScheduledTask(row: Record<string, unknown>): ScheduledTask {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    prompt: row.prompt as string,
+    projectId: (row.project_id as string | null) ?? undefined,
+    workDir: (row.work_dir as string | null) ?? undefined,
+    runtime: ((row.runtime as string | null) ?? 'local') === 'server' ? 'server' : 'local',
+    serverId: (row.server_id as string | null) ?? undefined,
+    modelId: (row.model_id as string | null) ?? undefined,
+    scheduleKind: row.schedule_kind as ScheduledTask['scheduleKind'],
+    scheduleExpr: row.schedule_expr as string,
+    enabled: row.enabled === 1,
+    nextRunAt: (row.next_run_at as number | null) ?? null,
+    lastRunAt: (row.last_run_at as number | null) ?? null,
+    lastStatus: (row.last_status as string | null) ?? null,
+    allowDangerous: row.allow_dangerous === 1,
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    userId: (row.user_id as string | null) ?? 'default',
+  };
+}
+
+function rowToScheduledRun(row: Record<string, unknown>): ScheduledRun {
+  return {
+    id: row.id as string,
+    taskId: row.task_id as string,
+    startedAt: row.started_at as number,
+    finishedAt: (row.finished_at as number | null) ?? null,
+    status: row.status as ScheduledRun['status'],
+    sessionId: (row.session_id as string | null) ?? undefined,
+    error: (row.error as string | null) ?? undefined,
+    userId: (row.user_id as string | null) ?? 'default',
+  };
+}
+
+export function listScheduledTasks(userId: string = 'default'): ScheduledTask[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM scheduled_tasks WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId) as Record<string, unknown>[];
+  return rows.map(rowToScheduledTask);
+}
+
+export function getScheduledTask(id: string): ScheduledTask | null {
+  const row = getDb().prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? rowToScheduledTask(row) : null;
+}
+
+/** 按 id 取任务；归属不匹配（跨身份访问）时返回 undefined */
+export function getOwnedScheduledTask(id: string, userId: string): ScheduledTask | undefined {
+  const task = getScheduledTask(id);
+  return task && task.userId === userId ? task : undefined;
+}
+
+/** 校验任务归属；不存在或跨身份访问抛「无权限访问该数据」。返回命中任务。 */
+export function assertScheduledTaskOwned(id: string, userId: string): ScheduledTask {
+  const task = getOwnedScheduledTask(id, userId);
+  if (!task) throw new Error('无权限访问该数据');
+  return task;
+}
+
+export function createScheduledTask(input: {
+  id: string;
+  name: string;
+  prompt: string;
+  projectId?: string;
+  workDir?: string;
+  runtime?: 'local' | 'server';
+  serverId?: string;
+  modelId?: string;
+  scheduleKind: ScheduledTask['scheduleKind'];
+  scheduleExpr: string;
+  enabled?: boolean;
+  nextRunAt?: number | null;
+  allowDangerous?: boolean;
+  userId?: string;
+}): ScheduledTask {
+  const now = Date.now();
+  const runtime = input.runtime === 'server' ? 'server' : 'local';
+  const enabled = input.enabled ?? true;
+  const allowDangerous = input.allowDangerous ?? false;
+  const nextRunAt = input.nextRunAt ?? null;
+  const userId = input.userId ?? 'default';
+  getDb()
+    .prepare(
+      `INSERT INTO scheduled_tasks (id, name, prompt, project_id, work_dir, runtime, server_id, model_id, schedule_kind, schedule_expr, enabled, next_run_at, allow_dangerous, created_at, updated_at, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.id, input.name, input.prompt, input.projectId ?? null, input.workDir ?? null,
+      runtime, input.serverId ?? null, input.modelId ?? null, input.scheduleKind, input.scheduleExpr,
+      enabled ? 1 : 0, nextRunAt, allowDangerous ? 1 : 0, now, now, userId,
+    );
+  return {
+    id: input.id,
+    name: input.name,
+    prompt: input.prompt,
+    projectId: input.projectId,
+    workDir: input.workDir,
+    runtime,
+    serverId: input.serverId,
+    modelId: input.modelId,
+    scheduleKind: input.scheduleKind,
+    scheduleExpr: input.scheduleExpr,
+    enabled,
+    nextRunAt,
+    lastRunAt: null,
+    lastStatus: null,
+    allowDangerous,
+    createdAt: now,
+    updatedAt: now,
+    userId,
+  };
+}
+
+/** 局部更新任务；id 不存在抛「任务不存在或已被删除」。userId 不可更改。 */
+export function updateScheduledTask(id: string, patch: {
+  name?: string;
+  prompt?: string;
+  projectId?: string | null;
+  workDir?: string | null;
+  runtime?: 'local' | 'server';
+  serverId?: string | null;
+  modelId?: string | null;
+  scheduleKind?: ScheduledTask['scheduleKind'];
+  scheduleExpr?: string;
+  enabled?: boolean;
+  nextRunAt?: number | null;
+  lastRunAt?: number | null;
+  lastStatus?: string | null;
+  allowDangerous?: boolean;
+}): ScheduledTask {
+  const sets: string[] = [];
+  const params: Array<string | number | null> = [];
+  const add = (column: string, value: string | number | null): void => {
+    sets.push(`${column} = ?`);
+    params.push(value);
+  };
+  if (patch.name !== undefined) add('name', patch.name);
+  if (patch.prompt !== undefined) add('prompt', patch.prompt);
+  if (patch.projectId !== undefined) add('project_id', patch.projectId);
+  if (patch.workDir !== undefined) add('work_dir', patch.workDir);
+  if (patch.runtime !== undefined) add('runtime', patch.runtime === 'server' ? 'server' : 'local');
+  if (patch.serverId !== undefined) add('server_id', patch.serverId);
+  if (patch.modelId !== undefined) add('model_id', patch.modelId);
+  if (patch.scheduleKind !== undefined) add('schedule_kind', patch.scheduleKind);
+  if (patch.scheduleExpr !== undefined) add('schedule_expr', patch.scheduleExpr);
+  if (patch.enabled !== undefined) add('enabled', patch.enabled ? 1 : 0);
+  if (patch.nextRunAt !== undefined) add('next_run_at', patch.nextRunAt);
+  if (patch.lastRunAt !== undefined) add('last_run_at', patch.lastRunAt);
+  if (patch.lastStatus !== undefined) add('last_status', patch.lastStatus);
+  if (patch.allowDangerous !== undefined) add('allow_dangerous', patch.allowDangerous ? 1 : 0);
+  if (sets.length > 0) {
+    add('updated_at', Date.now());
+    params.push(id);
+    const result = getDb()
+      .prepare(`UPDATE scheduled_tasks SET ${sets.join(', ')} WHERE id = ?`)
+      .run(...params);
+    if (result.changes !== 1) throw new Error('任务不存在或已被删除');
+  }
+  const task = getScheduledTask(id);
+  if (!task) throw new Error('任务不存在或已被删除');
+  return task;
+}
+
+/** 删除任务（执行记录经外键 CASCADE 一并删除）；id 不存在抛「任务不存在或已被删除」。 */
+export function deleteScheduledTask(id: string): void {
+  const result = getDb().prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+  if (result.changes !== 1) throw new Error('任务不存在或已被删除');
+}
+
+/**
+ * 记录一次执行：按 run.id upsert。首次插入（通常 status='running'），
+ * 后续只更新调用方提供的字段（status / finishedAt / sessionId / error）。
+ * user_id 取调用方传入，缺省继承任务归属。
+ */
+export function recordRun(taskId: string, run: ScheduledRun): void {
+  const db = getDb();
+  const task = getScheduledTask(taskId);
+  if (!task) throw new Error('任务不存在或已被删除');
+  const exists = db.prepare('SELECT 1 AS present FROM scheduled_runs WHERE id = ?').get(run.id);
+  if (!exists) {
+    db.prepare(
+      `INSERT INTO scheduled_runs (id, task_id, started_at, finished_at, status, session_id, error, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      run.id, taskId, run.startedAt, run.finishedAt ?? null, run.status,
+      run.sessionId ?? null, run.error ?? null, run.userId ?? task.userId ?? 'default',
+    );
+    return;
+  }
+  const sets: string[] = [];
+  const params: Array<string | number | null> = [];
+  if (run.status !== undefined) { sets.push('status = ?'); params.push(run.status); }
+  if (run.finishedAt !== undefined) { sets.push('finished_at = ?'); params.push(run.finishedAt); }
+  if (run.sessionId !== undefined) { sets.push('session_id = ?'); params.push(run.sessionId); }
+  if (run.error !== undefined) { sets.push('error = ?'); params.push(run.error); }
+  if (sets.length === 0) return;
+  params.push(run.id);
+  db.prepare(`UPDATE scheduled_runs SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function listRuns(taskId: string, limit: number = 20): ScheduledRun[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM scheduled_runs WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?')
+    .all(taskId, limit) as Record<string, unknown>[];
+  return rows.map(rowToScheduledRun);
+}
+
+/** 只保留任务最近 keep 条执行记录，返回删除条数 */
+export function pruneRuns(taskId: string, keep: number = 200): number {
+  return getDb()
+    .prepare(
+      `DELETE FROM scheduled_runs
+       WHERE task_id = ?
+         AND id NOT IN (
+           SELECT id FROM scheduled_runs WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?
+         )`,
+    )
+    .run(taskId, taskId, keep).changes;
 }
