@@ -2,7 +2,7 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.9.3.2] - 2026-09-14
+## [0.9.3.2] - 2026-09-17
 
 ### Added · 新增
 
