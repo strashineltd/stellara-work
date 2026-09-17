@@ -33,6 +33,10 @@ import type {
   ServerTestResult,
   ServerProvidersResult,
   ServerVcsResult,
+  ScheduledRun,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskPatch,
 } from '../shared/ipc';
 
 /**
@@ -335,6 +339,25 @@ const api: ElectronAPI = {
       ipcRenderer.on('identity-changed', handler);
       return () => {
         ipcRenderer.removeListener('identity-changed', handler);
+      };
+    },
+  },
+  scheduled: {
+    list: (): Promise<ScheduledTask[]> => ipcRenderer.invoke('scheduled:list'),
+    create: (input: ScheduledTaskInput): Promise<ScheduledTask> =>
+      ipcRenderer.invoke('scheduled:create', input),
+    update: (id: string, patch: ScheduledTaskPatch): Promise<ScheduledTask> =>
+      ipcRenderer.invoke('scheduled:update', id, patch),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:remove', id),
+    toggle: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:toggle', id),
+    runNow: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:runNow', id),
+    abort: (id: string): Promise<void> => ipcRenderer.invoke('scheduled:abort', id),
+    runs: (taskId: string): Promise<ScheduledRun[]> => ipcRenderer.invoke('scheduled:runs', taskId),
+    onChanged: (callback: () => void): (() => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('scheduled:changed', handler);
+      return () => {
+        ipcRenderer.removeListener('scheduled:changed', handler);
       };
     },
   },

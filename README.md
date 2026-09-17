@@ -29,6 +29,8 @@ Your API key, sessions, files, and configuration **never leave your machine**. S
 
 ## Features
 
+The **0.9.3 shell is redesigned**: a top bar with back/forward navigation and sidebar/workspace toggles, a new sidebar IA (New chat / Pull Request / Scheduled, plus project, recent, and server groups), a home screen with capability cards and a floating composer, and refreshed session and settings styling.
+
 | | Feature | Description |
 |---|---|---|
 | 🔒 | **Local-first privacy** | API keys encrypted via OS keychain (macOS) / DPAPI (Windows); all data stored locally |
@@ -43,6 +45,34 @@ Your API key, sessions, files, and configuration **never leave your machine**. S
 | 🎨 | **Design system** | Consistent UI tokens and workbench styling across all views |
 | 🔄 | **Context Hub** | Unified context management with checkpoints, verification evidence, and stale detection |
 | 👥 | **Subagent coordinator** | Session-scoped subagent management with role-based concurrency and conflict detection |
+| ⏰ | **Scheduled tasks** | One-time, interval, and cron runs with startup missed-run compensation; keep running in the tray after the window closes |
+| 🖥️ | **Server connections** | Connect opencode-compatible servers with encrypted credentials; pick local or a server as the execution target for new sessions |
+
+---
+
+## Scheduled Tasks & Tray Residency
+
+**已安排** runs the agent unattended on a schedule:
+
+- **Schedule kinds**: one-time, interval (every N minutes/hours), or cron expressions (common presets included).
+- **Execution target**: the local agent or any connected opencode server; each run opens an Agent session, and completion/failure sends a system notification.
+- **Missed runs**: if the app was closed at the scheduled time, startup writes one `missed` record and re-runs the task once — missed periods are not chased back-to-back.
+- **History**: the last 20 runs per task, with status, duration, error text, and a jump to the run's session.
+- **Identity**: tasks and run history are scoped to the active local identity.
+
+**Tray residency**: closing the main window hides it to the tray and scheduling keeps running; `Cmd+Q` (or tray → Quit) exits completely. Settings → App has **关闭窗口后保持后台运行（调度继续）**, on by default — turn it off to restore the previous behavior where closing the window quits.
+
+**Execution model**: scheduled runs are non-interactive — there is no approval channel, so dangerous tools (file writes, shell commands, …) fail closed and are denied by default. Read-only automations work today; write-type automations need a dedicated design in a future release. The per-task **allow dangerous tools** checkbox is only a UI risk acknowledgment and does not change the runtime denial.
+
+---
+
+## Server Connections
+
+Local-first stays the default, but sessions can also run on an **opencode-compatible server** (`opencode serve`, default `http://localhost:4096`, Basic auth):
+
+- **Settings → Servers**: add/edit/test servers, set the default, and delete with confirmation. Passwords are encrypted at rest (OS keychain / safeStorage chain) and never returned to the renderer — IPC exposes only `hasPassword`. URLs must be `http(s)` (https required for non-loopback hosts), and a health + auth check runs on save and on **Test connection**.
+- **Execution target**: the top-bar selector lists local plus each configured server with a live status dot. It controls the target for **new** sessions; existing sessions keep the target they were created with, and server sessions show the server name as a header badge.
+- **Server sessions**: create sessions, stream replies, answer permission approvals, and switch model/agent from server-provided lists — the same chat experience as local sessions. Offline servers show their cached sessions read-only with an offline badge and a reconnect action.
 
 ---
 

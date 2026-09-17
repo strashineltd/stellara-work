@@ -28,6 +28,7 @@ import { SidebarFileView } from './files/SidebarFileView';
 import { AppTopBar } from './shell/AppTopBar';
 import { ServerTargetSelector } from './shell/ServerTargetSelector';
 import { PlaceholderPage } from './shell/PlaceholderPage';
+import { ScheduledTasks } from './ScheduledTasks';
 import { CommandPalette } from './CommandPalette';
 import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
 import { type OpenSettings } from './SettingsPanel';
@@ -1261,12 +1262,7 @@ export function MainView(props: MainViewProps) {
               onBackHome={() => navigateToSection('home')}
             />
           ) : activeSection === 'scheduled' ? (
-            <PlaceholderPage
-              title="已安排"
-              description="定时任务将在后续版本推出"
-              icon="calendar"
-              onBackHome={() => navigateToSection('home')}
-            />
+            <ScheduledTasks onOpenSession={handleSelectSession} />
           ) : (
             <HomeView
               config={config}

@@ -17,7 +17,12 @@ import { OpencodeClient } from './server/opencode-client';
 import { ServerManager } from './server/server-manager';
 import { SessionBridge, type RemoteSessionUpdate } from './server/session-bridge';
 import { ServerChatBridge } from './server/chat-bridge';
+import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engine';
+import { enableNextRunAt, nextRunPatchForUpdate } from './scheduler/next-run';
+import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
 import { installAppMenu } from './menu';
+import { createAppTray, type TrayHandle } from './tray';
+import { shouldHideOnClose } from './tray-logic';
 import { notifyTaskEnd } from './notifications';
 import { isMainWindowWebContents, isSafeExternalUrl, isSameOrigin } from './security/url-guard';
 import { isTrustedIpcSender } from './security/ipc-guard';
@@ -56,6 +61,10 @@ import type {
   ServerProvidersResult,
   ServerVcsResult,
   ServerAgentSummary,
+  ScheduledRun,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskPatch,
 } from '../shared/ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -66,6 +75,13 @@ log.initialize();
 log.info('Stellara Work 启动中...');
 
 let mainWindow: BrowserWindow | null = null;
+
+// v0.9.3: 托盘驻留 —— 退出中标志（Cmd+Q / 托盘「退出」在 before-quit 置位，放行 close 拦截）
+let isQuitting = false;
+// v0.9.3: close 事件必须同步判断，故缓存 backgroundScheduling（启动与 settings:update 时刷新）
+let backgroundSchedulingEnabled = true;
+// v0.9.3: 系统托盘（app.whenReady 后创建，退出流程销毁）
+let appTray: TrayHandle | null = null;
 
 // M2.4: open-file 事件在窗口创建前到达时暂存，窗口就绪后处理
 let pendingOpenFile: string | null = null;
@@ -92,6 +108,61 @@ function requireServerRuntime(): ServerRuntime {
   return serverRuntime;
 }
 
+// v0.9.3: 调度器运行时（app.whenReady 内初始化；T4 IPC 与 T5 托盘经此接线）
+interface SchedulerRuntime {
+  /** 重新加载当前身份的任务集（先错过补偿、再启动引擎）；身份切换时调用 */
+  reload(): Promise<void>;
+  /** 手动立即运行（与定时执行同一路径；后台执行，不阻塞调用方） */
+  runNow(taskId: string): Promise<void>;
+  /** 启停任务（启用时重算 nextRunAt） */
+  toggle(taskId: string): Promise<void>;
+  pause(): void;
+  resume(): void;
+  isPaused(): boolean;
+  /** 任务是否有进行中的运行（列表视图 `running` 字段 / 立即运行防重入） */
+  isRunning(taskId: string): boolean;
+  /** 取消进行中的运行（本地 abort 信号 / 服务器 /abort） */
+  abort(taskId: string): boolean;
+}
+let schedulerRuntime: SchedulerRuntime | null = null;
+
+// 调度运行的服务器流订阅：ServerChatBridge 的 emit 统一转发（无 UI sink）。
+const serverStreamListeners = new Map<string, Set<(event: ChatStreamEvent) => void>>();
+function watchServerStream(streamId: string, listener: (event: ChatStreamEvent) => void): () => void {
+  const listeners = serverStreamListeners.get(streamId) ?? new Set<(event: ChatStreamEvent) => void>();
+  listeners.add(listener);
+  serverStreamListeners.set(streamId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) serverStreamListeners.delete(streamId);
+  };
+}
+function dispatchServerStreamEvent(streamId: string, event: ChatStreamEvent): void {
+  const listeners = serverStreamListeners.get(streamId);
+  if (!listeners) return;
+  for (const listener of [...listeners]) listener(event);
+}
+
+/** 通知点击：聚焦主窗口（调度运行完成时使用） */
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/** 让 ContextHub 在循环（含中断）结束后必定释放 */
+async function* disposeContextAfter<T>(
+  source: AsyncIterable<T>,
+  contextHub: ContextHub,
+): AsyncGenerator<T> {
+  try {
+    yield* source;
+  } finally {
+    contextHub.dispose();
+  }
+}
+
 /** 向所有窗口广播设置已变更（渲染层据此刷新本地状态） */
 function broadcastSettingsChanged(): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -103,6 +174,23 @@ function broadcastSettingsChanged(): void {
 function broadcastIdentityChanged(identity: LocalIdentity): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('identity-changed', identity);
+  }
+}
+
+/** v0.9.3：调度任务变更 / 执行完成后广播（P20，渲染层刷新已安排列表） */
+function broadcastScheduledChanged(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('scheduled:changed');
+  }
+}
+
+/** v0.9.3：刷新 close 拦截缓存的 backgroundScheduling（清空数据后配置回到默认，未设置视为开启） */
+async function refreshBackgroundSchedulingCache(): Promise<void> {
+  try {
+    const { loadConfig } = await import('./config/config-v2');
+    backgroundSchedulingEnabled = (await loadConfig()).app.backgroundScheduling !== false;
+  } catch (err) {
+    log.warn('刷新 backgroundScheduling 缓存失败（沿用当前值）', err);
   }
 }
 
@@ -230,6 +318,14 @@ function createWindow(): void {
       log.warn(`blocked window.open for unsafe url: ${url}`);
     }
     return { action: 'deny' };
+  });
+
+  // v0.9.3: 托盘驻留（P12）—— 开启后台调度时关闭窗口改为隐藏；退出流程（Cmd+Q / 托盘退出）放行。
+  // 托盘不可用（创建失败 / 未创建）时绝不拦截，否则窗口关闭后进程失联。
+  mainWindow.on('close', (event) => {
+    if (!shouldHideOnClose(backgroundSchedulingEnabled, isQuitting, appTray !== null)) return;
+    event.preventDefault();
+    mainWindow?.hide();
   });
 
   mainWindow.on('closed', () => {
@@ -961,6 +1057,8 @@ function registerIpcHandlers(): void {
     const cfg = await loadConfig();
     cfg.app = { ...cfg.app, ...patch };
     await saveConfig(cfg);
+    // v0.9.3: close 拦截需同步判断，缓存最新值（未设置视为开启）
+    backgroundSchedulingEnabled = cfg.app.backgroundScheduling !== false;
     broadcastSettingsChanged();
   });
 
@@ -973,6 +1071,7 @@ function registerIpcHandlers(): void {
     } catch (e) {
       log.warn('清理浏览器分区失败（忽略）', e);
     }
+    await refreshBackgroundSchedulingCache();
     broadcastSettingsChanged();
   });
 
@@ -988,6 +1087,7 @@ function registerIpcHandlers(): void {
       } catch (e) {
         log.warn('清理浏览器分区失败（忽略）', e);
       }
+      await refreshBackgroundSchedulingCache();
       broadcastSettingsChanged();
       return { cleared: 'all' as const };
     }
@@ -1235,11 +1335,85 @@ function registerIpcHandlers(): void {
           const cleared = await cloudAuth.reconcileLocalIdentitySwitch(activeId);
           if (cleared) broadcastSettingsChanged();
         },
-        broadcast: broadcastIdentityChanged,
+        broadcast: (identity) => {
+          broadcastIdentityChanged(identity);
+          // 调度任务按身份隔离：切换后重载新身份的任务集（含错过补偿）
+          void schedulerRuntime?.reload();
+        },
       },
       userId,
       force,
     );
+  });
+
+  // v0.9.3 已安排（调度器）：读取一律按活动身份隔离，id 操作先校验归属（H10）。
+  handle('scheduled:list', async (): Promise<ScheduledTask[]> => {
+    const db = await import('./store/db');
+    // running 为主进程注入的只读视图字段：渲染层据此把「立即运行」换成「停止」
+    return db.listScheduledTasks(getActiveUserId()).map((task) => ({
+      ...task,
+      running: schedulerRuntime?.isRunning(task.id) ?? false,
+    }));
+  });
+
+  handle('scheduled:create', async (_e, input: ScheduledTaskInput): Promise<ScheduledTask> => {
+    const [db, { v4: uuid }] = await Promise.all([import('./store/db'), import('uuid')]);
+    // P19：排期非法 / once 时间已过一律拒绝；id / userId / nextRunAt 由主进程注入
+    const nextRunAt = computeNextRun(input.scheduleKind, input.scheduleExpr, new Date());
+    if (!nextRunAt) throw new Error('调度表达式无效或时间已过，请检查后重试');
+    const task = db.createScheduledTask({
+      ...input,
+      id: uuid(),
+      userId: getActiveUserId(),
+      nextRunAt: nextRunAt.getTime(),
+    });
+    broadcastScheduledChanged();
+    return task;
+  });
+
+  handle('scheduled:update', async (_e, id: string, patch: ScheduledTaskPatch): Promise<ScheduledTask> => {
+    const db = await import('./store/db');
+    const current = db.assertScheduledTaskOwned(id, getActiveUserId());
+    // P19：排期 / 启停变化时无条件校验表达式（含停用操作），再按最终启用状态落 nextRunAt
+    const recalc = nextRunPatchForUpdate(current, patch, new Date());
+    const task = db.updateScheduledTask(id, recalc.changed ? { ...patch, nextRunAt: recalc.nextRunAt } : patch);
+    broadcastScheduledChanged();
+    return task;
+  });
+
+  handle('scheduled:remove', async (_e, id: string): Promise<void> => {
+    const db = await import('./store/db');
+    db.assertScheduledTaskOwned(id, getActiveUserId());
+    db.deleteScheduledTask(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:toggle', async (_e, id: string): Promise<void> => {
+    // 调度器初始化失败（schedulerRuntime 为空）时降级为明确错误
+    if (!schedulerRuntime) throw new Error('调度器未初始化，无法切换任务');
+    await schedulerRuntime.toggle(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:runNow', async (_e, id: string): Promise<void> => {
+    if (!schedulerRuntime) throw new Error('调度器未初始化，无法立即运行');
+    await schedulerRuntime.runNow(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:abort', async (_e, id: string): Promise<void> => {
+    const db = await import('./store/db');
+    // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
+    db.assertScheduledTaskOwned(id, getActiveUserId());
+    // 无进行中的运行时不报错（UI 停止按钮可能基于过期视图）
+    schedulerRuntime?.abort(id);
+    broadcastScheduledChanged();
+  });
+
+  handle('scheduled:runs', async (_e, taskId: string): Promise<ScheduledRun[]> => {
+    const db = await import('./store/db');
+    db.assertScheduledTaskOwned(taskId, getActiveUserId());
+    return db.listRuns(taskId, 20);
   });
 
   // 云账号体系（Phase 3 · 腾讯云 CloudBase）
@@ -2359,6 +2533,8 @@ app.whenReady().then(async () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('chat-stream', { streamId, event });
         }
+        // 调度运行的无 UI sink（与渲染层广播并行，互不影响）
+        dispatchServerStreamEvent(streamId, event);
       },
       newStreamId: () => `server-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
@@ -2387,6 +2563,184 @@ app.whenReady().then(async () => {
     log.error('服务器模块初始化失败', err);
   }
 
+  // v0.9.3: 调度器运行时（db + serverRuntime 就绪后构造；T4/T5 经此接线）
+  try {
+    const [db, { v4: uuid }] = await Promise.all([import('./store/db'), import('uuid')]);
+    const now = (): Date => new Date();
+    const runnerDeps: SchedulerRunnerDeps = {
+      db: {
+        createSession: db.createSession,
+        recordRun: db.recordRun,
+        pruneRuns: db.pruneRuns,
+        getScheduledTask: db.getScheduledTask,
+        updateScheduledTask: db.updateScheduledTask,
+        appendMessage: db.appendMessage,
+      },
+      sessions: {
+        create: (args, userId) => requireServerRuntime().sessions.create(args, userId),
+      },
+      chat: {
+        start: (sessionId, text, model, agent) =>
+          requireServerRuntime().chat.start(sessionId, text, model, agent),
+        abort: (streamId) => requireServerRuntime().chat.abort(streamId),
+        watch: watchServerStream,
+      },
+      runLocalLoop: (request) => {
+        // 复用交互式 Agent 循环；刻意不传 onApproval（危险工具失败关闭，P9/C1）
+        const contextHub = new ContextHub(
+          request.sessionId,
+          request.cwd,
+          request.model.contextWindow ?? 256000,
+          request.model.maxOutputTokens ?? 16384,
+        );
+        const common = {
+          model: request.model,
+          cwd: request.cwd,
+          sessionId: request.sessionId,
+          contextHub,
+          platform: { platform: process.platform, arch: process.arch },
+          signal: request.signal,
+          ...(request.memoryProjectId !== undefined ? { memoryProjectId: request.memoryProjectId } : {}),
+          memoryUserId: request.memoryUserId,
+        };
+        const loop = request.model.wireApi === 'anthropic'
+          ? runAnthropicAgentLoop(request.prompt, common)
+          : runResponsesLoop(request.prompt, common);
+        return disposeContextAfter(loop, contextHub);
+      },
+      // 任务模型：task.modelId，否则活动模型；无模型 / 无 key 时返回 null（run 记 error）
+      resolveModel: async (task) => {
+        const [{ loadConfig }, { getKey }] = await Promise.all([
+          import('./config/config-v2'),
+          import('./config/secrets'),
+        ]);
+        const config = await loadConfig();
+        const entry = task.modelId
+          ? config.models.find((model) => model.id === task.modelId)
+          : config.models.find((model) => model.id === config.activeModelId);
+        if (!entry) return null;
+        const apiKey = getKey(entry.id);
+        if (!apiKey) return null;
+        return {
+          id: entry.id as ModelConfig['id'],
+          label: entry.label,
+          baseUrl: entry.baseUrl,
+          model: entry.model,
+          apiKey,
+          workDir: entry.workDir,
+          isCustom: entry.id === 'custom',
+          wireApi: entry.wireApi ?? 'responses',
+          compatibility: entry.compatibility,
+          maxOutputTokens: entry.maxOutputTokens,
+          reasoningEffort: entry.reasoningEffort,
+          contextWindow: entry.contextWindow,
+        };
+      },
+      isDirectory: async (candidate) => {
+        try {
+          return (await fs.stat(candidate)).isDirectory();
+        } catch {
+          return false;
+        }
+      },
+      // P20：执行记录落库后广播（notify 在 recordRun / updateScheduledTask 之后调用）
+      notify: (state) => {
+        notifyTaskEnd(state, () => focusMainWindow());
+        broadcastScheduledChanged();
+      },
+      uuid,
+      now,
+    };
+
+    const engine = new SchedulerEngine({
+      // 运行中的任务 nextRunAt 尚未推进，必须过滤：任何重排都不能重复触发同一到期周期
+      listDue: () => db.listScheduledTasks(getActiveUserId()).filter((task) => !isRunning(task.id)),
+      onFire: async (task) => {
+        try {
+          await executeTask(task, runnerDeps);
+        } finally {
+          // P3：执行方在落库后重排（引擎触发后不自行重排）
+          engine.reschedule();
+        }
+      },
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    });
+
+    let paused = false;
+    // P18：错过补偿先于引擎启动 —— 先写 missed 记录，再补跑一次（结果照常 success/error），
+    // executeTask 的全生命周期负责重算 nextRunAt / once 停用。
+    const reload = async (): Promise<void> => {
+      engine.stop();
+      const userId = getActiveUserId();
+      // 运行中的任务不算「错过」（其补偿/推进由当前运行的生命周期负责）
+      const tasks = db.listScheduledTasks(userId).filter((task) => !isRunning(task.id));
+      const nowDate = now();
+      for (const task of computeMissed(tasks, nowDate)) {
+        db.recordRun(task.id, {
+          id: uuid(),
+          taskId: task.id,
+          startedAt: task.nextRunAt ?? nowDate.getTime(),
+          finishedAt: nowDate.getTime(),
+          status: 'missed',
+          userId,
+        });
+        try {
+          await executeTask(task, runnerDeps);
+        } catch (err) {
+          log.error('[scheduler] 错过补偿执行失败', task.id, err);
+        }
+      }
+      if (!paused) engine.start();
+    };
+
+    schedulerRuntime = {
+      reload,
+      runNow: async (taskId) => {
+        // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
+        const task = db.assertScheduledTaskOwned(taskId, getActiveUserId());
+        // 防重入：立即运行与定时触发共用同一运行登记（快速双击 / 到点重触发都拒绝）
+        if (isRunning(taskId)) throw new Error('任务正在运行中，请稍后重试');
+        // 后台执行：不阻塞 IPC / 托盘调用方（T4 广播 scheduled:changed 刷新列表）
+        void executeTask(task, runnerDeps)
+          .catch((err) => log.error('[scheduler] 立即运行失败', taskId, err))
+          .finally(() => engine.reschedule());
+        // executeTask 在首个 await 前已同步登记运行中；立即重排把该任务移出堆，
+        // 避免旧的到期快照在手动运行期间再次触发（运行结束的 finally 会再重排一次）
+        engine.reschedule();
+      },
+      toggle: async (taskId) => {
+        // 归属校验：运行时是 T4 IPC 之前的最后一道防线（跨身份 / 未知 id 一律拒绝）
+        const task = db.assertScheduledTaskOwned(taskId, getActiveUserId());
+        if (task.enabled) {
+          db.updateScheduledTask(taskId, { enabled: false, nextRunAt: null });
+        } else {
+          // P21：无法算出下一次运行时间时保持停用（不制造 enabled 却永不触发的死任务）
+          const nextRunAt = enableNextRunAt(task, now());
+          if (nextRunAt === null) {
+            log.warn('[scheduler] 任务无法排期，保持停用', taskId);
+          } else {
+            db.updateScheduledTask(taskId, { enabled: true, nextRunAt });
+          }
+        }
+        engine.reschedule();
+      },
+      pause: () => {
+        paused = true;
+        engine.stop();
+      },
+      resume: () => {
+        paused = false;
+        engine.start();
+      },
+      isPaused: () => paused,
+      isRunning: (taskId) => isRunning(taskId),
+      abort: (taskId) => abortRun(taskId),
+    };
+  } catch (err) {
+    log.error('调度器初始化失败', err);
+  }
+
   // C3: stdio MCP 服务器会 spawn 本地进程，add/test/update(command|args)
   // 前必须在主窗口原生确认；mcp-manager 未接线时 fail-closed 拒绝。
   const { mcpManager } = await import('./mcp/mcp-manager');
@@ -2394,13 +2748,15 @@ app.whenReady().then(async () => {
   mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(mainWindow, cfg));
 
   registerIpcHandlers();
+  // v0.9.3: 托盘驻留 —— close 事件同步读取配置，先加载并缓存（未设置视为开启）
+  const { loadConfig } = await import('./config/config-v2');
+  const cfg0 = await loadConfig();
+  backgroundSchedulingEnabled = cfg0.app?.backgroundScheduling !== false;
   createWindow();
   installAppMenu(() => mainWindow);
 
   // 浏览器：启动时注入 execJsEnabled（Agent 执行 browser_exec_js 的开关）
-  const { loadConfig } = await import('./config/config-v2');
   const { browserService } = await import('./browser/service');
-  const cfg0 = await loadConfig();
   browserService.setExecJsEnabled(cfg0.app?.browser?.execJsEnabled);
   // 单分区清理失败只记日志不阻断（Spec §5）。service.ts 不直接依赖 electron-log：
   // 其顶层 require('electron') 会破坏 vitest，日志回调在此注入。
@@ -2438,10 +2794,45 @@ app.whenReady().then(async () => {
 
   // 启动即连接已配置服务器（不阻塞窗口显示）
   void serverRuntime?.manager.connectAll();
+
+  // v0.9.3: 调度器启动（错过补偿先于引擎启动，避免引擎二次触发过期任务）
+  void schedulerRuntime?.reload();
+
+  // v0.9.3: 系统托盘驻留（P11/P12/P13）—— 左键开窗，右键菜单（暂停/恢复调度仅内存态）
+  try {
+    appTray = createAppTray({
+      onOpen: () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          createWindow();
+        } else {
+          focusMainWindow();
+        }
+      },
+      onTogglePause: () => {
+        if (!schedulerRuntime) return;
+        if (schedulerRuntime.isPaused()) {
+          schedulerRuntime.resume();
+        } else {
+          schedulerRuntime.pause();
+        }
+        appTray?.refreshMenu();
+      },
+      onQuit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+      // 调度器初始化失败时视为未暂停
+      isPaused: () => schedulerRuntime?.isPaused() ?? false,
+    });
+  } catch (err) {
+    log.error('托盘创建失败', err);
+  }
 });
 
 let browserQuitCleanupDone = false;
 app.on('before-quit', (e) => {
+  // v0.9.3: 进入退出流程后放行 close 拦截（Cmd+Q / 托盘退出必须真正退出）
+  isQuitting = true;
   if (browserQuitCleanupDone) return;
   e.preventDefault();
   browserQuitCleanupDone = true;
@@ -2455,6 +2846,8 @@ app.on('before-quit', (e) => {
     } catch (err) {
       log.warn('退出时清理 Cookie 失败（忽略）', err);
     } finally {
+      appTray?.destroy();
+      appTray = null;
       app.quit();
     }
   })();
@@ -2482,6 +2875,9 @@ app.on('activate', () => {
       mainWindow?.webContents.send('menu:action', 'open-path:' + pendingOpenFile);
       pendingOpenFile = null;
     }
+  } else {
+    // v0.9.3: 关闭窗口改为隐藏后，点 Dock 图标需重新显示（窗口仍存在但已隐藏）
+    focusMainWindow();
   }
 });
 

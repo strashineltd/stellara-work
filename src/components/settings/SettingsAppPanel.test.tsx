@@ -144,6 +144,44 @@ describe('SettingsAppPanel', () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the background scheduling switch on by default', async () => {
+    const { container } = await render(<SettingsAppPanel onChanged={vi.fn()} />);
+
+    const toggle = container.querySelector(
+      '[role="switch"][aria-label="关闭窗口后保持后台运行（调度继续）"]',
+    );
+    expect(toggle).toBeTruthy();
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('turns background scheduling off via settings.update and notifies parent', async () => {
+    const onChanged = vi.fn();
+    const { container } = await render(<SettingsAppPanel onChanged={onChanged} />);
+
+    const toggle = container.querySelector(
+      '[role="switch"][aria-label="关闭窗口后保持后台运行（调度继续）"]',
+    );
+    await fireClick(toggle);
+
+    expect(mocks.update).toHaveBeenCalledWith({ backgroundScheduling: false });
+    expect(
+      container
+        .querySelector('[role="switch"][aria-label="关闭窗口后保持后台运行（调度继续）"]')
+        ?.getAttribute('aria-checked'),
+    ).toBe('false');
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects backgroundScheduling=false from settings.get', async () => {
+    mocks = installApi({ theme: 'light', workspaceMode: 'sidebar', backgroundScheduling: false });
+    const { container } = await render(<SettingsAppPanel onChanged={vi.fn()} />);
+
+    const toggle = container.querySelector(
+      '[role="switch"][aria-label="关闭窗口后保持后台运行（调度继续）"]',
+    );
+    expect(toggle?.getAttribute('aria-checked')).toBe('false');
+  });
+
   it('opens the data dir and the main log file', async () => {
     const { container } = await render(<SettingsAppPanel onChanged={vi.fn()} />);
 

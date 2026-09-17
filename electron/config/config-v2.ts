@@ -95,6 +95,8 @@ export interface AppConfig {
     };
     servers?: ServerConfigEntry[];
     defaultServerId?: string | null;
+    /** v0.9.3: 关闭窗口后保持后台运行（调度继续），默认开启 */
+    backgroundScheduling?: boolean;
   };
   mcpServers: McpServerConfig[];
   schemaVersion: 1;
@@ -117,6 +119,7 @@ const SETTINGS_PATCH_WHITELIST: readonly string[] = [
   'workspaceMode',
   'browser',
   'contextCompactionSummaryEnabled',
+  'backgroundScheduling',
 ];
 
 /**

@@ -689,6 +689,8 @@ export interface AppSettings {
   workspaceMode?: 'sidebar' | 'tabs';
   /** 上下文压缩时是否调用模型生成对话摘要（默认开；false = 仅确定性剪枝） */
   contextCompactionSummaryEnabled?: boolean;
+  /** 关闭窗口后保持后台运行（调度继续），默认开启 */
+  backgroundScheduling?: boolean;
   /** 默认服务器 id（只读：仅能经 servers:setDefault 修改） */
   defaultServerId?: string | null;
   // 预留：language
@@ -890,6 +892,87 @@ export interface ServerAgentSummary {
   name: string;
   description?: string;
   mode?: string;
+}
+
+// ============================================
+// 已安排（调度器，v0.9.3）
+// ============================================
+
+/** 调度方式：一次性 ISO 时间 / 间隔分钟数 / cron 表达式 */
+export type ScheduledTaskKind = 'once' | 'interval' | 'cron';
+
+export type ScheduledRunStatus = 'running' | 'success' | 'error' | 'missed' | 'aborted';
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  prompt: string;
+  projectId?: string;
+  workDir?: string;
+  /** 执行端：local（本机）或 server（远端 OpenCode server） */
+  runtime: 'local' | 'server';
+  /** 执行端为 server 时使用的服务器 */
+  serverId?: string;
+  modelId?: string;
+  scheduleKind: ScheduledTaskKind;
+  scheduleExpr: string;
+  enabled: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastStatus: string | null;
+  /** 无交互调度运行中是否允许危险工具（UI 风险确认；运行时沿用失败关闭） */
+  allowDangerous: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** 归属身份（主进程内部字段，渲染层不传） */
+  userId?: string;
+  /** 是否有进行中的运行（主进程注入的只读视图字段，渲染层不传） */
+  running?: boolean;
+}
+
+export interface ScheduledRun {
+  id: string;
+  taskId: string;
+  startedAt: number;
+  finishedAt?: number | null;
+  status: ScheduledRunStatus;
+  sessionId?: string;
+  error?: string;
+  /** 归属身份（主进程内部字段） */
+  userId?: string;
+}
+
+/**
+ * 新建任务的渲染层负载：id / userId / nextRunAt 一律由主进程注入，
+ * 渲染层不得提供（P19 / H10）。
+ */
+export interface ScheduledTaskInput {
+  name: string;
+  prompt: string;
+  projectId?: string;
+  workDir?: string;
+  runtime: 'local' | 'server';
+  serverId?: string;
+  modelId?: string;
+  scheduleKind: ScheduledTaskKind;
+  scheduleExpr: string;
+  enabled?: boolean;
+  allowDangerous?: boolean;
+}
+
+/** 局部更新任务（不含 userId；归属由主进程按活动身份校验） */
+export interface ScheduledTaskPatch {
+  name?: string;
+  prompt?: string;
+  projectId?: string | null;
+  workDir?: string | null;
+  runtime?: 'local' | 'server';
+  serverId?: string | null;
+  modelId?: string | null;
+  scheduleKind?: ScheduledTaskKind;
+  scheduleExpr?: string;
+  enabled?: boolean;
+  allowDangerous?: boolean;
 }
 
 // ============================================
@@ -1315,6 +1398,20 @@ export interface ElectronAPI {
     switch: (userId: string, force?: boolean) => Promise<IdentitySwitchResult>;
     /** 监听身份变更（payload 为新身份）。返回取消监听函数。 */
     onChanged: (callback: (user: LocalIdentity) => void) => () => void;
+  };
+  /** 已安排（调度器，v0.9.3）：数据按活动身份隔离，变更广播 `scheduled:changed` */
+  scheduled: {
+    list: () => Promise<ScheduledTask[]>;
+    create: (input: ScheduledTaskInput) => Promise<ScheduledTask>;
+    update: (id: string, patch: ScheduledTaskPatch) => Promise<ScheduledTask>;
+    remove: (id: string) => Promise<void>;
+    toggle: (id: string) => Promise<void>;
+    runNow: (id: string) => Promise<void>;
+    /** 中止进行中的运行（本地中断 Agent 循环 / 服务器发送 /abort）；无运行时不报错 */
+    abort: (id: string) => Promise<void>;
+    runs: (taskId: string) => Promise<ScheduledRun[]>;
+    /** 监听任务/执行记录变更（唯一事件 `scheduled:changed`）。返回取消监听函数。 */
+    onChanged: (callback: () => void) => () => void;
   };
 }
 

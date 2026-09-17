@@ -17,6 +17,11 @@ import type {
   IdentitySwitchResult,
   CloudAccount,
   CloudAuthState,
+  ScheduledRun,
+  ScheduledTask,
+  ScheduledTaskInput,
+  ScheduledTaskKind,
+  ScheduledTaskPatch,
 } from '../shared/ipc';
 
 const now = Date.now();
@@ -135,6 +140,63 @@ function emptyDiagnostics(): DiagnosticsInfo {
     sessionCount: sessions.length, messageCount: previewRows.length, modelCount: 1,
     activeModelId: previewModel.id, modelsWithKey: [previewModel.id], logTail: '', collectedAt: new Date().toISOString(),
   };
+}
+
+// v0.9.3 调度器预览：内存任务 / 执行记录（UI 页面联调用）
+let previewScheduledTasks: ScheduledTask[] = [
+  {
+    id: 'scheduled-preview-1', name: '每日构建巡检',
+    prompt: '检查主分支构建状态并总结失败项',
+    projectId: 'product', workDir: previewWorkDir, runtime: 'local', modelId: previewModel.id,
+    scheduleKind: 'cron', scheduleExpr: '0 9 * * *', enabled: true,
+    nextRunAt: now + 3_600_000, lastRunAt: now - 43_200_000, lastStatus: 'success',
+    allowDangerous: false, createdAt: now - 86_400_000, updatedAt: now - 43_200_000,
+    running: true,
+  },
+  {
+    id: 'scheduled-preview-2', name: '间隔值班',
+    prompt: '巡检服务器状态，异常时给出摘要',
+    runtime: 'server', serverId: 'srv-preview',
+    scheduleKind: 'interval', scheduleExpr: '30', enabled: false,
+    nextRunAt: null, lastRunAt: null, lastStatus: null,
+    allowDangerous: true, createdAt: now - 3_600_000, updatedAt: now - 3_600_000,
+  },
+];
+let previewScheduledRuns: ScheduledRun[] = [
+  {
+    id: 'run-preview-1', taskId: 'scheduled-preview-1',
+    startedAt: now - 43_200_000, finishedAt: now - 43_190_000,
+    status: 'success', sessionId: 'ui-review',
+  },
+];
+
+function previewNextRunAt(kind: ScheduledTaskKind, expr: string): number | null {
+  if (kind === 'once') {
+    const at = Date.parse(expr);
+    return Number.isNaN(at) ? null : at;
+  }
+  if (kind === 'interval') {
+    const minutes = Number(expr);
+    return Number.isFinite(minutes) && minutes > 0 ? Date.now() + minutes * 60_000 : null;
+  }
+  return Date.now() + 60_000;
+}
+
+/** 补丁 → 任务字段（null 归一为 undefined，保持 ScheduledTask 的可选字段语义） */
+function previewPatchToTask(patch: ScheduledTaskPatch): Partial<ScheduledTask> {
+  const next: Partial<ScheduledTask> = {};
+  if (patch.name !== undefined) next.name = patch.name;
+  if (patch.prompt !== undefined) next.prompt = patch.prompt;
+  if (patch.projectId !== undefined) next.projectId = patch.projectId ?? undefined;
+  if (patch.workDir !== undefined) next.workDir = patch.workDir ?? undefined;
+  if (patch.runtime !== undefined) next.runtime = patch.runtime;
+  if (patch.serverId !== undefined) next.serverId = patch.serverId ?? undefined;
+  if (patch.modelId !== undefined) next.modelId = patch.modelId ?? undefined;
+  if (patch.scheduleKind !== undefined) next.scheduleKind = patch.scheduleKind;
+  if (patch.scheduleExpr !== undefined) next.scheduleExpr = patch.scheduleExpr;
+  if (patch.enabled !== undefined) next.enabled = patch.enabled;
+  if (patch.allowDangerous !== undefined) next.allowDangerous = patch.allowDangerous;
+  return next;
 }
 
 /** 为 `?ui-preview` 安装内存实现，便于在普通浏览器里检查真实 React 界面。 */
@@ -473,6 +535,54 @@ export function installDevPreviewApi(): void {
           previewIdentityListeners.delete(callback);
         };
       },
+    },
+    scheduled: {
+      list: async () => previewScheduledTasks,
+      create: async (input: ScheduledTaskInput) => {
+        const stamp = Date.now();
+        const task: ScheduledTask = {
+          ...input,
+          id: `scheduled-${stamp}`,
+          enabled: input.enabled ?? true,
+          allowDangerous: input.allowDangerous ?? false,
+          nextRunAt: previewNextRunAt(input.scheduleKind, input.scheduleExpr),
+          lastRunAt: null, lastStatus: null,
+          createdAt: stamp, updatedAt: stamp,
+        };
+        previewScheduledTasks = [task, ...previewScheduledTasks];
+        return task;
+      },
+      update: async (id, patch) => {
+        const current = previewScheduledTasks.find((task) => task.id === id);
+        if (!current) throw new Error('任务不存在或已被删除');
+        const updated: ScheduledTask = {
+          ...current,
+          ...previewPatchToTask(patch),
+          updatedAt: Date.now(),
+        };
+        if (patch.enabled === false) updated.nextRunAt = null;
+        else if (patch.enabled === true || patch.scheduleKind !== undefined || patch.scheduleExpr !== undefined) {
+          updated.nextRunAt = previewNextRunAt(updated.scheduleKind, updated.scheduleExpr);
+        }
+        previewScheduledTasks = previewScheduledTasks.map((task) => (task.id === id ? updated : task));
+        return updated;
+      },
+      remove: async (id) => {
+        previewScheduledTasks = previewScheduledTasks.filter((task) => task.id !== id);
+        previewScheduledRuns = previewScheduledRuns.filter((run) => run.taskId !== id);
+      },
+      toggle: async (id) => {
+        const current = previewScheduledTasks.find((task) => task.id === id);
+        if (!current) throw new Error('任务不存在或已被删除');
+        const enabled = !current.enabled;
+        previewScheduledTasks = previewScheduledTasks.map((task) => (task.id === id
+          ? { ...task, enabled, nextRunAt: enabled ? previewNextRunAt(task.scheduleKind, task.scheduleExpr) : null, updatedAt: Date.now() }
+          : task));
+      },
+      runNow: async () => {},
+      abort: async () => {},
+      runs: async (taskId) => previewScheduledRuns.filter((run) => run.taskId === taskId),
+      onChanged: () => () => {},
     },
   };
 
