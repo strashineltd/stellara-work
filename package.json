@@ -120,6 +120,8 @@
       "category": "public.app-category.developer-tools",
       "identity": "-",
       "hardenedRuntime": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.inherit.plist",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "win": {

@@ -57,3 +57,29 @@ Notes:
 - **White screen on first launch**: check `~/Library/Logs/Stellara Work/main.log` for main-process errors (common causes: data directory permissions, Keychain access denied).
 - **Commands rejected by the allowlist**: the agent's shell tool only permits allowlisted commands — use allowed ones (`ls / cat / grep / find / node`) or go through the approval flow.
 - **Keychain permission dialog**: when an encrypted key is first accessed, macOS asks whether Electron may access the keychain — choose "Allow". If you accidentally deny, restore it in System Settings → Privacy & Security → Keychain.
+
+## 6. Signing & Notarization · 签名与公证
+
+### 6.1 本地 / ad-hoc 构建
+
+`package.json` 的 `build.mac` 已启用 `hardenedRuntime`，并显式关联：
+
+- `assets/entitlements.mac.plist`（主进程）
+- `assets/entitlements.mac.inherit.plist`（渲染器 / GPU / 工具等子进程）
+
+未配置证书的构建仍用 `"identity": "-"` 做 ad-hoc 签名（Apple Silicon 要求二进制至少有 ad-hoc 签名）。**ad-hoc 签名无法通过公证**，README 中「右键打开 / xattr」的 Gatekeeper 绕过说明依然适用。
+
+### 6.2 发布：Developer ID + 公证（Notarization）
+
+1. **证书**：安装 `Developer ID Application` 证书，并把 `build.mac.identity` 从 `"-"` 改为证书名（如 `Developer ID Application: Your Name (TEAMID)`）。没有证书时不要开启公证。
+2. **凭据**（electron-builder 26 读取环境变量，三选一）：
+   - `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`
+   - `APPLE_API_KEY` + `APPLE_API_KEY_ID` + `APPLE_API_ISSUER`（推荐）
+   - `APPLE_KEYCHAIN` + `APPLE_KEYCHAIN_PROFILE`
+3. **构建**：`npm run package:mac`。凭据齐全时 electron-builder 在签名后自动调用 notarytool 公证；未配置凭据时日志显示 `skipped macOS notarization`。如需显式关闭，设置 `build.mac.notarize: false`。
+4. **验证**：
+
+   ```bash
+   spctl -a -vvv -t install "release/mac-arm64/Stellara Work.app"
+   xcrun stapler validate "release/mac-arm64/Stellara Work.app"
+   ```
