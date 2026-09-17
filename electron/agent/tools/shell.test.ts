@@ -869,7 +869,7 @@ describe('runCommand structural policy (executable + subcommand allowlist)', () 
         /命令不在白名单内|未允许的子命令|子命令必须是第一个参数/,
       );
     }
-  });
+  }, 15000); // CI 冷启动（npm/make 首次执行）可能超出默认 5s，单独放宽
 
   it('rejects -v and safe flags mixed with other arguments', async () => {
     for (const cmd of ['npm -v', 'git -v', 'cargo -v', 'xcodebuild -version']) {

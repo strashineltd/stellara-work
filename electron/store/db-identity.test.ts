@@ -126,7 +126,8 @@ describe('one-time identity backfill (H10)', () => {
     // H10 之后在默认档新建的会话：用户随后创建身份并重启，也不能被回填
     createSession({ id: 'fresh-default', title: 'y', modelId: 'm' });
     expect(runBackfill('u1')).toBe(0);
-    expect(listSessions('default').map((s) => s.id)).toEqual(['legacy-default', 'fresh-default']);
+    // 同毫秒创建时 updated_at 相同，ORDER BY updated_at DESC 的顺序不稳定：断言集合而非顺序
+    expect(listSessions('default').map((s) => s.id).sort()).toEqual(['fresh-default', 'legacy-default']);
   });
 
   it('keeps the marker across a database reopen', () => {
