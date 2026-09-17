@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -295,6 +295,19 @@ describe('上下文压缩与恢复', () => {
     expect(hub.getResponseItems().length).toBeLessThan(60);
     const events = getContextEventsBySession('sess-001').filter((e) => e.event === 'context_compacted');
     expect(events).toHaveLength(1);
+  });
+
+  it('检查点创建失败时降级返回且窗口不变', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    addItems(hub, 60);
+    const before = hub.getResponseItems();
+    vi.spyOn(hub, 'createCheckpoint').mockImplementation(() => {
+      throw new Error('disk full');
+    });
+    const result = await hub.ensureContextBudget({});
+    expect(result.compacted).toBe(false);
+    expect(hub.getResponseItems()).toHaveLength(before.length);
+    expect(hub.getResponseItems()).toEqual(before);
   });
 
   it('重开 hub 按指针恢复活跃窗口', async () => {

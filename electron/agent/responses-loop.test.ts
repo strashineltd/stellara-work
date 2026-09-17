@@ -6,6 +6,7 @@ import { runResponsesLoop } from './responses-loop';
 import { ContextHub } from '../context/context-hub';
 import { _setDbPath, getDb, createSession, initContextTables } from '../store/db';
 import type { ModelConfig } from '../../shared/ipc';
+import type { ResponseItem } from '../../shared/responses';
 
 let tmpDir: string;
 
@@ -67,7 +68,7 @@ const { mockRequiresApproval, mockMcpCallTool, mockRetrieveMemories, streamQueue
     mockRetrieveMemories: vi.fn().mockResolvedValue({ memories: [], promptBlock: null }),
     streamQueue: [] as Array<() => Array<Record<string, unknown>>>,
     defaultStreamEvents,
-    responseRequests: [] as Array<{ tools?: Array<{ name: string }> }>,
+    responseRequests: [] as Array<{ tools?: Array<{ name: string }>; input?: unknown[] }>,
   };
 });
 
@@ -79,7 +80,7 @@ vi.mock('../llm/responses', () => {
   return {
     ResponsesClient: class {
       async *createStream(request: unknown) {
-        if (request && typeof request === 'object') responseRequests.push(request as { tools?: Array<{ name: string }> });
+        if (request && typeof request === 'object') responseRequests.push(request as { tools?: Array<{ name: string }>; input?: unknown[] });
         const events = streamQueue.length > 0 ? streamQueue.shift()!() : defaultStreamEvents;
         for (const event of events) yield event;
       }
@@ -776,5 +777,52 @@ describe('上下文压缩接线', () => {
     const parsed = outputs.map((item) => JSON.parse((item as { output: string }).output) as { truncation?: { kind?: string } });
     expect(parsed.some((p) => p?.truncation?.kind === 'read_file')).toBe(true);
     expect(JSON.stringify(outputs)).not.toContain(marker);
+  });
+
+  it('真实 hub 在首个请求前自动压缩，且被保留的调用不丢紧邻 reasoning', async () => {
+    // window=8000 时 instructions+工具 schema 的 extraTokens（≈4.6k）高于硬阈值（3.15k），
+    // 压缩后仍会 hardLimited；用 40k 窗口（同长会话集成测试）验证真实 happy path。
+    const hub = new ContextHub('sess-001', tmpDir, 40_000, 500);
+
+    const prefill: ResponseItem[] = [];
+    for (let i = 0; i < 100; i++) {
+      prefill.push({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `${i}:${'x'.repeat(2000)}` }],
+      });
+    }
+    // 大 reasoning 使自然切点恰好落在它身上：修复前 reasoning 会被丢弃而 function_call 被保留
+    prefill.push({ type: 'reasoning', content: [{ type: 'reasoning_text', text: 'r'.repeat(44_000) }] });
+    prefill.push({ type: 'function_call', call_id: 'call-1', name: 'read_file', arguments: '{}', status: 'completed' });
+    prefill.push({ type: 'function_call_output', call_id: 'call-1', output: 'file content' });
+    for (const item of prefill) hub.addResponseItem(item);
+
+    const events: Array<{ type: string; compressedCount?: number }> = [];
+    for await (const event of runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+    })) {
+      events.push(event);
+    }
+
+    const summaries = events.filter((e) => e.type === 'summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]!.compressedCount).toBeGreaterThan(0);
+
+    expect(responseRequests.length).toBeGreaterThan(0);
+    const input = responseRequests[0]!.input as ResponseItem[];
+    expect(Array.isArray(input)).toBe(true);
+    expect(input.length).toBeLessThan(prefill.length);
+
+    const kept = new Set<ResponseItem>(input);
+    for (let i = 0; i < prefill.length; i++) {
+      const item = prefill[i]!;
+      if (item.type !== 'function_call' || !kept.has(item)) continue;
+      const prev = prefill[i - 1];
+      if (prev && prev.type === 'reasoning') expect(kept.has(prev)).toBe(true);
+    }
   });
 });

@@ -13,7 +13,6 @@
 export {
   CONTEXT_WINDOW_OPTIONS,
   DEFAULT_CONTEXT_WINDOW,
-  defaultThresholdTokens,
 } from './context-window';
 export type { ContextWindowValue } from './context-window';
 

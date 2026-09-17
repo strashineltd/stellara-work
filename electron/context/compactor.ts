@@ -59,7 +59,10 @@ export function transactionComponents(items: ResponseItem[]): Array<{ start: num
     const callAt = callIndex.get(item.call_id);
     if (callAt == null) return;
     paired.add(item.call_id);
-    spans.push({ start: Math.min(callAt, index), end: Math.max(callAt, index) });
+    const spanStart = Math.min(callAt, index);
+    let start = spanStart;
+    while (start > 0 && items[start - 1]!.type === 'reasoning') start--;
+    spans.push({ start, end: Math.max(callAt, index) });
   });
   items.forEach((item, index) => {
     if (item.type === 'function_call' && !paired.has(item.call_id)) {

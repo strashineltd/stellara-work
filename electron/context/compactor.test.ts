@@ -99,6 +99,39 @@ describe('compact', () => {
     expect(result.ok).toBe(true);
     expect(result.tokensAfter).toBeLessThan(result.tokensBefore);
   });
+
+  it('reasoning 与后续调用同组，切点不拆开', () => {
+    const items: ResponseItem[] = [
+      msg('x'.repeat(400)),
+      { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'r1' }] },
+      call('c1'),
+      out('c1', 'a'.repeat(400)),
+      { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'r2' }] },
+      call('c2'),
+      out('c2', 'b'.repeat(400)),
+    ];
+    const result = compact(items, options({ targetTokens: 50, hardLimitTokens: 1_000_000 }));
+    expect(result.keptItems[0]!.type).toBe('reasoning');
+    assertNoOrphanOutputs(result.keptItems);
+  });
+
+  it('被保留的调用不会丢掉紧邻其前的 reasoning', () => {
+    const all: ResponseItem[] = [
+      msg('x'.repeat(400)),
+      { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'r1' }] },
+      call('c1'),
+      out('c1', 'a'.repeat(400)),
+      msg('tail'),
+    ];
+    const result = compact(all, options({ targetTokens: 30, hardLimitTokens: 1_000_000 }));
+    const kept = new Set(result.keptItems);
+    for (let i = 0; i < all.length; i++) {
+      const item = all[i]!;
+      if (item.type !== 'function_call' || !kept.has(item)) continue;
+      const prev = all[i - 1];
+      if (prev && prev.type === 'reasoning') expect(kept.has(prev)).toBe(true);
+    }
+  });
 });
 
 import { capToolOutput, buildSummaryTranscript } from './compactor';

@@ -884,7 +884,14 @@ export class ContextHub {
       }
 
       const usage = this.context.usage;
-      const checkpoint = this.createCheckpoint();
+      let checkpoint: ContextCheckpoint;
+      try {
+        checkpoint = this.createCheckpoint();
+      } catch (err) {
+        log.warn('上下文检查点创建失败，跳过本次压缩:', err);
+        this.context.usage = this.calculateUsage();
+        return { compacted: false, hardLimited: this.context.usage.hardLimited };
+      }
       const activeItems = [...this.context.responseItems];
       const result = compact(activeItems, {
         targetTokens: Math.floor(usage.usableInputBudget * 0.6),

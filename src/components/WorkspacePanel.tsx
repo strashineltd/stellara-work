@@ -119,7 +119,7 @@ interface WorkspacePanelProps extends PresenceMotionProps {
   contextWindow?: number;
   subagents?: SubagentInfo[];
   onCreateCheckpoint?: () => Promise<void>;
-  onCompact?: () => Promise<{ ok: boolean; busy?: boolean }>;
+  onCompact?: () => Promise<{ ok: boolean; busy?: boolean; compacted?: boolean }>;
 }
 
 const MIN_WIDTH = 200;
@@ -434,7 +434,7 @@ function ContextCheckpointSection({
   staleEvidence?: Array<{ id: string; summary: string }>;
   taskGate?: { ok: boolean; reasons: string[] };
   onCreateCheckpoint?: () => Promise<void>;
-  onCompact?: () => Promise<{ ok: boolean; busy?: boolean }>;
+  onCompact?: () => Promise<{ ok: boolean; busy?: boolean; compacted?: boolean }>;
 }) {
   const [creating, setCreating] = useState(false);
   const [compacting, setCompacting] = useState(false);
@@ -476,7 +476,8 @@ function ContextCheckpointSection({
               setCompactNotice(null);
               void onCompact()
                 .then((res) => {
-                  if (res.ok) setCompactNotice('已压缩');
+                  if (res.ok && res.compacted === false) setCompactNotice('无需压缩');
+                  else if (res.ok) setCompactNotice('已压缩');
                   else if (res.busy) setCompactNotice('任务运行中，将在下一轮自动压缩');
                 })
                 .catch(() => setCompactNotice('压缩失败'))
