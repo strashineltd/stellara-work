@@ -447,4 +447,200 @@ describe('runAnthropicAgentLoop', () => {
       await expect(fs.stat(path.join(workDir, 'guarded.txt'))).rejects.toThrow();
     });
   });
+
+  it('工具输出超过上限时截断写入 hub，tool_result 事件仍返回完整结果', async () => {
+    const big = Array.from({ length: 120_000 }, (_, i) => String.fromCharCode(32 + ((i * 37) % 95))).join('');
+    await fs.writeFile(path.join(workDir, 'big.txt'), big);
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'read_file', input: { path: 'big.txt' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 6 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const seen: Array<{ output?: string }> = [];
+    for await (const event of runAnthropicAgentLoop('读大文件', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) {
+      if (event.type === 'tool_result') seen.push((event.toolResult?.result ?? {}) as { output?: string });
+    }
+
+    const hubOutput = hub.getResponseItems().find((item) => item.type === 'function_call_output');
+    expect(hubOutput && hubOutput.type === 'function_call_output' ? hubOutput.output : '').toContain('"truncation"');
+    expect(seen[0]?.output?.length).toBe(big.length);
+  });
+
+  it('达到软阈值时压缩并重建消息窗口（被丢弃前缀不进入请求）', async () => {
+    const hub = new ContextHub('sub-session', workDir, 30_000, 1_000, { persist: false });
+    const prefix = Array.from({ length: 200_000 }, (_, i) => String.fromCharCode(32 + ((i * 37) % 95))).join('');
+    hub.addResponseItem({ type: 'message', role: 'user', content: [{ type: 'input_text', text: `DROP-ME-PREFIX ${prefix}` }], status: 'completed' });
+    for (let i = 0; i < 10; i++) {
+      hub.addResponseItem({
+        type: 'message',
+        role: i % 2 === 0 ? 'assistant' : 'user',
+        content: [{ type: i % 2 === 0 ? 'output_text' : 'input_text', text: `KEEP-${i} ${'y'.repeat(200)}` }],
+        status: 'completed',
+      });
+    }
+
+    mockCreate.mockResolvedValueOnce({
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 2 },
+      content: [{ type: 'text', text: 'ok' }],
+    });
+
+    const events = [];
+    for await (const event of runAnthropicAgentLoop('继续', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) events.push(event);
+
+    expect(events.some((event) => event.type === 'summary')).toBe(true);
+    const firstRequest = mockCreate.mock.calls[0]![0];
+    const serialized = JSON.stringify(firstRequest.messages);
+    expect(serialized).not.toContain('DROP-ME-PREFIX');
+    expect(serialized).toContain('继续');
+  });
+
+  it('超过工具调用上限后进入强制审批（只读工具也会征求批准）', async () => {
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'read_file', input: { path: 'note.txt' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-2', name: 'read_file', input: { path: 'note.txt' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-3', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const onApproval = vi.fn().mockResolvedValue(true);
+    const events = [];
+    for await (const event of runAnthropicAgentLoop('任务', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client: { create: mockCreate }, maxToolCalls: 1, onApproval,
+    })) events.push(event);
+
+    expect(events.some((event) => event.type === 'content' && event.content?.includes('已达到工具调用上限(1)'))).toBe(true);
+    expect(onApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ function: expect.objectContaining({ name: 'read_file' }) }),
+    );
+  });
+
+  it('危险工具（write_file）在 Anthropic 路径同样需要审批', async () => {
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'write_file', input: { path: 'x.txt', content: 'x' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const onApproval = vi.fn().mockResolvedValue(false);
+    for await (const _event of runAnthropicAgentLoop('写文件', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client: { create: mockCreate }, onApproval,
+    })) { /* 消费事件 */ }
+
+    expect(onApproval).toHaveBeenCalledTimes(1);
+    const output = hub.getResponseItems().find((item) => item.type === 'function_call_output');
+    expect(output && output.type === 'function_call_output' ? output.output : '').toContain('用户拒绝了此操作');
+  });
+
+  it('跨轮重建为未配对的调用补中断结果，且请求角色交替', async () => {
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    // 模拟上一轮在工具执行前中断：有 function_call 无 output
+    hub.addResponseItem({ type: 'function_call', call_id: 'toolu-cancelled', name: 'read_file', arguments: '{"path":"note.txt"}', status: 'completed' });
+
+    mockCreate.mockResolvedValueOnce({
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 2 },
+      content: [{ type: 'text', text: 'ok' }],
+    });
+
+    for await (const _event of runAnthropicAgentLoop('继续', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) { /* 消费事件 */ }
+
+    const firstRequest = mockCreate.mock.calls[0]![0];
+    const msgs = firstRequest.messages as Array<{ role: string; content: unknown }>;
+    const flat = msgs.flatMap((m) => (Array.isArray(m.content) ? m.content : [])) as Array<{ type?: string; tool_use_id?: string }>;
+    expect(flat.filter((b) => b.type === 'tool_use')).toHaveLength(1);
+    const results = flat.filter((b) => b.type === 'tool_result');
+    expect(results).toHaveLength(1);
+    expect(results[0]!.tool_use_id).toBe('toolu-cancelled');
+    // 角色必须交替（不能出现连续两条 user）
+    const roles = msgs.map((m) => m.role);
+    expect(roles.every((role, i) => i === 0 || role !== roles[i - 1])).toBe(true);
+  });
+
+  it('同轮并行工具在 hub 中相邻，重建后合并为单条 assistant 与单条 user 消息', async () => {
+    await fs.writeFile(path.join(workDir, 'a.txt'), 'A');
+    await fs.writeFile(path.join(workDir, 'b.txt'), 'B');
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [
+          { type: 'tool_use', id: 'toolu-1', name: 'read_file', input: { path: 'a.txt' } },
+          { type: 'tool_use', id: 'toolu-2', name: 'read_file', input: { path: 'b.txt' } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: '完成' }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-3', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: 'ok' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    for await (const _event of runAnthropicAgentLoop('读两个文件', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) { /* 消费事件 */ }
+
+    const toolItemTypes = hub.getResponseItems()
+      .filter((item) => item.type === 'function_call' || item.type === 'function_call_output')
+      .map((item) => item.type);
+    expect(toolItemTypes).toEqual(['function_call', 'function_call', 'function_call_output', 'function_call_output']);
+
+    for await (const _event of runAnthropicAgentLoop('继续', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) { /* 消费事件 */ }
+
+    const secondRequest = mockCreate.mock.calls[2]![0];
+    const msgs = secondRequest.messages as Array<{ role: string; content: unknown }>;
+    const assistantIdx = msgs.findIndex((m) => m.role === 'assistant'
+      && Array.isArray(m.content)
+      && (m.content as Array<{ type?: string }>).some((b) => b.type === 'tool_use'));
+    expect(assistantIdx).toBeGreaterThanOrEqual(0);
+    const assistantBlocks = msgs[assistantIdx]!.content as Array<{ type: string; id?: string }>;
+    expect(assistantBlocks.filter((b) => b.type === 'tool_use').map((b) => b.id)).toEqual(['toolu-1', 'toolu-2']);
+    const next = msgs[assistantIdx + 1]!;
+    expect(next.role).toBe('user');
+    const resultBlocks = next.content as Array<{ type: string; tool_use_id?: string }>;
+    expect(resultBlocks.filter((b) => b.type === 'tool_result').map((b) => b.tool_use_id)).toEqual(['toolu-1', 'toolu-2']);
+    const roles = msgs.map((m) => m.role);
+    expect(roles.every((role, i) => i === 0 || role !== roles[i - 1])).toBe(true);
+  });
 });
