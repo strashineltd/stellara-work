@@ -447,4 +447,120 @@ describe('runAnthropicAgentLoop', () => {
       await expect(fs.stat(path.join(workDir, 'guarded.txt'))).rejects.toThrow();
     });
   });
+
+  it('工具输出超过上限时截断写入 hub，tool_result 事件仍返回完整结果', async () => {
+    const big = Array.from({ length: 120_000 }, (_, i) => String.fromCharCode(32 + ((i * 37) % 95))).join('');
+    await fs.writeFile(path.join(workDir, 'big.txt'), big);
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'read_file', input: { path: 'big.txt' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 6 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const seen: Array<{ output?: string }> = [];
+    for await (const event of runAnthropicAgentLoop('读大文件', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) {
+      if (event.type === 'tool_result') seen.push((event.toolResult?.result ?? {}) as { output?: string });
+    }
+
+    const hubOutput = hub.getResponseItems().find((item) => item.type === 'function_call_output');
+    expect(hubOutput && hubOutput.type === 'function_call_output' ? hubOutput.output : '').toContain('"truncation"');
+    expect(seen[0]?.output?.length).toBe(big.length);
+  });
+
+  it('达到软阈值时压缩并重建消息窗口（被丢弃前缀不进入请求）', async () => {
+    const hub = new ContextHub('sub-session', workDir, 30_000, 1_000, { persist: false });
+    const prefix = Array.from({ length: 200_000 }, (_, i) => String.fromCharCode(32 + ((i * 37) % 95))).join('');
+    hub.addResponseItem({ type: 'message', role: 'user', content: [{ type: 'input_text', text: `DROP-ME-PREFIX ${prefix}` }], status: 'completed' });
+    for (let i = 0; i < 10; i++) {
+      hub.addResponseItem({
+        type: 'message',
+        role: i % 2 === 0 ? 'assistant' : 'user',
+        content: [{ type: i % 2 === 0 ? 'output_text' : 'input_text', text: `KEEP-${i} ${'y'.repeat(200)}` }],
+        status: 'completed',
+      });
+    }
+
+    mockCreate.mockResolvedValueOnce({
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 2 },
+      content: [{ type: 'text', text: 'ok' }],
+    });
+
+    const events = [];
+    for await (const event of runAnthropicAgentLoop('继续', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+    })) events.push(event);
+
+    expect(events.some((event) => event.type === 'summary')).toBe(true);
+    const firstRequest = mockCreate.mock.calls[0]![0];
+    const serialized = JSON.stringify(firstRequest.messages);
+    expect(serialized).not.toContain('DROP-ME-PREFIX');
+    expect(serialized).toContain('继续');
+  });
+
+  it('超过工具调用上限后进入强制审批（只读工具也会征求批准）', async () => {
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'read_file', input: { path: 'note.txt' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-2', name: 'read_file', input: { path: 'note.txt' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-3', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const onApproval = vi.fn().mockResolvedValue(true);
+    const events = [];
+    for await (const event of runAnthropicAgentLoop('任务', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client: { create: mockCreate }, maxToolCalls: 1, onApproval,
+    })) events.push(event);
+
+    expect(events.some((event) => event.type === 'content' && event.content?.includes('已达到工具调用上限(1)'))).toBe(true);
+    expect(onApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ function: expect.objectContaining({ name: 'read_file' }) }),
+    );
+  });
+
+  it('危险工具（write_file）在 Anthropic 路径同样需要审批', async () => {
+    mockCreate
+      .mockResolvedValueOnce({
+        id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'tool_use', id: 'toolu-1', name: 'write_file', input: { path: 'x.txt', content: 'x' } }],
+      })
+      .mockResolvedValueOnce({
+        id: 'msg-2', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 2 },
+        content: [{ type: 'text', text: '完成' }],
+      });
+
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const onApproval = vi.fn().mockResolvedValue(false);
+    for await (const _event of runAnthropicAgentLoop('写文件', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client: { create: mockCreate }, onApproval,
+    })) { /* 消费事件 */ }
+
+    expect(onApproval).toHaveBeenCalledTimes(1);
+    const output = hub.getResponseItems().find((item) => item.type === 'function_call_output');
+    expect(output && output.type === 'function_call_output' ? output.output : '').toContain('用户拒绝了此操作');
+  });
 });

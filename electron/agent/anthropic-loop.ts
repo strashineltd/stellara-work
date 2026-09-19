@@ -7,15 +7,25 @@ import type {
   SkillDef,
   ToolCall,
   ToolExecutionContext,
-  ToolName,
 } from '../../shared/ipc';
 import type { AnthropicContent, AnthropicMessage, AnthropicTool } from '../llm/anthropic';
 import { AnthropicClient } from '../llm/anthropic';
-import { ContextHub, type PlanStep, type TaskContext } from '../context/context-hub';
-import { allTools, invokeTool, planModeTools } from './tools';
+import { ContextHub, type PlanStep } from '../context/context-hub';
+import { allTools, planModeTools } from './tools';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { parsePlanFromContent } from './plan-parser';
 import { mcpManager } from '../mcp/mcp-manager';
+import { needsApproval } from './shared/tool-policy';
+import { findPlanStepForTool } from './shared/plan-steps';
+import { executeToolCall } from './shared/tool-pipeline';
+import { runBudgetCheck } from './shared/context-budget';
+import { evaluateToolCallLimit, MAX_TOOL_CALLS_DEFAULT } from './shared/loop-limits';
+import { migrateHistoryToHub } from './shared/history-migration';
+import { buildInstructions } from './shared/instructions';
+import { projectAnthropicMessages } from './shared/anthropic-projection';
+import { estimateRequestTokens } from '../context/token-estimator';
+import { summarizeWithModel } from '../llm/client-factory';
+import { COMPACTION_SUMMARY_PROMPT } from '../context/compactor';
 
 export interface AnthropicLoopOptions {
   model: ModelConfig;
@@ -45,15 +55,17 @@ export interface AnthropicLoopOptions {
   agentId?: string;
   maxIterations?: number;
   maxToolCalls?: number;
+  /** 达到 maxToolCalls 上限后转为强制审批模式（默认 true） */
+  requireApprovalAfterLimit?: boolean;
+  /** 压缩时是否调用 LLM 生成对话摘要（默认 false） */
+  compactionSummaryEnabled?: boolean;
   /** 子代理内部关闭再次分派，避免递归任务树。 */
   allowSubagents?: boolean;
   /** 测试与嵌入场景可注入客户端；桌面运行时始终使用模型配置创建。 */
   client?: Pick<AnthropicClient, 'create'>;
 }
 
-const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents', 'browser_act', 'browser_exec_js', 'browser_screenshot', 'memory_save']);
-/** plan（只读）模式下也必须逐次审批的敏感工具：可能读到已登录页面的内容 */
-const PLAN_MODE_SENSITIVE_TOOLS = new Set(['browser_snapshot', 'browser_extract']);
+// 工具策略与限额常量已移至 ./shared（tool-policy、loop-limits）
 
 export async function* runAnthropicAgentLoop(
   userMessage: string,
@@ -68,28 +80,8 @@ export async function* runAnthropicAgentLoop(
     ? [...planModeTools, ...(options.planExtraTools ?? [])]
     : [...executableTools, ...(options.extraTools ?? [])])
     .map(toAnthropicTool);
-  const messages: AnthropicMessage[] = [];
-  const history = options.history ?? [];
-
-  if (options.contextHub.getResponseItems().length === 0) {
-    for (const item of history) {
-      if ((item.role === 'user' || item.role === 'assistant') && item.content) {
-        messages.push({ role: item.role, content: item.content });
-        options.contextHub.addResponseItem({
-          type: 'message',
-          role: item.role,
-          content: [{ type: item.role === 'user' ? 'input_text' : 'output_text', text: item.content }],
-          status: 'completed',
-        });
-      }
-    }
-  } else {
-    for (const item of history) {
-      if ((item.role === 'user' || item.role === 'assistant') && item.content) {
-        messages.push({ role: item.role, content: item.content });
-      }
-    }
-  }
+  migrateHistoryToHub(options.contextHub, options.history);
+  let messages: AnthropicMessage[] = projectAnthropicMessages(options.contextHub.getResponseItems());
 
   messages.push({ role: 'user', content: userMessage });
   await options.contextHub.commitEvent('user_message_added', { content: userMessage, attachments: [] }, options.agentId ?? 'main');
@@ -138,6 +130,7 @@ export async function* runAnthropicAgentLoop(
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let toolCalls = 0;
+  let forceApprovalMode = false;
   /** 连续输出截断次数（reasoning 吃满 max_tokens 时每轮都会截断） */
   let incompleteCount = 0;
 
@@ -154,8 +147,25 @@ export async function* runAnthropicAgentLoop(
       yield { type: 'error', error: '用户中断', errorMeta: { kind: 'user_aborted', hint: '请求已取消', retryable: false } };
       return;
     }
-    if (options.contextHub.isHardLimited()) {
-      yield { type: 'error', error: '上下文达到硬阈值', errorMeta: { kind: 'context_too_long', hint: '上下文达到硬阈值，请创建检查点后继续', retryable: false } };
+    const budget = await runBudgetCheck({
+      hub: options.contextHub,
+      requestTokens: estimateRequestTokens({
+        items: [],
+        instructions: buildInstructions(system, options.contextHub.getContext()),
+        tools,
+      }),
+      signal: options.signal,
+      summarize:
+        options.compactionSummaryEnabled === true
+          ? (transcript) => summarizeWithModel(options.model, COMPACTION_SUMMARY_PROMPT, transcript, options.signal)
+          : undefined,
+    });
+    for (const budgetEvent of budget.events) yield budgetEvent;
+    if (budget.compacted) {
+      // 压缩后从 hub 重建消息窗口：被丢弃前缀必须离开请求体
+      messages = projectAnthropicMessages(options.contextHub.getResponseItems());
+    }
+    if (budget.hardLimited) {
       return;
     }
 
@@ -243,8 +253,14 @@ export async function* runAnthropicAgentLoop(
     }
 
     toolCalls += uses.length;
-    if (toolCalls > (options.maxToolCalls ?? 50)) {
-      yield { type: 'error', error: '工具调用次数超过限制', errorMeta: { kind: 'invalid_request', hint: '工具调用次数超过限制', retryable: false } };
+    const limit = evaluateToolCallLimit(toolCalls, options.maxToolCalls ?? MAX_TOOL_CALLS_DEFAULT, {
+      requireApprovalAfterLimit: options.requireApprovalAfterLimit,
+    });
+    if (limit.kind === 'force_approval') {
+      forceApprovalMode = true;
+      yield { type: 'content', content: limit.message };
+    } else if (limit.kind === 'error') {
+      yield { type: 'error', error: limit.message, errorMeta: { kind: 'invalid_request', hint: limit.hint, retryable: false } };
       return;
     }
 
@@ -282,11 +298,13 @@ export async function* runAnthropicAgentLoop(
         continue;
       }
 
-      // 内置危险工具 / plan 模式敏感工具 / MCP 审批策略要求时等待用户批准；缺少 onApproval 时 fail-closed 拒绝
-      const requiresApproval =
-        DANGEROUS_TOOLS.has(name) ||
-        (planMode && PLAN_MODE_SENSITIVE_TOOLS.has(name)) ||
-        (name.startsWith('mcp__') && (await mcpManager.requiresApproval(name)));
+      // 内置危险工具 / plan 模式敏感工具 / MCP 审批策略 / 强制审批模式要求时等待用户批准；缺少 onApproval 时 fail-closed 拒绝
+      const requiresApproval = await needsApproval({
+        toolName: name,
+        planMode,
+        forceApproval: forceApprovalMode,
+        mcpRequiresApproval: (toolName) => mcpManager.requiresApproval(toolName),
+      });
       if (requiresApproval) {
         if (!options.onApproval) {
           const output = JSON.stringify({ ok: false, error: '此操作需要用户批准，但当前上下文不支持审批（已拒绝）' });
@@ -320,50 +338,21 @@ export async function* runAnthropicAgentLoop(
           planStepId: matchedPlanStep?.id ?? options.contextHub.getContext().plan.steps.find((step) => step.status === 'in_progress')?.id,
           toolCallId: callId,
         };
-        const result = await invokeTool(name as ToolName, args, options.cwd, toolContext);
-        const output = JSON.stringify(result);
-        outputs.push({ type: 'tool_result', tool_use_id: callId, content: output });
-        options.contextHub.addResponseItem({ type: 'function_call_output', call_id: callId, output });
-        await options.contextHub.commitEvent('tool_call_completed', {
-          id: callId,
-          result: result.output,
-          affectedFiles: result.meta?.kind === 'edit' ? [result.meta.path] : [],
-        }, options.agentId ?? 'main');
-        if (result.meta?.kind === 'edit') {
-          await options.contextHub.commitEvent('file_modified', {
-            filePath: result.meta.path,
-            toolCallId: callId,
-            agentId: options.agentId ?? 'main',
-            planStepId: toolContext.planStepId,
-          }, options.agentId ?? 'main');
-        }
-        if (result.meta?.kind === 'command') {
-          await options.contextHub.commitEvent('command_completed', {
-            command: result.meta.command,
-            exitCode: result.meta.exitCode,
-            stdout: result.meta.stdout,
-            stderr: result.meta.stderr,
-            planStepId: toolContext.planStepId,
-          }, options.agentId ?? 'main');
-          if (result.meta.exitCode === 0) {
-            await options.contextHub.commitEvent('verification_completed', {
-              kind: 'test',
-              command: result.meta.command,
-              relatedFiles: options.contextHub.getUnverifiedFiles(),
-              planStepIds: toolContext.planStepId ? [toolContext.planStepId] : [],
-              ok: true,
-              summary: `验证命令通过：${result.meta.command}`,
-            }, options.agentId ?? 'main');
-          }
-        }
-        if (result.ok && matchedPlanStep) {
-          await options.contextHub.commitEvent('plan_step_changed', {
-            stepId: matchedPlanStep.id,
-            status: 'completed',
-          }, options.agentId ?? 'main');
-        }
-        yield { type: 'tool_result', toolResult: { name, toolCallId: callId, result } };
-        if (name === 'task_complete' && result.ok) taskCompleteAccepted = true;
+
+        const { outputText, raw } = await executeToolCall({
+          hub: options.contextHub,
+          cwd: options.cwd,
+          name,
+          args,
+          matchedPlanStepId: matchedPlanStep?.id,
+          context: toolContext,
+        });
+
+        outputs.push({ type: 'tool_result', tool_use_id: callId, content: outputText });
+        options.contextHub.addResponseItem({ type: 'function_call_output', call_id: callId, output: outputText });
+        yield { type: 'tool_result', toolResult: { name, toolCallId: callId, result: raw } };
+
+        if (name === 'task_complete' && raw.ok) taskCompleteAccepted = true;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const output = JSON.stringify({ ok: false, error: message });
@@ -393,33 +382,4 @@ function toAnthropicTool(tool: OpenAITool): AnthropicTool {
   };
 }
 
-function findPlanStepForTool(
-  context: Readonly<TaskContext>,
-  toolName: string,
-  args: Record<string, unknown>,
-): PlanStep | undefined {
-  if (toolName === 'task_complete' || toolName === 'dispatch_subagents') return undefined;
-  const active = context.plan.steps.find((step) => step.status === 'in_progress');
-  if (active) return active;
-  const pathValue = typeof args.path === 'string' ? args.path.toLowerCase() : '';
-  const commandValue = typeof args.command === 'string' ? args.command.toLowerCase() : '';
-  return context.plan.steps.find((step) => {
-    if (step.status !== 'pending') return false;
-    const text = step.description.toLowerCase();
-    if (pathValue && text.includes(pathValue)) return true;
-    if (commandValue && text.includes(commandValue)) return true;
-    if (toolName === 'run_command') return /测试|验证|构建|运行|test|build|verify/.test(text);
-    if (toolName === 'write_file' || toolName === 'edit_file') return /实现|修改|编辑|创建|写入|add|edit|implement/.test(text);
-    return false;
-  }) ?? context.plan.steps.find((step) => step.status === 'pending');
-}
-
-function buildInstructions(system: string, context: Readonly<TaskContext>): string {
-  const sections = [system];
-  if (context.objective) sections.push(`## 当前目标\n${context.objective}`);
-  if (context.constraints.length > 0) sections.push(`## 约束\n${context.constraints.map((item) => `- ${item}`).join('\n')}`);
-  if (context.decisions.length > 0) sections.push(`## 已确认决策\n${context.decisions.map((item) => `- ${item.description}: ${item.reason}`).join('\n')}`);
-  if (context.plan.steps.length > 0) sections.push(`## 计划状态\n${context.plan.steps.map((item) => `- [${item.status}] ${item.description}`).join('\n')}`);
-  if (context.workspace.unverifiedFiles.size > 0) sections.push(`## 未验证文件\n${Array.from(context.workspace.unverifiedFiles).map((item) => `- ${item}`).join('\n')}`);
-  return sections.join('\n\n');
-}
+// findPlanStepForTool 与 buildInstructions 已移至 ./shared（plan-steps、instructions）

@@ -2252,6 +2252,7 @@ async function runOneSubagent(
           agentId: definition.id,
           signal,
           maxToolCalls: 100,
+          requireApprovalAfterLimit: true,
           allowSubagents: false,
           onApproval,
           toolGuard,
