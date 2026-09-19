@@ -12,7 +12,7 @@
  */
 
 import log from 'electron-log/main';
-import type { ModelConfig, ChatStreamEvent, ToolCall, ToolName, ToolExecutionContext, SkillDef, ErrorKind } from '../../shared/ipc';
+import type { ModelConfig, ChatStreamEvent, ToolCall, ToolExecutionContext, SkillDef, ErrorKind } from '../../shared/ipc';
 import type {
   CreateResponseRequest,
   ResponseItem,
@@ -22,14 +22,21 @@ import type {
   ResponseFunctionCallOutputItem,
 } from '../../shared/responses';
 import { ResponsesClient } from '../llm/responses';
-import { allTools, planModeTools, invokeTool } from './tools';
+import { allTools, planModeTools } from './tools';
 import { mcpManager } from '../mcp/mcp-manager';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
-import { ContextHub, type TaskContext, type PlanStep } from '../context/context-hub';
+import { ContextHub, type PlanStep } from '../context/context-hub';
 import { parsePlanFromContent } from './plan-parser';
-import { capToolOutput, COMPACTION_SUMMARY_PROMPT } from '../context/compactor';
+import { COMPACTION_SUMMARY_PROMPT } from '../context/compactor';
 import { estimateRequestTokens } from '../context/token-estimator';
 import { summarizeWithModel } from '../llm/client-factory';
+import { needsApproval } from './shared/tool-policy';
+import { findPlanStepForTool } from './shared/plan-steps';
+import { executeToolCall } from './shared/tool-pipeline';
+import { runBudgetCheck } from './shared/context-budget';
+import { evaluateToolCallLimit, MAX_TOOL_CALLS_DEFAULT, MAX_ITERATIONS_DEFAULT } from './shared/loop-limits';
+import { migrateHistoryToHub } from './shared/history-migration';
+import { buildInstructions } from './shared/instructions';
 
 // ============================================
 // 接口定义
@@ -95,11 +102,7 @@ export interface ResponsesLoopOptions {
 // 常量
 // ============================================
 
-const DANGEROUS_TOOLS = new Set(['write_file', 'edit_file', 'run_command', 'web_fetch', 'dispatch_subagents', 'browser_act', 'browser_exec_js', 'browser_screenshot', 'memory_save']);
-/** plan（只读）模式下也必须逐次审批的敏感工具：可能读到已登录页面的内容 */
-const PLAN_MODE_SENSITIVE_TOOLS = new Set(['browser_snapshot', 'browser_extract']);
-const MAX_TOOL_CALLS_DEFAULT = 50;
-const MAX_ITERATIONS_DEFAULT = 200;
+// 工具策略与限额常量已移至 ./shared（tool-policy、loop-limits）
 
 // ============================================
 // Responses Agent Loop
@@ -155,36 +158,7 @@ export async function* runResponsesLoop(
   }
 
   // v0.9.1 会话尚未持久化完整 Responses Items 时，用领域历史做一次迁移。
-  if (contextHub.getResponseItems().length === 0 && options.history?.length) {
-    for (const message of options.history) {
-      if ((message.role === 'user' || message.role === 'assistant') && message.content) {
-        contextHub.addResponseItem({
-          type: 'message',
-          role: message.role,
-          content: [{ type: message.role === 'user' ? 'input_text' : 'output_text', text: message.content }],
-          status: 'completed',
-        });
-      }
-      if (message.role === 'assistant') {
-        for (const call of message.tool_calls ?? []) {
-          contextHub.addResponseItem({
-            type: 'function_call',
-            call_id: call.id,
-            name: call.function.name,
-            arguments: call.function.arguments,
-            status: 'completed',
-          });
-        }
-      }
-      if (message.role === 'tool' && message.tool_call_id) {
-        contextHub.addResponseItem({
-          type: 'function_call_output',
-          call_id: message.tool_call_id,
-          output: message.content,
-        });
-      }
-    }
-  }
+  migrateHistoryToHub(contextHub, options.history);
 
   // 注入记忆
   try {
@@ -255,36 +229,21 @@ export async function* runResponsesLoop(
     }
 
     // 上下文预算检查：达到软阈值时在迭代边界同步压缩
-    const context = contextHub.getContext();
-    let instructions = buildInstructions(systemPrompt, context);
-    const budget = await contextHub.ensureContextBudget({
-      extraTokens: estimateRequestTokens({ items: [], instructions, tools }),
+    let instructions = buildInstructions(systemPrompt, contextHub.getContext());
+    const budget = await runBudgetCheck({
+      hub: contextHub,
+      requestTokens: estimateRequestTokens({ items: [], instructions, tools }),
       signal,
       summarize:
         options.compactionSummaryEnabled === true
           ? (transcript) => summarizeWithModel(model, COMPACTION_SUMMARY_PROMPT, transcript, signal)
           : undefined,
     });
+    for (const budgetEvent of budget.events) yield budgetEvent;
     if (budget.compacted) {
-      yield {
-        type: 'summary',
-        tokensBefore: budget.tokensBefore,
-        tokensAfter: budget.tokensAfter,
-        compressedCount: budget.compressedCount,
-        summary: budget.summary,
-      };
       instructions = buildInstructions(systemPrompt, contextHub.getContext());
     }
     if (budget.hardLimited) {
-      yield {
-        type: 'error',
-        error: '上下文压缩后仍超出硬阈值，请新开会话或降低单次任务规模',
-        errorMeta: {
-          kind: 'context_too_long',
-          hint: '上下文压缩后仍超出硬阈值，请新开会话或降低单次任务规模',
-          retryable: false,
-        },
-      };
       return;
     }
 
@@ -433,21 +392,19 @@ export async function* runResponsesLoop(
 
     // 检查是否超过工具调用限制
     toolCallCount += functionCalls.size;
-    if (toolCallCount > maxToolCalls) {
-      if (options.requireApprovalAfterLimit !== false) {
-        forceApprovalMode = true;
-        yield {
-          type: 'content',
-          content: `\n\n[已达到工具调用上限(${maxToolCalls})，进入审批模式]`,
-        };
-      } else {
-        yield {
-          type: 'error',
-          error: `工具调用次数超过限制 (${maxToolCalls})`,
-          errorMeta: { kind: 'invalid_request', hint: '工具调用次数超过限制', retryable: false },
-        };
-        return;
-      }
+    const limit = evaluateToolCallLimit(toolCallCount, maxToolCalls, {
+      requireApprovalAfterLimit: options.requireApprovalAfterLimit,
+    });
+    if (limit.kind === 'force_approval') {
+      forceApprovalMode = true;
+      yield { type: 'content', content: limit.message };
+    } else if (limit.kind === 'error') {
+      yield {
+        type: 'error',
+        error: limit.message,
+        errorMeta: { kind: 'invalid_request', hint: limit.hint, retryable: false },
+      };
+      return;
     }
 
     // 执行 Function Calls
@@ -495,12 +452,13 @@ export async function* runResponsesLoop(
       }
 
       // 检查是否需要审批：强制审批模式 / 内置危险工具 / plan 模式敏感工具 / MCP 策略（approval 配置）
-      const needsApproval =
-        forceApprovalMode ||
-        DANGEROUS_TOOLS.has(fc.name) ||
-        (planMode && PLAN_MODE_SENSITIVE_TOOLS.has(fc.name)) ||
-        (fc.name.startsWith('mcp__') && (await mcpManager.requiresApproval(fc.name)));
-      if (needsApproval) {
+      const requiresApproval = await needsApproval({
+        toolName: fc.name,
+        planMode,
+        forceApproval: forceApprovalMode,
+        mcpRequiresApproval: (toolName) => mcpManager.requiresApproval(toolName),
+      });
+      if (requiresApproval) {
         if (!onApproval) {
           toolResults.push({
             type: 'function_call_output',
@@ -551,7 +509,7 @@ export async function* runResponsesLoop(
         },
       };
 
-      // 执行工具
+      // 执行工具（调用 + 截断 + 事件记账走共享管道）
       try {
         // 创建工具执行上下文
         const toolContext: ToolExecutionContext = {
@@ -563,64 +521,27 @@ export async function* runResponsesLoop(
           planStepId: matchedPlanStep?.id ?? contextHub.getContext().plan.steps.find(s => s.status === 'in_progress')?.id,
         };
 
-        const result = await invokeTool(fc.name as ToolName, args, cwd, toolContext);
-        const cappedResult = capToolOutput(fc.name, args, result);
+        const { outputText, raw } = await executeToolCall({
+          hub: contextHub,
+          cwd,
+          name: fc.name,
+          args,
+          matchedPlanStepId: matchedPlanStep?.id,
+          context: toolContext,
+        });
 
         toolResults.push({
           type: 'function_call_output',
           call_id: fc.call_id,
-          output: JSON.stringify(cappedResult),
+          output: outputText,
         });
-
-        // 记录工具调用完成
-        await contextHub.commitEvent('tool_call_completed', {
-          id: fc.call_id,
-          result: result.output,
-          affectedFiles: result.meta?.kind === 'edit' ? [result.meta.path] : [],
-        });
-
-        if (result.meta?.kind === 'command') {
-          await contextHub.commitEvent('command_completed', {
-            command: result.meta.command,
-            exitCode: result.meta.exitCode,
-            stdout: result.meta.stdout,
-            stderr: result.meta.stderr,
-            planStepId: toolContext.planStepId,
-          }, options.agentId ?? 'main');
-          if (result.meta.exitCode === 0) {
-            const verifiedFiles = contextHub.getUnverifiedFiles();
-            await contextHub.commitEvent('verification_completed', {
-              kind: 'test',
-              command: result.meta.command,
-              relatedFiles: verifiedFiles,
-              planStepIds: toolContext.planStepId ? [toolContext.planStepId] : [],
-              ok: true,
-              summary: `验证命令通过：${result.meta.command}`,
-            }, options.agentId ?? 'main');
-          }
-        }
 
         yield {
           type: 'tool_result',
-          toolResult: { name: fc.name, toolCallId: fc.call_id, result },
+          toolResult: { name: fc.name, toolCallId: fc.call_id, result: raw },
         };
 
-        // 如果是写工具，记录文件修改
-        if (result.meta?.kind === 'edit') {
-          await contextHub.commitEvent('file_modified', {
-            filePath: result.meta.path,
-            toolCallId: fc.call_id,
-            agentId: options.agentId ?? 'main',
-            planStepId: toolContext.planStepId,
-          }, options.agentId ?? 'main');
-        }
-        if (result.ok && matchedPlanStep) {
-          await contextHub.commitEvent('plan_step_changed', {
-            stepId: matchedPlanStep.id,
-            status: 'completed',
-          }, options.agentId ?? 'main');
-        }
-        if (fc.name === 'task_complete' && result.ok) taskCompleteAccepted = true;
+        if (fc.name === 'task_complete' && raw.ok) taskCompleteAccepted = true;
       } catch (err) {
         const error = (err as Error).message;
         toolResults.push({
@@ -663,73 +584,6 @@ export async function* runResponsesLoop(
 // ============================================
 // 辅助函数
 // ============================================
-
-function findPlanStepForTool(
-  context: Readonly<TaskContext>,
-  toolName: string,
-  args: Record<string, unknown>,
-): PlanStep | undefined {
-  if (toolName === 'task_complete' || toolName === 'dispatch_subagents') return undefined;
-  const active = context.plan.steps.find((step) => step.status === 'in_progress');
-  if (active) return active;
-  const pathValue = typeof args.path === 'string' ? args.path.toLowerCase() : '';
-  const commandValue = typeof args.command === 'string' ? args.command.toLowerCase() : '';
-  return context.plan.steps.find((step) => {
-    if (step.status !== 'pending') return false;
-    const text = step.description.toLowerCase();
-    if (pathValue && text.includes(pathValue)) return true;
-    if (commandValue && text.includes(commandValue)) return true;
-    if (toolName === 'run_command') return /测试|验证|构建|运行|test|build|verify/.test(text);
-    if (toolName === 'write_file' || toolName === 'edit_file') return /实现|修改|编辑|创建|写入|add|edit|implement/.test(text);
-    return false;
-  }) ?? context.plan.steps.find((step) => step.status === 'pending');
-}
-
-/**
- * 构建 instructions（每轮重新生成）
- */
-function buildInstructions(systemPrompt: string, context: TaskContext): string {
-  let instructions = systemPrompt;
-
-  // 注入当前目标
-  if (context.objective) {
-    instructions += `\n\n## 当前目标\n${context.objective}`;
-  }
-
-  // 注入约束
-  if (context.constraints.length > 0) {
-    instructions += `\n\n## 约束\n${context.constraints.map(c => `- ${c}`).join('\n')}`;
-  }
-
-  // 注入决策
-  if (context.decisions.length > 0) {
-    instructions += `\n\n## 已确认的决策\n${context.decisions.map(d => `- ${d.description}: ${d.reason}`).join('\n')}`;
-  }
-
-  // 注入计划状态
-  if (context.plan.steps.length > 0) {
-    const completedSteps = context.plan.steps.filter(s => s.status === 'completed');
-    const pendingSteps = context.plan.steps.filter(s => s.status !== 'completed');
-    if (completedSteps.length > 0) {
-      instructions += `\n\n## 已完成步骤\n${completedSteps.map(s => `- ${s.description}`).join('\n')}`;
-    }
-    if (pendingSteps.length > 0) {
-      instructions += `\n\n## 待完成步骤\n${pendingSteps.map(s => `- [${s.status}] ${s.description}`).join('\n')}`;
-    }
-  }
-
-  // 注入未验证文件
-  if (context.workspace.unverifiedFiles.size > 0) {
-    instructions += `\n\n## 未验证文件\n以下文件已修改但未验证：\n${Array.from(context.workspace.unverifiedFiles).map(f => `- ${f}`).join('\n')}`;
-  }
-
-  // 注入压缩摘要（早期对话已移出活跃窗口）
-  if (context.compactionSummary) {
-    instructions += `\n\n## 早期对话摘要（已压缩）\n${context.compactionSummary}`;
-  }
-
-  return instructions;
-}
 
 /**
  * 将 OpenAITool 转换为 ResponseFunctionTool
