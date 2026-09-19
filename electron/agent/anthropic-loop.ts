@@ -83,7 +83,17 @@ export async function* runAnthropicAgentLoop(
   migrateHistoryToHub(options.contextHub, options.history);
   let messages: AnthropicMessage[] = projectAnthropicMessages(options.contextHub.getResponseItems());
 
-  messages.push({ role: 'user', content: userMessage });
+  // 若重建窗口以 user 结尾（如中断恢复的中断结果），把新消息并入该条，保持角色交替
+  const seedLast = messages[messages.length - 1];
+  if (seedLast && seedLast.role === 'user') {
+    const content = Array.isArray(seedLast.content)
+      ? seedLast.content
+      : [{ type: 'text' as const, text: seedLast.content }];
+    content.push({ type: 'text', text: userMessage });
+    seedLast.content = content;
+  } else {
+    messages.push({ role: 'user', content: userMessage });
+  }
   await options.contextHub.commitEvent('user_message_added', { content: userMessage, attachments: [] }, options.agentId ?? 'main');
 
   let system = getSystemPrompt(
@@ -266,6 +276,12 @@ export async function* runAnthropicAgentLoop(
 
     const outputs: AnthropicContent[] = [];
     let taskCompleteAccepted = false;
+    // 先按响应顺序登记本轮全部 function_call：保持同轮调用相邻，跨轮重建才能合并回一条 assistant 消息
+    for (const use of uses) {
+      const callId = (use.id ?? use.tool_use_id)!;
+      const args = (use.input ?? {}) as Record<string, unknown>;
+      options.contextHub.addResponseItem({ type: 'function_call', call_id: callId, name: use.name!, arguments: JSON.stringify(args), status: 'completed' });
+    }
     for (const use of uses) {
       const callId = (use.id ?? use.tool_use_id)!;
       const name = use.name!;
@@ -278,7 +294,6 @@ export async function* runAnthropicAgentLoop(
           status: 'in_progress',
         }, options.agentId ?? 'main');
       }
-      options.contextHub.addResponseItem({ type: 'function_call', call_id: callId, name, arguments: argsJson, status: 'completed' });
 
       if (name === 'task_complete') {
         const gate = options.contextHub.canCompleteTask();
@@ -321,12 +336,7 @@ export async function* runAnthropicAgentLoop(
         }
       }
 
-      await options.contextHub.commitEvent('tool_call_started', {
-        id: callId,
-        name,
-        args,
-        planStepId: matchedPlanStep?.id,
-      }, options.agentId ?? 'main');
+      // 工具调用事件由共享管道统一提交（started → completed → …）
       yield { type: 'tool_call', toolCall: { id: callId, type: 'function', function: { name, arguments: argsJson } } };
 
       try {

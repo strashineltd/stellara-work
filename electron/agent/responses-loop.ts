@@ -492,14 +492,7 @@ export async function* runResponsesLoop(
         }, options.agentId ?? 'main');
       }
 
-      // 记录工具调用开始
-      await contextHub.commitEvent('tool_call_started', {
-        id: fc.call_id,
-        name: fc.name,
-        args,
-        planStepId: matchedPlanStep?.id,
-      }, options.agentId ?? 'main');
-
+      // 工具调用事件由共享管道统一提交（started → completed → …）
       yield {
         type: 'tool_call',
         toolCall: {

@@ -76,10 +76,12 @@ describe('projectAnthropicMessages', () => {
   it('arguments 非法 JSON 时 input 兜底为空对象', () => {
     const items: ResponseItem[] = [
       { type: 'function_call', call_id: 'c1', name: 'read_file', arguments: '{bad json', status: 'completed' },
+      { type: 'function_call_output', call_id: 'c1', output: 'OUT' },
     ];
 
     expect(projectAnthropicMessages(items)).toEqual([
       { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'read_file', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: 'OUT' }] },
     ]);
   });
 
@@ -96,5 +98,16 @@ describe('projectAnthropicMessages', () => {
     const callIds = flat.filter((b) => b.type === 'tool_use').map((b) => b.id);
     const outputIds = flat.filter((b) => b.type === 'tool_result').map((b) => b.tool_use_id);
     expect(outputIds).toEqual(callIds);
+  });
+
+  it('未配对的 function_call 生成中断结果，避免请求缺 tool_result', () => {
+    const items: ResponseItem[] = [
+      { type: 'function_call', call_id: 'c1', name: 'write_file', arguments: '{"path":"x"}', status: 'completed' },
+    ];
+
+    expect(projectAnthropicMessages(items)).toEqual([
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'write_file', input: { path: 'x' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: '{"ok":false,"error":"工具执行被中断，结果未知"}' }] },
+    ]);
   });
 });

@@ -189,4 +189,42 @@ describe.each(['responses', 'anthropic'] as const)('%s 契约', (protocol) => {
     expect(hubOutput && hubOutput.type === 'function_call_output' ? hubOutput.output : '').toContain('用户拒绝了此操作');
     await expect(fs.stat(path.join(workDir, 'x.txt'))).rejects.toThrow();
   });
+
+  it('每个工具调用恰好一个 started 与一个 completed 事件', async () => {
+    const args = JSON.stringify({ path: 'note.txt' });
+    if (protocol === 'responses') {
+      const call = { type: 'function_call', call_id: 'call-1', name: 'read_file', arguments: args, status: 'completed' };
+      queueResponsesRounds([
+        [
+          { type: 'response.output_item.done', item: call },
+          { type: 'response.completed', response: { id: 'r1', object: 'response', model: 'test', status: 'completed', output: [call], usage: { input_tokens: 1, output_tokens: 1 } } },
+        ],
+        [
+          { type: 'response.completed', response: { id: 'r2', object: 'response', model: 'test', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }], usage: { input_tokens: 1, output_tokens: 1 } } },
+        ],
+      ]);
+    } else {
+      mockAnthropicCreate
+        .mockResolvedValueOnce(makeAnthropicRound([{ type: 'tool_use', id: 'call-1', name: 'read_file', input: { path: 'note.txt' } }], 'tool_use'))
+        .mockResolvedValueOnce(makeAnthropicRound([{ type: 'text', text: 'done' }], 'end_turn'));
+    }
+
+    const sessionId = `contract-${protocol}`;
+    const hub = new ContextHub(sessionId, workDir, 256_000, 16_384, { persist: false });
+    const seen: string[] = [];
+    hub.onEvent((event) => seen.push(event.event));
+    if (protocol === 'responses') {
+      for await (const _event of runResponsesLoop('读文件', {
+        model: MODEL, cwd: workDir, sessionId, contextHub: hub, allowSubagents: false,
+      })) { /* 消费事件 */ }
+    } else {
+      for await (const _event of runAnthropicAgentLoop('读文件', {
+        model: MODEL, cwd: workDir, sessionId, contextHub: hub, allowSubagents: false,
+        client: { create: mockAnthropicCreate },
+      })) { /* 消费事件 */ }
+    }
+
+    expect(seen.filter((name) => name === 'tool_call_started')).toHaveLength(1);
+    expect(seen.filter((name) => name === 'tool_call_completed')).toHaveLength(1);
+  });
 });

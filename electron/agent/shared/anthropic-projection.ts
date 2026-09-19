@@ -20,6 +20,10 @@ function parseToolInput(raw: string): unknown {
 
 export function projectAnthropicMessages(items: ResponseItem[]): AnthropicMessage[] {
   const messages: AnthropicMessage[] = [];
+  const outputCallIds = new Set<string>();
+  for (const item of items) {
+    if (item.type === 'function_call_output') outputCallIds.add(item.call_id);
+  }
 
   const pushBlock = (role: 'user' | 'assistant', block: AnthropicContent): void => {
     const last = messages[messages.length - 1];
@@ -49,6 +53,14 @@ export function projectAnthropicMessages(items: ResponseItem[]): AnthropicMessag
         name: item.name,
         input: parseToolInput(item.arguments),
       });
+      if (!outputCallIds.has(item.call_id)) {
+        // 中断恢复：没有结果的调用补一条失败 tool_result，保证 Anthropic 请求配对完整
+        pushBlock('user', {
+          type: 'tool_result',
+          tool_use_id: item.call_id,
+          content: JSON.stringify({ ok: false, error: '工具执行被中断，结果未知' }),
+        });
+      }
       continue;
     }
     if (item.type === 'function_call_output') {
