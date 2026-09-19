@@ -338,7 +338,11 @@ export class ContextHub {
   // ============================================
 
   /**
-   * 获取当前上下文（只读）
+   * 获取当前上下文（浅拷贝只读视图）
+   *
+   * 注意：嵌套集合（decisions / plan / workspace 的 Map/Set 等）与内部状态
+   * 共享引用，调用方不得直接改写；所有状态变更必须走 commitEvent / addDecision
+   * 等事件 API，以保证 revision 与持久化一致。
    */
   getContext(): Readonly<TaskContext> {
     return { ...this.context };
@@ -476,6 +480,9 @@ export class ContextHub {
         break;
       case 'memory_injected':
         this.handleMemoryInjected(event);
+        break;
+      case 'decision_recorded':
+        this.handleDecisionRecorded(event);
         break;
       case 'context_compacted':
         this.handleContextCompacted(event);
@@ -664,6 +671,17 @@ export class ContextHub {
     }
   }
 
+  private handleDecisionRecorded(event: ContextEventEnvelope): void {
+    const data = event.data as { description: string; reason: string; relatedFiles?: string[] };
+    this.context.decisions.push({
+      id: uuid(),
+      description: data.description,
+      reason: data.reason,
+      relatedFiles: data.relatedFiles ?? [],
+      createdAt: event.createdAt,
+    });
+  }
+
   private handleSubagentStarted(event: ContextEventEnvelope): void {
     const data = event.data as {
       id: string;
@@ -829,6 +847,24 @@ export class ContextHub {
     this.context.responseItems.push(item);
     this.persistResponseItem(item);
     this.context.usage = this.calculateUsage();
+  }
+
+  /**
+   * 记录一条决策（事件驱动；子代理结果合并等场景使用）
+   */
+  async addDecision(
+    data: { description: string; reason: string; relatedFiles?: string[] },
+    sourceAgentId: string = 'main',
+  ): Promise<void> {
+    await this.commitEvent(
+      'decision_recorded',
+      {
+        description: data.description,
+        reason: data.reason,
+        relatedFiles: data.relatedFiles ?? [],
+      },
+      sourceAgentId,
+    );
   }
 
   private persistResponseItem(item: ResponseItem): void {

@@ -12,7 +12,6 @@
  * 7. usage 汇总
  */
 
-import { v4 as uuid } from 'uuid';
 import log from 'electron-log/main';
 import type {
   SubagentDef,
@@ -27,12 +26,27 @@ import {
 // 接口定义
 // ============================================
 
+/** 子代理 token 用量 */
+export interface SubagentUsage {
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** 单个子代理运行结果 */
+export interface SubagentRunOutcome {
+  id: string;
+  summary: string;
+  ok: boolean;
+  elapsedMs: number;
+  usage?: SubagentUsage;
+}
+
 /** 子代理执行器（注入外部实现） */
 export type SubagentRunner = (
   definition: SubagentDef,
   packet: SubagentContextPacket,
   signal: AbortSignal,
-) => Promise<{ summary: string; ok: boolean }>;
+) => Promise<{ summary: string; ok: boolean; usage?: SubagentUsage }>;
 
 /** 子代理批次请求 */
 export interface SubagentBatchRequest {
@@ -43,7 +57,7 @@ export interface SubagentBatchRequest {
 
 /** 子代理批次结果 */
 export interface SubagentBatchResult {
-  results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
+  results: Array<SubagentRunOutcome>;
   conflicts: string[];
   totalUsage: { promptTokens: number; completionTokens: number };
 }
@@ -168,8 +182,13 @@ export class SubagentCoordinator {
     // 按角色分组执行
     const results = await this.executeByRole(defs, signal);
 
-    // 计算总 usage
+    // 汇总总 usage（缺失用量按 0 计）
     const totalUsage = { promptTokens: 0, completionTokens: 0 };
+    for (const result of results) {
+      if (!result.usage) continue;
+      totalUsage.promptTokens += result.usage.promptTokens;
+      totalUsage.completionTokens += result.usage.completionTokens;
+    }
 
     return {
       results,
@@ -184,8 +203,8 @@ export class SubagentCoordinator {
   private async executeByRole(
     defs: SubagentDef[],
     signal: AbortSignal,
-  ): Promise<Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>> {
-    const results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> = [];
+  ): Promise<SubagentRunOutcome[]> {
+    const results: SubagentRunOutcome[] = [];
 
     // Research 和 Verify 可以并行
     const parallelDefs = defs.filter(d => d.role === 'research' || d.role === 'verify' || !d.role);
@@ -212,10 +231,10 @@ export class SubagentCoordinator {
   private async executeParallel(
     defs: SubagentDef[],
     signal: AbortSignal,
-  ): Promise<Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>> {
+  ): Promise<SubagentRunOutcome[]> {
     if (defs.length === 0) return [];
 
-    const results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }> = [];
+    const results: SubagentRunOutcome[] = [];
     let cursor = 0;
 
     const worker = async (): Promise<void> => {
@@ -243,7 +262,7 @@ export class SubagentCoordinator {
   private async executeSingle(
     def: SubagentDef,
     signal: AbortSignal,
-  ): Promise<{ id: string; summary: string; ok: boolean; elapsedMs: number }> {
+  ): Promise<SubagentRunOutcome> {
     const startTime = Date.now();
 
     // 更新状态为 running
@@ -292,6 +311,7 @@ export class SubagentCoordinator {
         summary: result.summary,
         ok: result.ok,
         elapsedMs: Date.now() - startTime,
+        usage: result.usage,
       };
     } catch (err) {
       const error = (err as Error).message;
@@ -399,14 +419,12 @@ export class SubagentCoordinator {
         });
       }
 
-      // 合并决策
+      // 合并决策（事件驱动：revision 与持久化保持一致）
       for (const decision of result.decisionsProposed) {
-        this.contextHub.getContext().decisions.push({
-          id: uuid(),
+        await this.contextHub.addDecision({
           description: decision.description,
           reason: decision.reason,
-          relatedFiles: decision.relatedFiles || [],
-          createdAt: new Date().toISOString(),
+          relatedFiles: decision.relatedFiles,
         });
       }
     }

@@ -2182,10 +2182,11 @@ async function runOneSubagent(
   signal: AbortSignal,
   parentStreamId: string,
   approvalTimeoutMs?: number,
-): Promise<{ summary: string; ok: boolean }> {
+): Promise<{ summary: string; ok: boolean; usage: { promptTokens: number; completionTokens: number } }> {
   const startedAt = Date.now();
   let summary = '';
   let ok = false;
+  const usage = { promptTokens: 0, completionTokens: 0 };
   const model = await resolveSubagentModel(definition, parentModel, cwd);
   const readOnly = definition.readOnly ?? definition.role !== 'build';
   const toolGuard = createSubagentToolGuard({ readOnly, cwd, fileScopes: definition.fileScopes });
@@ -2276,6 +2277,10 @@ async function runOneSubagent(
     for await (const event of loop) {
       if (signal.aborted) break;
       if (event.type === 'content' && event.content) summary += event.content;
+      if (event.type === 'usage' && event.usage) {
+        usage.promptTokens += event.usage.promptTokens;
+        usage.completionTokens += event.usage.completionTokens;
+      }
       if (event.type === 'tool_result' && event.toolResult) {
         parentSend({ type: 'subagent_progress', subagentId: definition.id, subagentTool: event.toolResult.name });
       }
@@ -2303,7 +2308,7 @@ async function runOneSubagent(
     subagentContextRevision: packet.parentContextRevision,
     workspaceRevision: packet.workspaceRevision,
   });
-  return { summary: summary.trim(), ok };
+  return { summary: summary.trim(), ok, usage };
 }
 
 /**

@@ -51,6 +51,16 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * 请求确定未送达的建连错误：重连重试是安全的。
+ * 其余失败（超时、连接已关闭等）可能发生在工具已执行之后，重试有重复副作用风险。
+ */
+const PRE_DELIVERY_CONNECTION_ERROR_RE = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i;
+
+function isPreDeliveryConnectionError(message: string): boolean {
+  return PRE_DELIVERY_CONNECTION_ERROR_RE.test(message);
+}
+
 export class McpManager {
   private cache = new Map<string, CachedConnection>();
 
@@ -213,7 +223,10 @@ export class McpManager {
     }
     const result = await callMcpTool(entry.client, toolName, args);
     if (result.ok || result.error?.startsWith('MCP 工具执行错误')) return result;
+    // 失败后作废缓存连接：下一次调用重建，避免复用坏连接
     this.invalidateFor(serverId);
+    // 只有请求确定未送达才自动重试；超时/断流等可能已执行，重试有重复副作用风险
+    if (!isPreDeliveryConnectionError(result.error ?? '')) return result;
     try {
       return await callMcpTool((await this.getEntry(serverId)).client, toolName, args);
     } catch (e) {

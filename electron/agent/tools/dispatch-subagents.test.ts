@@ -69,6 +69,14 @@ describe('session-scoped dispatch', () => {
     expect(result.output).toContain('research-1 · research · 完成');
   });
 
+  it('reports batch token usage in the output', async () => {
+    const runner = runnerFor();
+    setSubagentRunner(sessionId, runner);
+    const result = await dispatchSubagents({ subagents: [{ id: 'a', task: 't', role: 'research' }] }, '/work', context);
+
+    expect(result.output).toContain('用量：input 10 / output 5 tokens');
+  });
+
   it('reports failures and workspace conflicts', async () => {
     const runner = runnerFor(async () => ({
       results: [{ id: 'build-1', summary: 'failed', ok: false, elapsedMs: 2 }],

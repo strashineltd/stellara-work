@@ -8,7 +8,7 @@ import type {
 
 export interface SubagentRunner {
   dispatch(subagents: SubagentDef[]): Promise<{
-    results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
+    results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number; usage?: { promptTokens: number; completionTokens: number } }>;
     conflicts: string[];
     totalUsage: { promptTokens: number; completionTokens: number };
   }>;
@@ -70,7 +70,12 @@ export async function dispatchSubagents(
     lines.push(`## 冲突\n${batch.conflicts.map((item) => `- ${item}`).join('\n')}`);
   }
   const failed = batch.results.filter((result) => !result.ok).length;
-  const output = `子代理批次完成：${batch.results.length - failed}/${batch.results.length} 成功\n\n${lines.join('\n\n')}`;
+  const output = [
+    `子代理批次完成：${batch.results.length - failed}/${batch.results.length} 成功`,
+    `用量：input ${batch.totalUsage.promptTokens} / output ${batch.totalUsage.completionTokens} tokens`,
+    '',
+    lines.join('\n\n'),
+  ].join('\n');
   return failed > 0 || batch.conflicts.length > 0
     ? { ok: false, output, error: `${failed} 个子代理失败，${batch.conflicts.length} 个冲突` }
     : { ok: true, output };

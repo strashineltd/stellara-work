@@ -1060,6 +1060,7 @@ export type ContextEventType =
   | 'subagent_started'
   | 'subagent_completed'
   | 'memory_injected'
+  | 'decision_recorded'
   | 'context_compacted'
   | 'checkpoint_created';
 
