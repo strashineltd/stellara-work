@@ -1,16 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, nativeTheme, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, safeStorage, session, shell, nativeTheme } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import log from 'electron-log/main';
 import { loadEnv, getEnvPath } from './config/env';
 import { loadModelsConfig } from './config/models';
 import { runResponsesLoop } from './agent/responses-loop';
+import { runAgentSession } from './agent/session-runner';
 import { runAnthropicAgentLoop } from './agent/anthropic-loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { buildSubagentApprovalId } from './chat/approval-ids';
 import { createSubagentToolGuard } from './agent/subagent-guard';
-import { setSubagentRunner } from './agent/tools/dispatch-subagents';
-import { SubagentCoordinator } from './agent/subagent-coordinator';
 import { ContextHub } from './context/context-hub';
 import { resolveSessionModel } from './chat/session-context';
 import { OpencodeClient } from './server/opencode-client';
@@ -522,12 +521,20 @@ function registerIpcHandlers(): void {
     const streamId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     browserSessionStreams.set(request.sessionId, streamId);
 
-    const wireApi = configured.wireApi ?? 'responses';
-    if (wireApi === 'anthropic') {
-      void runAnthropicLoopForIpc(request, configured, streamId);
-    } else {
-      void runResponsesLoopForIpc(request, configured, streamId);
-    }
+    void runAgentSession(
+      {
+        getWindow: () => mainWindow,
+        chatStreams,
+        attachContextEvents,
+        notifyTaskEnd,
+        unregisterBrowserStream,
+        runSubagent: runOneSubagent,
+        extractMemories: extractMemoriesFromSession,
+      },
+      request,
+      configured,
+      streamId,
+    );
 
     return { streamId };
   });
@@ -1763,379 +1770,6 @@ function attachContextEvents(
  *
  * 用于自定义模型选择 Anthropic 格式时使用。
  */
-async function runAnthropicLoopForIpc(
-  request: ChatRequest,
-  model: ModelConfig,
-  streamId: string,
-): Promise<void> {
-  const send = (event: ChatStreamEvent) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('chat-stream', { streamId, event });
-    }
-  };
-  // 记忆注入按项目 + 归属身份检索：解析会话所属项目与身份
-  let memoryProjectId: string | undefined;
-  let memoryUserId: string | undefined;
-  try {
-    const { getSession } = await import('./store/db');
-    const session = getSession(request.sessionId);
-    memoryProjectId = session?.projectId ?? undefined;
-    memoryUserId = session?.userId;
-  } catch {
-    // 会话解析失败时按个人记忆注入
-  }
-
-  const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
-  const last = messages[messages.length - 1];
-  if (!last || last.role !== 'user') {
-    send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
-    return;
-  }
-
-  // 附件注入
-  let userContent = last.content;
-  if (request.attachments && request.attachments.length > 0) {
-    const attachmentLines = request.attachments.map(
-      (a) => `- ${a.name} → ${a.relPath}（${a.kind === 'image' ? '图片' : '文件'}）`,
-    );
-    userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
-  }
-
-  // 防御：初始化失败（如数据库表缺失）时向 UI 回传错误，而不是无事件挂起
-  let contextHub: ContextHub;
-  try {
-    contextHub = new ContextHub(
-      request.sessionId,
-      model.workDir || '.',
-      model.contextWindow || 256000,
-      model.maxOutputTokens || 16384,
-    );
-  } catch (err) {
-    send({ type: 'error', error: `会话上下文初始化失败：${err instanceof Error ? err.message : String(err)}` });
-    send({ type: 'done' });
-    return;
-  }
-  const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
-  attachContextEvents(contextHub, send);
-
-  // 创建 AbortController
-  const ctrl = chatStreams.start(streamId, request.sessionId);
-  let terminalEventSent = false;
-  let taskCompleted = false;
-  let taskFailed = false;
-
-  // macOS：阻止系统休眠
-  let powerSaveId: number | null = null;
-  if (process.platform === 'darwin') {
-    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
-  }
-
-  try {
-    const cwd = model.workDir!;
-
-    // 加载 skills + /skill 精确调用目标
-    let skills: import('../shared/ipc').SkillDef[] = [];
-    let activeSkill: import('../shared/ipc').SkillDef | undefined;
-    try {
-      const { loadSkillsWithErrors, findSkill } = await import('./agent/skills');
-      const { items } = await loadSkillsWithErrors(cwd);
-      skills = items.filter((s) => s.enabled !== false);
-      if (request.activeSkillName) {
-        activeSkill = findSkill(items.filter((s) => s.enabled !== false), request.activeSkillName) ?? undefined;
-      }
-    } catch {
-      // skills 加载失败不影响 agent 运行
-    }
-
-    let extraTools: import('../shared/ipc').OpenAITool[] = [];
-    let planExtraTools: import('../shared/ipc').OpenAITool[] = [];
-    try {
-      const { mcpManager } = await import('./mcp/mcp-manager');
-      extraTools = await mcpManager.getEnabledTools();
-      planExtraTools = await mcpManager.getEnabledTools(true);
-    } catch {
-      // MCP 不可用不阻断 Agent
-    }
-
-    coordinator.setRunner(async (definition, packet, signal) => {
-      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal, streamId, request.approvalTimeoutMs);
-    });
-    setSubagentRunner(request.sessionId, {
-      dispatch: (definitions) => coordinator.dispatch(definitions),
-    });
-
-    for await (const event of runAnthropicAgentLoop(userContent, {
-      model,
-      cwd,
-      sessionId: request.sessionId,
-      contextHub,
-      history: messages.slice(0, -1),
-      planMode: request.planMode ?? false,
-      platform: { platform: process.platform, arch: process.arch },
-      skills,
-      activeSkill,
-      extraTools,
-      planExtraTools,
-      memoryProjectId,
-      memoryUserId,
-      signal: ctrl.signal,
-      onApproval: async (toolCall) => {
-        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        send({
-          type: 'approval_required',
-          approval: { id: approvalId, toolName: toolCall.function.name, args: toolCall.function.arguments, toolCallId: toolCall.id },
-        });
-        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
-        return chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
-      },
-      onPlanApproval: async (plan) => {
-        const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        send({
-          type: 'plan_approval_required',
-          planApproval: { id: approvalId, plan: plan.steps.map((step) => step.description) },
-        });
-        const requestedTimeout = request.approvalTimeoutMs ?? 300_000;
-        return chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
-      },
-    })) {
-      if (ctrl.signal.aborted) break;
-      send(event);
-      if (event.type === 'task_complete') taskCompleted = true;
-      if (event.type === 'error') taskFailed = true;
-      if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
-    }
-
-    // 任务结束通知
-    const windowActive = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused();
-    if (!windowActive && !ctrl.signal.aborted && (taskCompleted || taskFailed)) {
-      if (process.platform === 'darwin') {
-        app.dock?.bounce(taskFailed ? 'critical' : 'informational');
-      }
-      notifyTaskEnd(
-        { completed: taskCompleted, failed: taskFailed, aborted: false },
-        () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.show();
-            mainWindow.focus();
-          }
-        },
-      );
-    }
-  } catch (err) {
-    if (!ctrl.signal.aborted) {
-      send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
-    }
-  } finally {
-    setSubagentRunner(request.sessionId, null);
-    coordinator.dispose();
-    contextHub.dispose();
-    chatStreams.cleanup(streamId);
-    unregisterBrowserStream(request.sessionId, streamId);
-    if (!terminalEventSent) send({ type: 'done' });
-
-    // macOS：恢复系统休眠
-    if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {
-      powerSaveBlocker.stop(powerSaveId);
-    }
-
-    // 异步提取记忆
-    void extractMemoriesFromSession(request, model).catch(() => {});
-  }
-}
-
-async function runResponsesLoopForIpc(
-  request: ChatRequest,
-  model: ModelConfig,
-  streamId: string,
-): Promise<void> {
-  const send = (event: ChatStreamEvent) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('chat-stream', { streamId, event });
-    }
-  };
-  // 记忆注入按项目 + 归属身份检索：解析会话所属项目与身份
-  let memoryProjectId: string | undefined;
-  let memoryUserId: string | undefined;
-  try {
-    const { getSession } = await import('./store/db');
-    const session = getSession(request.sessionId);
-    memoryProjectId = session?.projectId ?? undefined;
-    memoryUserId = session?.userId;
-  } catch {
-    // 会话解析失败时按个人记忆注入
-  }
-
-  const messages = request.messages.map(({ attachments: _a, ...rest }) => rest);
-  const last = messages[messages.length - 1];
-  if (!last || last.role !== 'user') {
-    send({ type: 'error', error: '消息历史末尾必须是 user 消息' });
-    return;
-  }
-
-  // 附件注入
-  let userContent = last.content;
-  if (request.attachments && request.attachments.length > 0) {
-    const attachmentLines = request.attachments.map(
-      (a) => `- ${a.name} → ${a.relPath}（${a.kind === 'image' ? '图片' : '文件'}）`,
-    );
-    userContent = `用户附带附件（位于工作区 .stellara-attachments/ 目录，可用 read_file 读取）：\n${attachmentLines.join('\n')}\n\n${userContent}`;
-  }
-
-  // 创建 ContextHub 和 SubagentCoordinator
-  // 防御：初始化失败（如数据库表缺失）时向 UI 回传错误，而不是无事件挂起
-  let contextHub: ContextHub;
-  try {
-    contextHub = new ContextHub(
-      request.sessionId,
-      model.workDir || '.',
-      model.contextWindow || 256000,
-      model.maxOutputTokens || 16384,
-    );
-  } catch (err) {
-    send({ type: 'error', error: `会话上下文初始化失败：${err instanceof Error ? err.message : String(err)}` });
-    send({ type: 'done' });
-    return;
-  }
-
-  const coordinator = new SubagentCoordinator(request.sessionId, contextHub);
-
-  attachContextEvents(contextHub, send);
-
-  // 创建 AbortController
-  const ctrl = chatStreams.start(streamId, request.sessionId);
-  let terminalEventSent = false;
-  let taskCompleted = false;
-  let taskFailed = false;
-
-  // macOS：阻止系统休眠
-  let powerSaveId: number | null = null;
-  if (process.platform === 'darwin') {
-    powerSaveId = powerSaveBlocker.start('prevent-app-suspension');
-  }
-
-  try {
-    const cwd = model.workDir!;
-
-    const { loadConfig } = await import('./config/config-v2');
-    const appConfig = await loadConfig();
-
-    // 加载 skills + /skill 精确调用目标
-    let skills: import('../shared/ipc').SkillDef[] = [];
-    let activeSkill: import('../shared/ipc').SkillDef | undefined;
-    try {
-      const { loadSkillsWithErrors, findSkill } = await import('./agent/skills');
-      const { items } = await loadSkillsWithErrors(cwd);
-      skills = items.filter((s) => s.enabled !== false);
-      if (request.activeSkillName) {
-        activeSkill = findSkill(items.filter((s) => s.enabled !== false), request.activeSkillName) ?? undefined;
-      }
-    } catch {
-      // skills 加载失败不影响 agent 运行
-    }
-
-    // 加载 MCP 工具（全量 + plan 模式可见的子集）
-    let extraTools: import('../shared/ipc').OpenAITool[] = [];
-    let planExtraTools: import('../shared/ipc').OpenAITool[] = [];
-    try {
-      const { mcpManager } = await import('./mcp/mcp-manager');
-      extraTools = await mcpManager.getEnabledTools();
-      planExtraTools = await mcpManager.getEnabledTools(true);
-    } catch {
-      // MCP 工具加载失败不影响 agent 运行
-    }
-
-    // 设置子代理执行器
-    coordinator.setRunner(async (definition, packet, signal) => {
-      return runOneSubagent(definition, packet, model, cwd, request.sessionId, send, signal, streamId, request.approvalTimeoutMs);
-    });
-    setSubagentRunner(request.sessionId, {
-      dispatch: (definitions) => coordinator.dispatch(definitions),
-    });
-
-    // 运行 Responses Loop
-    for await (const event of runResponsesLoop(userContent, {
-      model,
-      cwd,
-      sessionId: request.sessionId,
-      contextHub,
-      history: messages.slice(0, -1),
-      planMode: request.planMode ?? false,
-      platform: { platform: process.platform, arch: process.arch },
-      skills,
-      activeSkill,
-      extraTools: extraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
-      planExtraTools: planExtraTools as unknown as import('../shared/responses').ResponseFunctionTool[],
-      memoryProjectId,
-      memoryUserId,
-      compactionSummaryEnabled: appConfig.app.contextCompactionSummaryEnabled !== false,
-      signal: ctrl.signal,
-      onApproval: async (toolCall) => {
-        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        send({
-          type: 'approval_required',
-          approval: { id: approvalId, toolName: toolCall.function.name, args: toolCall.function.arguments, toolCallId: toolCall.id },
-        });
-        const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
-        const timeoutMs = Math.min(Math.max(requestedTimeout, 1_000), 300_000);
-        return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
-      },
-      onPlanApproval: async (plan) => {
-        const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        send({
-          type: 'plan_approval_required',
-          planApproval: { id: approvalId, plan: plan.steps.map((step) => step.description) },
-        });
-        const requestedTimeout = request.approvalTimeoutMs ?? 300_000;
-        return chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
-      },
-    })) {
-      if (ctrl.signal.aborted) break;
-      send(event);
-      if (event.type === 'task_complete') taskCompleted = true;
-      if (event.type === 'error') taskFailed = true;
-      if (event.type === 'done' || event.type === 'error') terminalEventSent = true;
-    }
-
-    // 任务结束通知
-    const windowActive = mainWindow !== null && !mainWindow.isDestroyed() && mainWindow.isFocused();
-    if (!windowActive && !ctrl.signal.aborted && (taskCompleted || taskFailed)) {
-      if (process.platform === 'darwin') {
-        app.dock?.bounce(taskFailed ? 'critical' : 'informational');
-      }
-      notifyTaskEnd(
-        { completed: taskCompleted, failed: taskFailed, aborted: false },
-        () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.show();
-            mainWindow.focus();
-          }
-        },
-      );
-    }
-  } catch (err) {
-    if (!ctrl.signal.aborted) {
-      send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
-    }
-  } finally {
-    // 清理资源
-    setSubagentRunner(request.sessionId, null);
-    coordinator.dispose();
-    contextHub.dispose();
-    chatStreams.cleanup(streamId);
-    unregisterBrowserStream(request.sessionId, streamId);
-    if (!terminalEventSent) send({ type: 'done' });
-
-    // macOS：恢复系统休眠
-    if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {
-      powerSaveBlocker.stop(powerSaveId);
-    }
-
-    // 异步提取记忆
-    void extractMemoriesFromSession(request, model).catch(() => {});
-  }
-}
 
 /**
  * 运行单个子代理：独立 streamId（sub- 前缀，仅用于 registry 隔离）、独立 AbortController
