@@ -405,4 +405,27 @@ describe('上下文压缩与恢复', () => {
     const firstResult = await first;
     expect(firstResult.compacted).toBe(true);
   });
+
+  it('addDecision 记录决策事件并推进 revision', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+
+    await hub.addDecision({ description: '用 SQLite', reason: '本地优先', relatedFiles: ['db.ts'] });
+
+    expect(hub.getRevision()).toBe(1);
+    const decisions = hub.getContext().decisions;
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      description: '用 SQLite',
+      reason: '本地优先',
+      relatedFiles: ['db.ts'],
+    });
+  });
+
+  it('addDecision 的事件在回放后恢复', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+    await hub.addDecision({ description: '用 SQLite', reason: '本地优先' });
+
+    const replayed = new ContextHub('sess-001', '/tmp/work');
+    expect(replayed.getContext().decisions.map((d) => d.description)).toEqual(['用 SQLite']);
+  });
 });

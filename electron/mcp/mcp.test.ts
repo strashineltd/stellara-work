@@ -498,10 +498,10 @@ describe('McpManager', () => {
       expect(res.error).toBe('spawn ENOENT');
     });
 
-    it('reconnects once when a cached client call fails', async () => {
+    it('reconnects once when a cached client fails before delivery (ECONNREFUSED)', async () => {
       await seed(stdioCfg);
       const stale = makeClient();
-      stale.callTool.mockRejectedValue(new Error('connection closed'));
+      stale.callTool.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:1'));
       let calls = 0;
       mockClient.mockImplementation(function () {
         calls += 1;
@@ -514,16 +514,22 @@ describe('McpManager', () => {
       expect(mockClient).toHaveBeenCalledTimes(2);
     });
 
-    it('returns error when retry after stale client also fails', async () => {
+    it('does not retry ambiguous failures but invalidates the cached client', async () => {
       await seed(stdioCfg);
-      const bad = makeClient();
-      bad.callTool.mockRejectedValue(new Error('connection closed'));
+      const stale = makeClient();
+      stale.callTool.mockRejectedValue(new Error('connection closed'));
       mockClient.mockImplementation(function () {
-        return bad;
+        return stale;
       });
       await mcpManager.getEnabledTools();
-      const res = await mcpManager.callTool('mcp__s1__read', {});
-      expect(res).toEqual({ ok: false, output: '', error: 'connection closed' });
+      const first = await mcpManager.callTool('mcp__s1__read', {});
+      // 错误可能发生在执行之后：不重试，直接返回
+      expect(first).toEqual({ ok: false, output: '', error: 'connection closed' });
+      expect(mockClient).toHaveBeenCalledTimes(1);
+
+      // 但缓存已作废：下一次调用重建连接而不是复用坏连接
+      const second = await mcpManager.callTool('mcp__s1__read', {});
+      expect(second.ok).toBe(false);
       expect(mockClient).toHaveBeenCalledTimes(2);
     });
 

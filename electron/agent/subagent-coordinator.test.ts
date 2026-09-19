@@ -120,4 +120,45 @@ describe('SubagentCoordinator', () => {
     expect(result.conflicts).toHaveLength(1);
     expect(result.conflicts[0]).toContain('fileScopes 冲突');
   });
+
+  it('汇总子代理 token 用量', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const coordinator = new SubagentCoordinator('sess-001', hub);
+
+    coordinator.setRunner(async () => ({
+      summary: 'done',
+      ok: true,
+      usage: { promptTokens: 120, completionTokens: 30 },
+    }));
+
+    const result = await coordinator.dispatch([
+      { id: 'sa-1', task: 'A', role: 'research' },
+      { id: 'sa-2', task: 'B', role: 'verify' },
+    ]);
+
+    expect(result.totalUsage).toEqual({ promptTokens: 240, completionTokens: 60 });
+  });
+
+  it('mergeResults 的决策走事件并可在回放后恢复', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const coordinator = new SubagentCoordinator('sess-001', hub);
+    const before = hub.getRevision();
+
+    await coordinator.mergeResults([{
+      basedOnRevision: 0,
+      conclusions: [],
+      filesRead: [],
+      filesChanged: [],
+      verification: [],
+      decisionsProposed: [{ description: '用 SQLite', reason: '本地优先' }],
+      unresolved: [],
+      usage: { promptTokens: 0, completionTokens: 0 },
+    }]);
+
+    expect(hub.getRevision()).toBe(before + 1);
+    expect(hub.getContext().decisions.map((d) => d.description)).toEqual(['用 SQLite']);
+
+    const replayed = new ContextHub('sess-001', tmpDir);
+    expect(replayed.getContext().decisions.map((d) => d.description)).toEqual(['用 SQLite']);
+  });
 });
