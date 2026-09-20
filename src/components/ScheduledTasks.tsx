@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type {
   ModelListItem, ProjectSummary, ScheduledRun, ScheduledTask, ScheduledTaskInput,
-  ScheduledTaskKind, ServerEntry,
+  ScheduledTaskKind, ScheduledTaskPolicy, ServerEntry,
 } from '../../shared/ipc';
 import { usePresence } from '../hooks/usePresence';
 import { captureFocusTarget, presenceRootProps, restoreFocusTarget, type PresenceMotionProps } from '../lib/presence-ui';
 import { Icon } from './Icon';
+
+const POLICY_TOOL_LABELS: Record<string, string> = {
+  write_file: '写入文件',
+  edit_file: '编辑文件',
+  run_command: '运行命令',
+};
+
+/** 任务卡片策略摘要：未配置 = 只读 */
+export function policySummary(policy?: ScheduledTaskPolicy): string {
+  if (!policy || policy.allowedTools.length === 0) return '只读';
+  const tools = policy.allowedTools.map((tool) => POLICY_TOOL_LABELS[tool] ?? tool).join('、');
+  const parts = [`写操作：${tools}`];
+  if (policy.fileScopes.length > 0) parts.push(`范围 ${policy.fileScopes.join('、')}`);
+  if (policy.allowedCommands.length > 0) parts.push(`命令 ${policy.allowedCommands.length} 条`);
+  return parts.join(' · ');
+}
 
 export interface ScheduledTasksProps {
   /** 历史记录中的会话跳转：切换到任务页并打开该会话 */
@@ -324,6 +340,7 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
                   <div className="scheduled-task-row__meta">
                     <span>下次运行：{nextRunLabel(task)}</span>
                     <span>最近：{lastStatusLabel(task)}</span>
+                    <span>{policySummary(task.policy)}</span>
                   </div>
                 </div>
                 <div className="scheduled-task-row__actions">
@@ -438,7 +455,9 @@ function ScheduledTaskDialog({
   const [intervalAmount, setIntervalAmount] = useState(initialInterval.amount);
   const [intervalUnit, setIntervalUnit] = useState<'minutes' | 'hours'>(initialInterval.unit);
   const [cronExpr, setCronExpr] = useState(task?.scheduleKind === 'cron' ? task.scheduleExpr : '');
-  const [allowDangerous, setAllowDangerous] = useState(task?.allowDangerous ?? false);
+  const [allowedTools, setAllowedTools] = useState<Array<'write_file' | 'edit_file' | 'run_command'>>(task?.policy?.allowedTools ?? []);
+  const [fileScopesText, setFileScopesText] = useState((task?.policy?.fileScopes ?? []).join('\n'));
+  const [allowedCommandsText, setAllowedCommandsText] = useState((task?.policy?.allowedCommands ?? []).join('\n'));
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const savingRef = useRef(false);
@@ -452,15 +471,8 @@ function ScheduledTaskDialog({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isClosing, onClose]);
 
-  function toggleDangerous() {
-    if (allowDangerous) {
-      setAllowDangerous(false);
-      return;
-    }
-    const confirmed = window.confirm(
-      '允许危险工具后，无人值守运行可能执行删除、写入等高风险操作。确认开启？',
-    );
-    if (confirmed) setAllowDangerous(true);
+  function toggleTool(tool: 'write_file' | 'edit_file' | 'run_command') {
+    setAllowedTools((prev) => (prev.includes(tool) ? prev.filter((item) => item !== tool) : [...prev, tool]));
   }
 
   function handleProjectChange(id: string) {
@@ -526,14 +538,33 @@ function ScheduledTaskDialog({
       scheduleExpr = cronExpr.trim();
     }
 
+    const policyDraft = {
+      allowedTools: [...allowedTools],
+      fileScopes: fileScopesText.split('\n').map((line) => line.trim()).filter(Boolean),
+      allowedCommands: allowedCommandsText.split('\n').map((line) => line.trim()).filter(Boolean),
+    };
+    const needsScopes = allowedTools.includes('write_file') || allowedTools.includes('edit_file');
+    if (runtime === 'local' && needsScopes && policyDraft.fileScopes.length === 0) {
+      setFeedback('选择写入/编辑文件后必须填写可写范围');
+      return;
+    }
+    if (runtime === 'local' && allowedTools.includes('run_command') && policyDraft.allowedCommands.length === 0) {
+      setFeedback('选择运行命令后必须填写至少一条命令');
+      return;
+    }
+    const hasPolicy = runtime === 'local' && allowedTools.length > 0;
+    if (hasPolicy && !window.confirm('该任务将在无人值守时执行写操作（按声明范围）。确认按最小范围授权？')) {
+      return;
+    }
+
     const input: ScheduledTaskInput = {
       name: trimmedName,
       prompt: trimmedPrompt,
       runtime,
       scheduleKind: kind,
       scheduleExpr,
-      allowDangerous,
     };
+    if (hasPolicy) input.policy = policyDraft;
     if (runtime === 'server') {
       input.serverId = serverId;
     } else {
@@ -777,20 +808,44 @@ function ScheduledTaskDialog({
             </div>
           )}
 
-          <div className="scheduled-danger">
-            <div className="scheduled-danger__text">
-              <strong>允许危险工具</strong>
-              <span>无人值守运行时可能执行删除、写入等高风险操作；运行时仍按失败关闭处理。</span>
+          {runtime === 'local' ? (
+            <div className="scheduled-policy">
+              <strong>允许的写操作</strong>
+              {([
+                ['write_file', '写入文件'],
+                ['edit_file', '编辑文件'],
+                ['run_command', '运行命令'],
+              ] as const).map(([value, label]) => (
+                <label key={value} className="scheduled-policy__option">
+                  <input
+                    type="checkbox"
+                    checked={allowedTools.includes(value)}
+                    onChange={() => toggleTool(value)}
+                    aria-label={label}
+                  />
+                  {label}
+                </label>
+              ))}
+              {(allowedTools.includes('write_file') || allowedTools.includes('edit_file')) && (
+                <textarea
+                  aria-label="可写范围"
+                  placeholder="每行一个范围，如 src/**"
+                  value={fileScopesText}
+                  onChange={(event) => setFileScopesText(event.target.value)}
+                />
+              )}
+              {allowedTools.includes('run_command') && (
+                <textarea
+                  aria-label="命令白名单"
+                  placeholder="每行一条命令，如 npm test"
+                  value={allowedCommandsText}
+                  onChange={(event) => setAllowedCommandsText(event.target.value)}
+                />
+              )}
             </div>
-            <button
-              className={`settings-switch${allowDangerous ? ' on' : ''}`}
-              role="switch"
-              aria-checked={allowDangerous}
-              aria-label="允许危险工具"
-              type="button"
-              onClick={toggleDangerous}
-            />
-          </div>
+          ) : (
+            <p className="scheduled-policy__server-note">写操作策略由远端服务器治理，本地不配置。</p>
+          )}
 
           {feedback && <p className="scheduled-dialog__error" role="alert">{feedback}</p>}
 
