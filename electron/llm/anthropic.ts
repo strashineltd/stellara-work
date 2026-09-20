@@ -277,8 +277,12 @@ export class AnthropicClient {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (signal.aborted) throw new Error('请求已取消');
 
+      let emitted = false;
       try {
-        yield* this.fetchStream(url, body, signal);
+        for await (const event of this.fetchStream(url, body, signal)) {
+          emitted = true;
+          yield event;
+        }
         return;
       } catch (err) {
         if ((err as Error).name === 'AbortError' || signal.aborted) {
@@ -288,7 +292,8 @@ export class AnthropicClient {
         const errorMeta = classifyThrownError(err);
         lastError = new Error(errorMeta.hint);
 
-        if (errorMeta.retryable && attempt < MAX_RETRIES) {
+        // 已经产出过事件：重试会整段重放（内容/工具调用重复），直接向上抛
+        if (errorMeta.retryable && attempt < MAX_RETRIES && !emitted) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
           log.warn(`Anthropic stream 异常，${delay}ms 后重试 (${attempt + 1}/${MAX_RETRIES}): ${errorMeta.hint}`);
           await sleep(delay);
