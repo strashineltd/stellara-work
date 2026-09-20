@@ -9,6 +9,7 @@ import path from 'node:path';
 import { ContextHub } from '../../context/context-hub';
 import { runResponsesLoop } from '../responses-loop';
 import { runAnthropicAgentLoop } from '../anthropic-loop';
+import { streamingClient } from '../anthropic-stream-test-utils';
 import type { ChatStreamEvent, ModelConfig, ToolCall } from '../../../shared/ipc';
 
 const { mockCreateStream, mockAnthropicCreate, mockRetrieveMemories, mockRequiresApproval } = vi.hoisted(() => ({
@@ -76,7 +77,7 @@ async function runScenario(
   } else {
     for await (const event of runAnthropicAgentLoop(prompt, {
       model: MODEL, cwd: workDir, sessionId, contextHub: hub, allowSubagents: false,
-      client: { create: mockAnthropicCreate },
+      client: streamingClient(mockAnthropicCreate),
       ...(options.maxToolCalls !== undefined ? { maxToolCalls: options.maxToolCalls } : {}),
       ...(options.onApproval ? { onApproval: options.onApproval } : {}),
     })) events.push(event);
@@ -220,7 +221,7 @@ describe.each(['responses', 'anthropic'] as const)('%s 契约', (protocol) => {
     } else {
       for await (const _event of runAnthropicAgentLoop('读文件', {
         model: MODEL, cwd: workDir, sessionId, contextHub: hub, allowSubagents: false,
-        client: { create: mockAnthropicCreate },
+        client: streamingClient(mockAnthropicCreate),
       })) { /* 消费事件 */ }
     }
 

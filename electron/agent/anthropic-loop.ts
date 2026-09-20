@@ -23,6 +23,7 @@ import { evaluateToolCallLimit, MAX_TOOL_CALLS_DEFAULT } from './shared/loop-lim
 import { migrateHistoryToHub } from './shared/history-migration';
 import { buildInstructions } from './shared/instructions';
 import { projectAnthropicMessages } from './shared/anthropic-projection';
+import { AnthropicStreamAssembler } from './anthropic-stream-assembler';
 import { estimateRequestTokens } from '../context/token-estimator';
 import { summarizeWithModel } from '../llm/client-factory';
 import { COMPACTION_SUMMARY_PROMPT } from '../context/compactor';
@@ -66,8 +67,8 @@ export interface AnthropicLoopOptions {
   compactionSummaryEnabled?: boolean;
   /** 子代理内部关闭再次分派，避免递归任务树。 */
   allowSubagents?: boolean;
-  /** 测试与嵌入场景可注入客户端；桌面运行时始终使用模型配置创建。 */
-  client?: Pick<AnthropicClient, 'create'>;
+  /** 测试与嵌入场景可注入流式客户端；桌面运行时始终使用模型配置创建。 */
+  client?: Pick<AnthropicClient, 'createStream'>;
 }
 
 // 工具策略与限额常量已移至 ./shared（tool-policy、loop-limits）
@@ -189,14 +190,21 @@ export async function* runAnthropicAgentLoop(
       return;
     }
 
-    const response = await client.create({
+    // 流式消费：文本/思考增量实时透传，装配后供下游使用（工具调用、截断、记账）
+    const assembler = new AnthropicStreamAssembler();
+    for await (const event of client.createStream({
       model: options.model.model,
       max_tokens: options.model.maxOutputTokens ?? 16_384,
       system: buildInstructions(system, options.contextHub.getContext()),
       messages,
       tools,
       tool_choice: { type: 'auto' },
-    }, options.signal);
+    }, options.signal)) {
+      const delta = assembler.handle(event);
+      if (delta?.text) yield { type: 'content', content: delta.text };
+      if (delta?.reasoning) yield { type: 'reasoning', content: delta.reasoning };
+    }
+    const response = assembler.finish();
 
     totalInputTokens += response.usage.input_tokens;
     totalOutputTokens += response.usage.output_tokens;
@@ -218,7 +226,7 @@ export async function* runAnthropicAgentLoop(
     messages.push({ role: 'assistant', content: assistantContent });
     for (const block of assistantContent) {
       if (block.type === 'text' && block.text) {
-        yield { type: 'content', content: block.text };
+        // 文本已在流式消费时透传，这里只落 ContextHub，避免重复输出
         options.contextHub.addResponseItem({
           type: 'message',
           role: 'assistant',

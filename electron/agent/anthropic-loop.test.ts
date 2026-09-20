@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ContextHub } from '../context/context-hub';
 import { runAnthropicAgentLoop } from './anthropic-loop';
+import { streamingClient } from './anthropic-stream-test-utils';
 import type { ModelConfig } from '../../shared/ipc';
 
 const mockCreate = vi.fn();
@@ -70,12 +71,15 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: hub,
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
     })) events.push(event);
 
     expect(events.some((event) => event.type === 'tool_call' && event.toolCall?.id === 'toolu-1')).toBe(true);
     expect(events.some((event) => event.type === 'tool_result' && event.toolResult?.toolCallId === 'toolu-1')).toBe(true);
-    expect(events.some((event) => event.type === 'content' && event.content === '读取完成')).toBe(true);
+    const assistantText = events
+      .flatMap((event) => (event.type === 'content' && event.content ? [event.content] : []))
+      .join('');
+    expect(assistantText).toBe('读取完成');
     const secondRequest = mockCreate.mock.calls[1]![0];
     const resultMessage = secondRequest.messages.find((message: { role: string; content: unknown }) =>
       message.role === 'user' && Array.isArray(message.content)
@@ -106,7 +110,7 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: hub,
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
       onApproval,
     })) {
       // 消费事件
@@ -146,7 +150,7 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: hub,
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
       onApproval,
     })) {
       // 消费事件
@@ -179,7 +183,7 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: hub,
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
       memoryProjectId: 'proj-1',
     })) {
       // 消费事件
@@ -204,7 +208,7 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: hub,
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
       planMode: true,
       planExtraTools: [
         { type: 'function', function: { name: 'mcp__s1__read', description: 'read', parameters: { type: 'object' } } },
@@ -233,7 +237,7 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: hub,
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
     })) {
       if (ev.type === 'error' && ev.error) events.push(ev.error);
     }
@@ -247,7 +251,7 @@ describe('runAnthropicAgentLoop', () => {
       sessionId: 'sub-session',
       contextHub: new ContextHub('sub-session-2', workDir, 256000, 16384, { persist: false }),
       allowSubagents: false,
-      client: { create: mockCreate },
+      client: streamingClient(mockCreate),
     });
     for await (const ev of gen2) {
       if (ev.type === 'content' && ev.content) contents.push(ev.content);
@@ -292,7 +296,7 @@ describe('runAnthropicAgentLoop', () => {
         sessionId: 'sub-session',
         contextHub: hub,
         allowSubagents: false,
-        client: { create: mockCreate },
+        client: streamingClient(mockCreate),
         onApproval,
         ...(opts.planMode ? { planMode: true } : {}),
       })) {
@@ -374,7 +378,7 @@ describe('runAnthropicAgentLoop', () => {
         sessionId: 'sub-session',
         contextHub: hub,
         allowSubagents: false,
-        client: { create: mockCreate },
+        client: streamingClient(mockCreate),
       })) {
       }
 
@@ -395,7 +399,7 @@ describe('runAnthropicAgentLoop', () => {
         sessionId: 'sub-session',
         contextHub: hub,
         allowSubagents: false,
-        client: { create: mockCreate },
+        client: streamingClient(mockCreate),
         onApproval,
       })) {
       }
@@ -417,7 +421,7 @@ describe('runAnthropicAgentLoop', () => {
         sessionId: 'sub-session',
         contextHub: hub,
         allowSubagents: false,
-        client: { create: mockCreate },
+        client: streamingClient(mockCreate),
       })) {
         if (event.type === 'tool_result' && event.toolResult) names.push(event.toolResult.name);
       }
@@ -438,7 +442,7 @@ describe('runAnthropicAgentLoop', () => {
         sessionId: 'sub-session',
         contextHub: hub,
         allowSubagents: false,
-        client: { create: mockCreate },
+        client: streamingClient(mockCreate),
         toolGuard,
       })) {
       }
@@ -466,7 +470,7 @@ describe('runAnthropicAgentLoop', () => {
     const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
     const seen: Array<{ output?: string }> = [];
     for await (const event of runAnthropicAgentLoop('读大文件', {
-      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: streamingClient(mockCreate),
     })) {
       if (event.type === 'tool_result') seen.push((event.toolResult?.result ?? {}) as { output?: string });
     }
@@ -497,7 +501,7 @@ describe('runAnthropicAgentLoop', () => {
 
     const events = [];
     for await (const event of runAnthropicAgentLoop('继续', {
-      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: streamingClient(mockCreate),
     })) events.push(event);
 
     expect(events.some((event) => event.type === 'summary')).toBe(true);
@@ -530,7 +534,7 @@ describe('runAnthropicAgentLoop', () => {
     const events = [];
     for await (const event of runAnthropicAgentLoop('任务', {
       model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
-      client: { create: mockCreate }, maxToolCalls: 1, onApproval,
+      client: streamingClient(mockCreate), maxToolCalls: 1, onApproval,
     })) events.push(event);
 
     expect(events.some((event) => event.type === 'content' && event.content?.includes('已达到工具调用上限(1)'))).toBe(true);
@@ -556,7 +560,7 @@ describe('runAnthropicAgentLoop', () => {
     const onApproval = vi.fn().mockResolvedValue(false);
     for await (const _event of runAnthropicAgentLoop('写文件', {
       model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
-      client: { create: mockCreate }, onApproval,
+      client: streamingClient(mockCreate), onApproval,
     })) { /* 消费事件 */ }
 
     expect(onApproval).toHaveBeenCalledTimes(1);
@@ -576,7 +580,7 @@ describe('runAnthropicAgentLoop', () => {
     });
 
     for await (const _event of runAnthropicAgentLoop('继续', {
-      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: streamingClient(mockCreate),
     })) { /* 消费事件 */ }
 
     const firstRequest = mockCreate.mock.calls[0]![0];
@@ -616,7 +620,7 @@ describe('runAnthropicAgentLoop', () => {
 
     const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
     for await (const _event of runAnthropicAgentLoop('读两个文件', {
-      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: streamingClient(mockCreate),
     })) { /* 消费事件 */ }
 
     const toolItemTypes = hub.getResponseItems()
@@ -625,7 +629,7 @@ describe('runAnthropicAgentLoop', () => {
     expect(toolItemTypes).toEqual(['function_call', 'function_call', 'function_call_output', 'function_call_output']);
 
     for await (const _event of runAnthropicAgentLoop('继续', {
-      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: { create: mockCreate },
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false, client: streamingClient(mockCreate),
     })) { /* 消费事件 */ }
 
     const secondRequest = mockCreate.mock.calls[2]![0];
@@ -653,7 +657,7 @@ describe('runAnthropicAgentLoop', () => {
     const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
     for await (const _event of runAnthropicAgentLoop('任务', {
       model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
-      client: { create: mockCreate }, allowedToolNames: new Set(['read_file']),
+      client: streamingClient(mockCreate), allowedToolNames: new Set(['read_file']),
     })) { /* 消费事件 */ }
 
     const firstRequest = mockCreate.mock.calls[0]![0] as { tools: Array<{ name: string }> };
@@ -662,5 +666,50 @@ describe('runAnthropicAgentLoop', () => {
     expect(names).toContain('task_complete');
     expect(names).not.toContain('write_file');
     expect(names).not.toContain('run_command');
+  });
+
+  it('文本按流式增量输出（而非一次性返回）', async () => {
+    mockCreate.mockResolvedValueOnce({
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+      usage: { input_tokens: 3, output_tokens: 2 },
+      content: [{ type: 'text', text: '前半后半' }],
+    });
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const contents: string[] = [];
+    for await (const event of runAnthropicAgentLoop('任务', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client: streamingClient(mockCreate),
+    })) {
+      if (event.type === 'content' && event.content) contents.push(event.content);
+    }
+    expect(contents).toEqual(['前半', '后半']);
+  });
+
+  it('thinking 增量透传为 reasoning 事件，且不重复文本', async () => {
+    const client = {
+      async *createStream() {
+        yield { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 1 } } } as never;
+        yield { type: 'content_block_start', index: 0, content_block: { type: 'thinking', text: '' } } as never;
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', text: '想一想' } };
+        yield { type: 'content_block_stop', index: 0 };
+        yield { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } };
+        yield { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '答案' } };
+        yield { type: 'content_block_stop', index: 1 };
+        yield { type: 'message_delta', delta: { type: 'message_delta', stop_reason: 'end_turn' }, usage: { output_tokens: 2 } };
+        yield { type: 'message_stop' };
+      },
+    };
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const contents: string[] = [];
+    const reasoning: string[] = [];
+    for await (const event of runAnthropicAgentLoop('任务', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client,
+    })) {
+      if (event.type === 'content' && event.content) contents.push(event.content);
+      if (event.type === 'reasoning' && event.content) reasoning.push(event.content);
+    }
+    expect(reasoning).toEqual(['想一想']);
+    expect(contents).toEqual(['答案']);
   });
 });
