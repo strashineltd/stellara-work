@@ -91,10 +91,12 @@ export interface AnthropicStreamEvent {
   type: string;
   // 事件特定字段
   index?: number;
-  delta?: { type: string; text?: string; partial_json?: string };
+  delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
   content_block?: AnthropicContent;
   message?: AnthropicResponse;
   error?: { type: string; message: string };
+  /** message_delta 携带的累计用量（部分网关同时给 input/output） */
+  usage?: { input_tokens?: number; output_tokens?: number };
 }
 
 // ─── 工具函数 ─────────────────────────────────────────
