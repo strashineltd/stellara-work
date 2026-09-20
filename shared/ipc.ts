@@ -913,7 +913,7 @@ export type ScheduledRunStatus = 'running' | 'success' | 'error' | 'missed' | 'a
 export interface ScheduledTaskPolicy {
   /** 允许危险工具白名单（仅这三个可选） */
   allowedTools: Array<'write_file' | 'edit_file' | 'run_command'>;
-  /** 可写文件范围（glob/目录）；write/edit 路径与 run_command 的 cwd 必须落于其中 */
+  /** 可写文件范围（glob/目录）：write/edit 的目标必须匹配；run_command 显式提供的 cwd 也必须在范围内（未提供时在工作目录根执行） */
   fileScopes: string[];
   /** 命令白名单（token 边界前缀匹配） */
   allowedCommands: string[];

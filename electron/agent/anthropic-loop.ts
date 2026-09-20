@@ -42,6 +42,8 @@ export interface AnthropicLoopOptions {
   planExtraTools?: OpenAITool[];
   /** 工具子集过滤（策略）：未提供时不过滤 */
   allowedToolNames?: ReadonlySet<string>;
+  /** 工具拒绝谓词（调度策略）：命中的工具始终不注入 */
+  isToolDenied?: (name: string) => boolean;
   /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
   memoryProjectId?: string;
   /** 会话归属身份（记忆注入时按身份检索，缺省 default） */
@@ -50,8 +52,9 @@ export interface AnthropicLoopOptions {
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
   /**
    * 子代理执行护栏：返回非空字符串时拒绝执行该工具调用并回传错误。
+   * 可为异步（调度策略的文件范围校验需要 realpath）。
    */
-  toolGuard?: (name: string, args: Record<string, unknown>) => string | null;
+  toolGuard?: (name: string, args: Record<string, unknown>) => string | null | Promise<string | null>;
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
   rolePrompt?: string;
   agentId?: string;
@@ -80,10 +83,12 @@ export async function* runAnthropicAgentLoop(
       ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
       : allTools,
     options.allowedToolNames,
+    options.isToolDenied,
   );
+  const allowedExtraTools = (options.extraTools ?? []).filter((tool) => !options.isToolDenied?.(tool.function.name));
   let tools = (planMode
-    ? [...filterToolsByPolicy(planModeTools, options.allowedToolNames), ...(options.planExtraTools ?? [])]
-    : [...executableTools, ...(options.extraTools ?? [])])
+    ? [...filterToolsByPolicy(planModeTools, options.allowedToolNames, options.isToolDenied), ...(options.planExtraTools ?? [])]
+    : [...executableTools, ...allowedExtraTools])
     .map(toAnthropicTool);
   migrateHistoryToHub(options.contextHub, options.history);
   let messages: AnthropicMessage[] = projectAnthropicMessages(options.contextHub.getResponseItems());
@@ -310,7 +315,7 @@ export async function* runAnthropicAgentLoop(
         }
       }
 
-      const guardError = options.toolGuard?.(name, args);
+      const guardError = await options.toolGuard?.(name, args);
       if (guardError) {
         const output = JSON.stringify({ ok: false, error: guardError });
         outputs.push({ type: 'tool_result', tool_use_id: callId, content: output });

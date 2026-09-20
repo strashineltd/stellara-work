@@ -1095,4 +1095,3 @@ git commit -m "docs+preview(scheduler): 写操作策略说明与预览适配"
 - **Placeholder scan**：无 TBD/TODO；代码步骤均含完整实现或精确改动位置。
 - **Type consistency**：`ScheduledTaskPolicy`（Task 2 定义）在 Task 3/5/6/7 使用一致；`ScheduledPolicyRuntime.allowedToolNames/shouldApprove/toolGuard`（Task 3）与 Task 6 main.ts 用法一致；`filterToolsByPolicy`（Task 4）签名两条 loop 共用；`validateTaskPolicy` 返回 `string | null`（Task 2）在 Task 6 以 `if (policyError) throw` 消费。
 - **Review Focus**：5 条均有对应测试任务（Task 1/2/3/4/5/7）。
-

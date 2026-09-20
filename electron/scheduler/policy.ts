@@ -1,8 +1,10 @@
 /**
  * 定时任务写操作策略：保存时校验与运行时匹配（纯函数）。
  */
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { tokenizeCommand, validateAllowedCommandEntry, isAbsolutePathArg } from '../agent/tools/shell';
-import { createSubagentToolGuard } from '../agent/subagent-guard';
+import { canonicalCwd, isWithinDir } from '../fs/path-security';
 import type { ScheduledTaskPolicy } from '../../shared/ipc';
 
 const ALLOWED_POLICY_TOOLS = new Set(['write_file', 'edit_file', 'run_command']);
@@ -62,7 +64,123 @@ export function matchesCommandAllowlist(command: string, allowlist: readonly str
 export interface ScheduledPolicyRuntime {
   allowedToolNames: ReadonlySet<string>;
   shouldApprove: (toolName: string) => boolean;
-  toolGuard: (name: string, args: Record<string, unknown>) => string | null;
+  /** 异步护栏：文件范围校验需要 realpath（符号链接 / 父目录解析） */
+  toolGuard: (name: string, args: Record<string, unknown>) => Promise<string | null>;
+}
+
+/** 调度运行中显式拒绝的工具（与策略无关）：MCP、浏览器、子代理分派 */
+export function isScheduledDeniedTool(name: string): boolean {
+  return name.startsWith('mcp__') || name.startsWith('browser_') || name === 'dispatch_subagents';
+}
+
+const GLOB_MAGIC = /[*?]/;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 极简 glob → RegExp：`**` 跨段、`*` 段内、`?` 单字符 */
+export function globToRegExp(glob: string): RegExp {
+  const parts = glob.split('/');
+  let out = '^';
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    const last = i === parts.length - 1;
+    if (part === '**') {
+      out += last ? '.*' : '(?:[^/]+/)*';
+      continue;
+    }
+    out += escapeRegExp(part).replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]');
+    if (!last) out += '/';
+  }
+  return new RegExp(out + '$');
+}
+
+/** scope 是否匹配相对路径（无通配符的 scope 按目录前缀匹配） */
+export function matchesScope(relativePath: string, scope: string): boolean {
+  const normalizedScope = scope.replaceAll('\\', '/').replace(/\/+$/, '');
+  const normalizedPath = relativePath.replaceAll('\\', '/');
+  if (!GLOB_MAGIC.test(normalizedScope)) {
+    return normalizedPath === normalizedScope || normalizedPath.startsWith(`${normalizedScope}/`);
+  }
+  return globToRegExp(normalizedScope).test(normalizedPath);
+}
+
+/** scope 的静态目录前缀（用于 cwd 校验）：截到第一个含通配符的段之前 */
+function scopeDirectory(scope: string): string {
+  const parts = scope.replaceAll('\\', '/').replace(/\/+$/, '').split('/');
+  const staticParts: string[] = [];
+  for (const part of parts) {
+    if (GLOB_MAGIC.test(part)) break;
+    staticParts.push(part);
+  }
+  return staticParts.join('/');
+}
+
+/** 目标的真实路径：存在则 realpath；不存在则取最近存在祖先的 realpath 拼接缺失段 */
+async function resolveRealTarget(absPath: string): Promise<string | null> {
+  const missing: string[] = [];
+  let current = absPath;
+  for (let depth = 0; depth < 64; depth++) {
+    try {
+      const real = await fs.realpath(current);
+      return missing.length > 0 ? path.join(real, ...missing.reverse()) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return null;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
+  return null;
+}
+
+/**
+ * 校验写入路径是否落于任务声明的范围。
+ * 与文件工具使用同一路径解析（不 trim）；对真实路径（穿透符号链接）做范围匹配。
+ */
+export async function checkScheduledFilePath(
+  rawPath: string,
+  cwd: string,
+  fileScopes: readonly string[],
+): Promise<string | null> {
+  if (fileScopes.length === 0) return '任务未声明可写范围（已拒绝）';
+  if (!rawPath) return '缺少 path（已拒绝）';
+  const resolved = path.resolve(cwd, rawPath);
+  const realTarget = await resolveRealTarget(resolved);
+  if (!realTarget) return `无法解析路径（已拒绝）：${rawPath}`;
+  const realCwd = await canonicalCwd(cwd);
+  if (!isWithinDir(realTarget, realCwd)) return `路径超出工作目录（已拒绝）：${rawPath}`;
+  const relative = path.relative(realCwd, realTarget);
+  if (!fileScopes.some((scope) => matchesScope(relative, scope))) {
+    return `路径 ${rawPath} 超出任务声明的可写范围（已拒绝）`;
+  }
+  return null;
+}
+
+/**
+ * 校验显式提供的 run_command cwd 是否落于声明范围（未提供时在工作目录根执行）。
+ */
+export async function checkScheduledCommandCwd(
+  rawCwd: string | undefined,
+  cwd: string,
+  fileScopes: readonly string[],
+): Promise<string | null> {
+  if (rawCwd === undefined || rawCwd === '') return null;
+  if (fileScopes.length === 0) return null;
+  const resolved = path.resolve(cwd, rawCwd);
+  const realTarget = await resolveRealTarget(resolved);
+  if (!realTarget) return `无法解析命令 cwd（已拒绝）：${rawCwd}`;
+  const realCwd = await canonicalCwd(cwd);
+  if (!isWithinDir(realTarget, realCwd)) return `命令 cwd ${rawCwd} 超出工作目录（已拒绝）`;
+  const relative = path.relative(realCwd, realTarget);
+  const allowed = fileScopes.some((scope) => {
+    const dir = scopeDirectory(scope);
+    if (!dir) return true;
+    return relative === dir || relative.startsWith(`${dir}/`);
+  });
+  if (!allowed) return `命令 cwd ${rawCwd} 超出任务声明的可写范围（已拒绝）`;
+  return null;
 }
 
 /**
@@ -76,23 +194,25 @@ export function buildScheduledPolicyRuntime(
   const normalized = normalizeScheduledPolicy(policy);
   const allowedToolNames = new Set<string>(normalized?.allowedTools ?? []);
   const allowedCommands = normalized?.allowedCommands ?? [];
-  const baseGuard = createSubagentToolGuard({
-    readOnly: false,
-    cwd,
-    fileScopes: normalized?.fileScopes ?? [],
-  });
+  const fileScopes = normalized?.fileScopes ?? [];
 
   return {
     allowedToolNames,
     shouldApprove: (toolName) => allowedToolNames.has(toolName),
-    toolGuard: (name, args) => {
-      const baseError = baseGuard(name, args);
-      if (baseError) return baseError;
+    toolGuard: async (name, args) => {
+      if (isScheduledDeniedTool(name)) {
+        return `工具 ${name} 不支持在调度任务中使用（已拒绝）`;
+      }
+      if (name === 'write_file' || name === 'edit_file') {
+        const target = typeof args.path === 'string' ? args.path : '';
+        return checkScheduledFilePath(target, cwd, fileScopes);
+      }
       if (name === 'run_command') {
         const command = typeof args.command === 'string' ? args.command : '';
         if (!matchesCommandAllowlist(command, allowedCommands)) {
           return '命令不在任务白名单内（已拒绝）';
         }
+        return checkScheduledCommandCwd(typeof args.cwd === 'string' ? args.cwd : undefined, cwd, fileScopes);
       }
       return null;
     },

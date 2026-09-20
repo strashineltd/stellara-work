@@ -421,6 +421,12 @@ describe('ScheduledTasks 写操作策略', () => {
     expect(row.textContent).toContain('写操作：编辑文件');
     expect(row.textContent).toContain('范围 src/**');
   });
+
+  it('server 任务卡片显示由远端治理', async () => {
+    stubApi([makeTask({ runtime: 'server', serverId: 'srv-1' })]);
+    const { container } = await renderScheduled();
+    expect(taskRow(container, 't1').textContent).toContain('由远端治理');
+  });
 });
 
 describe('ScheduledTasks 执行历史', () => {

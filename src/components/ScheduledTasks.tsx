@@ -340,7 +340,7 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
                   <div className="scheduled-task-row__meta">
                     <span>下次运行：{nextRunLabel(task)}</span>
                     <span>最近：{lastStatusLabel(task)}</span>
-                    <span>{policySummary(task.policy)}</span>
+                    <span>{task.runtime === 'server' ? '由远端治理' : policySummary(task.policy)}</span>
                   </div>
                 </div>
                 <div className="scheduled-task-row__actions">

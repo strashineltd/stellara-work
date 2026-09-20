@@ -20,7 +20,7 @@ import { ServerChatBridge } from './server/chat-bridge';
 import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engine';
 import { enableNextRunAt, nextRunPatchForUpdate } from './scheduler/next-run';
 import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
-import { buildScheduledPolicyRuntime, normalizeScheduledPolicy, validateTaskPolicy } from './scheduler/policy';
+import { buildScheduledPolicyRuntime, isScheduledDeniedTool, normalizeScheduledPolicy, validateTaskPolicy } from './scheduler/policy';
 import { installAppMenu } from './menu';
 import { createAppTray, type TrayHandle } from './tray';
 import { shouldHideOnClose } from './tray-logic';
@@ -2256,6 +2256,7 @@ app.whenReady().then(async () => {
           ...(request.memoryProjectId !== undefined ? { memoryProjectId: request.memoryProjectId } : {}),
           memoryUserId: request.memoryUserId,
           allowedToolNames: runtime.allowedToolNames,
+          isToolDenied: isScheduledDeniedTool,
           onApproval: async (toolCall: ToolCall) => runtime.shouldApprove(toolCall.function.name),
           toolGuard: (name: string, args: Record<string, unknown>) => runtime.toolGuard(name, args),
         };

@@ -45,13 +45,20 @@ export async function needsApproval(input: ApprovalDecisionInput): Promise<boole
 }
 
 /**
- * 工具子集过滤：未提供 allowedToolNames 时不变；
- * 提供时仅保留"只读/非危险工具 + 白名单内的危险工具 + task_complete"。
+ * 工具子集过滤：未提供 allowedToolNames / isDenied 时不变；
+ * - isDenied 命中的工具始终移除（调度拒绝 MCP/浏览器/子代理等）
+ * - allowedToolNames 提供时仅保留"只读/非危险工具 + 白名单内的危险工具 + task_complete"
  */
-export function filterToolsByPolicy(tools: OpenAITool[], allowedToolNames?: ReadonlySet<string>): OpenAITool[] {
-  if (!allowedToolNames) return tools;
+export function filterToolsByPolicy(
+  tools: OpenAITool[],
+  allowedToolNames?: ReadonlySet<string>,
+  isDenied?: (name: string) => boolean,
+): OpenAITool[] {
+  if (!allowedToolNames && !isDenied) return tools;
   return tools.filter((tool) => {
     const name = tool.function.name;
+    if (isDenied?.(name)) return false;
+    if (!allowedToolNames) return true;
     if (name === 'task_complete') return true;
     if (!DANGEROUS_TOOLS.has(name)) return true;
     return allowedToolNames.has(name);

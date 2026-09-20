@@ -50,4 +50,14 @@ describe('filterToolsByPolicy', () => {
     expect(filterToolsByPolicy(tools, new Set(['edit_file'])).map((t) => t.function.name).sort())
       .toEqual(['edit_file', 'read_file', 'task_complete']);
   });
+
+  it('isDenied 谓词优先于白名单（调度拒绝 MCP/浏览器工具）', () => {
+    const tools = [tool('browser_navigate'), tool('read_file'), tool('mcp__s1__read')];
+    const filtered = filterToolsByPolicy(
+      tools,
+      new Set(['read_file']),
+      (name) => name.startsWith('browser_') || name.startsWith('mcp__'),
+    );
+    expect(filtered.map((t) => t.function.name)).toEqual(['read_file']);
+  });
 });
