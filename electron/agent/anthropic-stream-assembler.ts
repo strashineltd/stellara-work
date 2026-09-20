@@ -71,10 +71,14 @@ export class AnthropicStreamAssembler {
         if (typeof index === 'number' && this.inputJson.has(index)) {
           const block = this.blocks.get(index);
           if (block && block.type === 'tool_use') {
-            try {
-              block.input = JSON.parse(this.inputJson.get(index) || '{}');
-            } catch {
-              block.input = {};
+            const partial = this.inputJson.get(index) ?? '';
+            // 未收到任何分片时保留 start 块自带的 input（部分兼容网关如此）
+            if (partial) {
+              try {
+                block.input = JSON.parse(partial);
+              } catch {
+                block.input = {};
+              }
             }
           }
         }

@@ -54,6 +54,17 @@ describe('AnthropicStreamAssembler', () => {
     ]);
   });
 
+  it('未收到 input_json_delta 时保留 start 块自带的 input', () => {
+    const { assembled } = collect([
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu-4', name: 'read_file', input: { path: 'b.txt' } } },
+      { type: 'content_block_stop', index: 0 },
+    ]);
+
+    expect(assembled.content).toEqual([
+      { type: 'tool_use', id: 'tu-4', name: 'read_file', input: { path: 'b.txt' } },
+    ]);
+  });
+
   it('多块按 index 排序组装', () => {
     const { assembled } = collect([
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
