@@ -156,8 +156,8 @@ describe('AnthropicStreamAssembler', () => {
     ]);
   });
 
-  it('重复 index 的 start 不会重复输出块', () => {
-    const { assembled } = collect([
+  it('重复 index 的 start 被忽略，实时输出与最终内容一致', () => {
+    const { deltas, assembled } = collect([
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
       { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '一' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
@@ -166,6 +166,7 @@ describe('AnthropicStreamAssembler', () => {
       ...END,
     ]);
 
-    expect(assembled.content).toEqual([{ type: 'text', text: '二' }]);
+    expect(deltas.map((delta) => delta.text)).toEqual(['一', '二']);
+    expect(assembled.content).toEqual([{ type: 'text', text: '一二' }]);
   });
 });

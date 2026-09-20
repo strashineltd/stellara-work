@@ -47,8 +47,9 @@ export class AnthropicStreamAssembler {
       case 'content_block_start': {
         const block = event.content_block;
         if (block && typeof event.index === 'number') {
-          // 重复 index 视为覆盖（异常流），不重复登记，避免同一块输出两次
-          if (!this.blocks.has(event.index)) this.order.push(event.index);
+          // 重复 index 视为协议异常：忽略第二个 start，保证实时输出与最终历史一致
+          if (this.blocks.has(event.index)) return null;
+          this.order.push(event.index);
           this.blocks.set(event.index, { ...block });
           this.openBlocks.add(event.index);
           if (block.type === 'tool_use') this.inputJson.set(event.index, '');
