@@ -467,4 +467,36 @@ describe('上下文压缩与恢复', () => {
     expect(count('subagent_runs')).toBe(1);
     expect(replayed.getVerificationEvidence()).toHaveLength(1);
   });
+
+  it('二次修改后重新复核：门禁不再被历史 stale 证据阻塞', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+    await hub.commitEvent('file_modified', { filePath: 'doc.md', agentId: 'main' });
+    await hub.commitEvent('file_read', { filePath: 'doc.md' });
+    await hub.commitEvent('file_modified', { filePath: 'doc.md', agentId: 'main' });
+    await hub.commitEvent('file_read', { filePath: 'doc.md' });
+
+    expect(hub.getUnverifiedFiles()).toEqual([]);
+    const gate = hub.canCompleteTask();
+    expect(gate.ok).toBe(true);
+  });
+
+  it('重放不重写子代理完成时间', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+    await hub.commitEvent('subagent_started', { id: 'sa-up', task: 't', role: 'research' });
+    await hub.commitEvent('subagent_completed', { id: 'sa-up', status: 'completed', resultSummary: 'done' });
+    const db = getDb();
+    const before = db.prepare('SELECT completed_at FROM subagent_runs WHERE id = ?').get('sa-up') as { completed_at: string };
+    expect(before.completed_at).toBeTruthy();
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 60_000));
+    try {
+      new ContextHub('sess-001', '/tmp/work');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const after = db.prepare('SELECT completed_at FROM subagent_runs WHERE id = ?').get('sa-up') as { completed_at: string };
+    expect(after.completed_at).toBe(before.completed_at);
+  });
 });

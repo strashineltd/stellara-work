@@ -32,6 +32,8 @@ describe('executeToolCall', () => {
     const content = Array.from({ length: 120_000 }, (_, i) => String.fromCharCode(32 + ((i * 37) % 95))).join('');
     await fs.writeFile(path.join(workDir, 'big.txt'), content);
     const hub = makeHub();
+    const seen: string[] = [];
+    hub.onEvent((event) => seen.push(event.event));
 
     const { outputText, raw } = await executeToolCall({
       hub, cwd: workDir, name: 'read_file', args: { path: 'big.txt' }, context: baseContext,
@@ -41,6 +43,8 @@ describe('executeToolCall', () => {
     expect(raw.output.length).toBe(content.length);
     const capped = JSON.parse(outputText) as { truncation?: { kind?: string } };
     expect(capped.truncation?.kind).toBe('read_file');
+    // 截断 stub 未让模型看到内容，不构成读后复核
+    expect(seen).not.toContain('file_read');
   });
 
   it('编辑文件：记录 modified/unverified 与完成事件', async () => {
@@ -84,6 +88,19 @@ describe('executeToolCall', () => {
     });
 
     expect(seen).toContain('file_read');
+  });
+
+  it('部分读取（带 offset/limit）不构成读后复核', async () => {
+    await fs.writeFile(path.join(workDir, 'note.txt'), 'a\nb\nc\n');
+    const hub = makeHub();
+    const seen: string[] = [];
+    hub.onEvent((event) => seen.push(event.event));
+
+    await executeToolCall({
+      hub, cwd: workDir, name: 'read_file', args: { path: 'note.txt', offset: 1, limit: 1 }, context: baseContext,
+    });
+
+    expect(seen).not.toContain('file_read');
   });
 
   it('匹配到计划步骤且工具成功时推进为 completed', async () => {

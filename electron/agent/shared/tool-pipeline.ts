@@ -16,6 +16,11 @@ const VERIFICATION_KIND_LABELS: Record<CommandVerificationKind, string> = {
   build: '构建',
 };
 
+/** capToolOutput 把超限输出替换为带 truncation 字段的 stub */
+function isTruncationStub(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && 'truncation' in (value as Record<string, unknown>);
+}
+
 export interface ExecuteToolCallInput {
   hub: ContextHub;
   cwd: string;
@@ -54,8 +59,14 @@ export async function executeToolCall(input: ExecuteToolCallInput): Promise<Exec
     affectedFiles: result.meta?.kind === 'edit' ? [result.meta.path] : [],
   }, context.agentId);
 
-  if (name === 'read_file' && result.ok && typeof args.path === 'string') {
-    // 读后复核通道：修改后重新读取会清除该文件的未验证标记（见 ContextHub.handleFileRead）
+  // 读后复核通道：仅"完整读取且模型真实看到内容"才计入（部分读取 / 截断 stub 不算）
+  const coveredRead =
+    name === 'read_file' &&
+    result.ok &&
+    args.offset === undefined &&
+    args.limit === undefined &&
+    !isTruncationStub(capped);
+  if (coveredRead && typeof args.path === 'string') {
     await hub.commitEvent('file_read', { filePath: args.path }, context.agentId);
   }
 

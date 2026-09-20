@@ -742,7 +742,7 @@ export class ContextHub {
       subagent.resultSummary = data.resultSummary;
     }
 
-    if (this.shouldPersist) updateSubagentRun(data.id, data.status, data.resultSummary);
+    if (this.shouldPersist && !this.replaying) updateSubagentRun(data.id, data.status, data.resultSummary);
   }
 
   private handleMemoryInjected(event: ContextEventEnvelope): void {
@@ -794,7 +794,7 @@ export class ContextHub {
       }
     }
     // 更新数据库
-    if (this.shouldPersist) markEvidenceStale(this.sessionId, this.context.workspaceRevision);
+    if (this.shouldPersist && !this.replaying) markEvidenceStale(this.sessionId, this.context.workspaceRevision);
   }
 
   /**
@@ -807,7 +807,7 @@ export class ContextHub {
         if (subagent.workspaceRevision < this.context.workspaceRevision) {
           subagent.status = 'failed';
           subagent.resultSummary = `上下文已过期：文件 ${filePath} 已修改`;
-          if (this.shouldPersist) updateSubagentRun(subagent.id, 'failed', subagent.resultSummary);
+          if (this.shouldPersist && !this.replaying) updateSubagentRun(subagent.id, 'failed', subagent.resultSummary);
         }
       }
     }
@@ -1070,10 +1070,13 @@ export class ContextHub {
       reasons.push(`还有 ${this.context.workspace.unverifiedFiles.size} 个文件未验证（运行测试/构建/类型检查，或修改后重新读取一遍）`);
     }
 
-    // 检查是否有 stale 的证据
-    const staleEvidence = this.getStaleEvidence();
+    // 检查是否有 stale 的证据：只有相关文件仍未被重新验证时才阻塞；
+    // 已重新验证的历史过期证据不再挡住 task_complete
+    const staleEvidence = this.getStaleEvidence().filter((e) =>
+      e.relatedFiles.some((file) => this.context.workspace.unverifiedFiles.has(file)),
+    );
     if (staleEvidence.length > 0) {
-      reasons.push(`有 ${staleEvidence.length} 个验证证据已过期`);
+      reasons.push(`有 ${staleEvidence.length} 个验证证据已过期（相关文件尚未重新验证）`);
     }
 
     // 检查是否有上下文冲突（stale 子代理）

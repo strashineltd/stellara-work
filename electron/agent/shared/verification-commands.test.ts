@@ -51,6 +51,18 @@ describe('classifyVerificationCommand', () => {
     ['npm run lint:fix', null],
     ['cargo fmt', null],
     ['go mod tidy', null],
+    // 执行模式加固：帮助/版本/清理/列举/配置不构成验证
+    ['make --version', null],
+    ['npm test --help', null],
+    ['npm run build --if-present', null],
+    ['tsc -v', null],
+    ['cmake -E echo hello', null],
+    ['cmake -S . -B build', null],
+    ['make clean', null],
+    ['swift package describe', null],
+    ['mvn clean', null],
+    ['gradle check', 'typecheck'],
+    ['npm run "build"', 'build'],
     ['', null],
   ];
 
