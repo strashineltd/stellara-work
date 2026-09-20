@@ -6,8 +6,15 @@
  */
 import { invokeTool } from '../tools';
 import { capToolOutput } from '../../context/compactor';
+import { classifyVerificationCommand, type CommandVerificationKind } from './verification-commands';
 import type { ContextHub } from '../../context/context-hub';
 import type { ToolArgs, ToolExecutionContext, ToolName, ToolResult } from '../../../shared/ipc';
+
+const VERIFICATION_KIND_LABELS: Record<CommandVerificationKind, string> = {
+  test: '测试',
+  typecheck: '类型检查',
+  build: '构建',
+};
 
 export interface ExecuteToolCallInput {
   hub: ContextHub;
@@ -47,6 +54,11 @@ export async function executeToolCall(input: ExecuteToolCallInput): Promise<Exec
     affectedFiles: result.meta?.kind === 'edit' ? [result.meta.path] : [],
   }, context.agentId);
 
+  if (name === 'read_file' && result.ok && typeof args.path === 'string') {
+    // 读后复核通道：修改后重新读取会清除该文件的未验证标记（见 ContextHub.handleFileRead）
+    await hub.commitEvent('file_read', { filePath: args.path }, context.agentId);
+  }
+
   if (result.meta?.kind === 'command') {
     await hub.commitEvent('command_completed', {
       command: result.meta.command,
@@ -55,14 +67,17 @@ export async function executeToolCall(input: ExecuteToolCallInput): Promise<Exec
       stderr: result.meta.stderr,
       planStepId,
     }, context.agentId);
-    if (result.meta.exitCode === 0) {
+    // 只有 test/typecheck/build 家族的命令成功才构成"文件验证"，其余命令不清理未验证标记
+    const verificationKind =
+      result.meta.exitCode === 0 ? classifyVerificationCommand(result.meta.command) : null;
+    if (verificationKind) {
       await hub.commitEvent('verification_completed', {
-        kind: 'test',
+        kind: verificationKind,
         command: result.meta.command,
         relatedFiles: hub.getUnverifiedFiles(),
         planStepIds: planStepId ? [planStepId] : [],
         ok: true,
-        summary: `验证命令通过：${result.meta.command}`,
+        summary: `${VERIFICATION_KIND_LABELS[verificationKind]}通过：${result.meta.command}`,
       }, context.agentId);
     }
   }

@@ -565,6 +565,22 @@ export class ContextHub {
   private handleFileRead(event: ContextEventEnvelope): void {
     const data = event.data as { filePath: string };
     this.context.workspace.readFileRevisions.set(data.filePath, this.context.workspaceRevision);
+
+    // 读后复核：修改过的文件被重新读取 → file_reread 级验证证据，清除未验证标记
+    if (!this.context.workspace.unverifiedFiles.has(data.filePath)) return;
+    this.context.workspace.unverifiedFiles.delete(data.filePath);
+    const evidence: VerificationEvidence = {
+      id: uuid(),
+      kind: 'file_reread',
+      relatedFiles: [data.filePath],
+      planStepIds: [],
+      workspaceRevision: this.context.workspaceRevision,
+      ok: true,
+      summary: `修改后重新读取复核：${data.filePath}`,
+      createdAt: event.createdAt,
+    };
+    this.context.verification.evidence.push(evidence);
+    if (this.shouldPersist && !this.replaying) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
   }
 
   private handleFileModified(event: ContextEventEnvelope): void {
@@ -621,10 +637,10 @@ export class ContextHub {
       planStepId?: string;
     };
 
-    // 命令完成产生验证证据
+    // 命令执行记录（manual 级证据：不代表文件验证；文件验证见 verification_completed）
     const evidence: VerificationEvidence = {
       id: uuid(),
-      kind: 'test',
+      kind: 'manual',
       command: data.command,
       relatedFiles: [],
       planStepIds: data.planStepId ? [data.planStepId] : [],
@@ -635,7 +651,7 @@ export class ContextHub {
     };
 
     this.context.verification.evidence.push(evidence);
-    if (this.shouldPersist) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
+    if (this.shouldPersist && !this.replaying) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
   }
 
   private handleVerificationCompleted(event: ContextEventEnvelope): void {
@@ -661,7 +677,7 @@ export class ContextHub {
     };
 
     this.context.verification.evidence.push(evidence);
-    if (this.shouldPersist) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
+    if (this.shouldPersist && !this.replaying) insertVerificationEvidence({ ...evidence, sessionId: this.sessionId });
 
     // 如果验证成功，移除 unverified 标记
     if (data.ok) {
@@ -700,7 +716,7 @@ export class ContextHub {
       workspaceRevision: this.context.workspaceRevision,
     });
 
-    if (this.shouldPersist) insertSubagentRun({
+    if (this.shouldPersist && !this.replaying) insertSubagentRun({
       id: data.id,
       sessionId: this.sessionId,
       parentAgentId: event.sourceAgentId,
@@ -1051,7 +1067,7 @@ export class ContextHub {
 
     // 检查是否有未验证的文件
     if (this.context.workspace.unverifiedFiles.size > 0) {
-      reasons.push(`还有 ${this.context.workspace.unverifiedFiles.size} 个文件未验证`);
+      reasons.push(`还有 ${this.context.workspace.unverifiedFiles.size} 个文件未验证（运行测试/构建/类型检查，或修改后重新读取一遍）`);
     }
 
     // 检查是否有 stale 的证据

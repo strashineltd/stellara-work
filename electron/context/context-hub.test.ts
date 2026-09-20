@@ -428,4 +428,43 @@ describe('上下文压缩与恢复', () => {
     const replayed = new ContextHub('sess-001', '/tmp/work');
     expect(replayed.getContext().decisions.map((d) => d.description)).toEqual(['用 SQLite']);
   });
+
+  it('file_read 复核未验证文件：清除标记并添加 file_reread 证据', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+    await hub.commitEvent('file_modified', { filePath: 'a.ts', agentId: 'main' });
+    expect(hub.getUnverifiedFiles()).toEqual(['a.ts']);
+
+    await hub.commitEvent('file_read', { filePath: 'a.ts' });
+
+    expect(hub.getUnverifiedFiles()).toEqual([]);
+    expect(
+      hub.getVerificationEvidence().some((e) => e.kind === 'file_reread' && e.relatedFiles.includes('a.ts')),
+    ).toBe(true);
+  });
+
+  it('file_read 未验证之外的文件：不产生证据', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+    await hub.commitEvent('file_read', { filePath: 'b.ts' });
+    expect(hub.getVerificationEvidence()).toHaveLength(0);
+  });
+
+  it('重放事件不重复落盘验证证据与子代理行', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work');
+    await hub.commitEvent('verification_completed', {
+      kind: 'test', command: 'npm test', relatedFiles: [], planStepIds: [], ok: true, summary: '通过',
+    });
+    await hub.commitEvent('subagent_started', { id: 'sa-1', task: 't', role: 'research' });
+
+    const db = getDb();
+    const count = (table: string) =>
+      (db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE session_id = ?`).get('sess-001') as { c: number }).c;
+    expect(count('verification_evidence')).toBe(1);
+    expect(count('subagent_runs')).toBe(1);
+
+    const replayed = new ContextHub('sess-001', '/tmp/work');
+
+    expect(count('verification_evidence')).toBe(1);
+    expect(count('subagent_runs')).toBe(1);
+    expect(replayed.getVerificationEvidence()).toHaveLength(1);
+  });
 });

@@ -11,8 +11,8 @@ describe('BUILD_MODE_SYSTEM_PROMPT', () => {
   });
 
   it('contains verification guidance', () => {
-    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('read_file');
-    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('确认修改正确');
+    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('测试/构建/类型检查');
+    expect(BUILD_MODE_SYSTEM_PROMPT).toContain('重新 read_file 通读确认');
   });
 
   it('lists all tool names', () => {

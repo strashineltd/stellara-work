@@ -56,7 +56,7 @@ describe('executeToolCall', () => {
     expect(hub.getContext().tools.completed.some((t) => t.id === 'tc-2' && t.status === 'completed')).toBe(true);
   });
 
-  it.skipIf(process.platform === 'win32')('命令成功：记录验证并清除未验证标记', async () => {
+  it.skipIf(process.platform === 'win32')('非验证命令成功：不清理未验证标记', async () => {
     const hub = makeHub();
     await executeToolCall({
       hub, cwd: workDir, name: 'write_file', args: { path: 'a.txt', content: 'x' },
@@ -70,8 +70,20 @@ describe('executeToolCall', () => {
     });
 
     expect(raw.meta?.kind).toBe('command');
-    expect(hub.getUnverifiedFiles()).toHaveLength(0);
-    expect(hub.getVerificationEvidence().some((e) => e.kind === 'test' && e.ok)).toBe(true);
+    expect(hub.getUnverifiedFiles()).toHaveLength(1);
+  });
+
+  it('read_file 成功：提交 file_read 事件（读后复核通道）', async () => {
+    await fs.writeFile(path.join(workDir, 'note.txt'), 'hello');
+    const hub = makeHub();
+    const seen: string[] = [];
+    hub.onEvent((event) => seen.push(event.event));
+
+    await executeToolCall({
+      hub, cwd: workDir, name: 'read_file', args: { path: 'note.txt' }, context: baseContext,
+    });
+
+    expect(seen).toContain('file_read');
   });
 
   it('匹配到计划步骤且工具成功时推进为 completed', async () => {
