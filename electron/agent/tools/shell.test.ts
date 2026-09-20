@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseCommand, runCommand, buildChildEnv, shellTools } from './shell';
+import { parseCommand, runCommand, buildChildEnv, shellTools, tokenizeCommand, validateAllowedCommandEntry } from './shell';
 
 vi.mock('node:dns/promises', () => ({
   default: {
@@ -1104,5 +1104,34 @@ describe('buildChildEnv (H5)', () => {
     ]) {
       expect(env[key], key).toBeUndefined();
     }
+  });
+});
+
+describe('tokenizeCommand', () => {
+  it('按引号分词且保持 token 原样', () => {
+    expect(tokenizeCommand('npm test -- --runInBand')).toEqual(['npm', 'test', '--', '--runInBand']);
+    expect(tokenizeCommand('git commit -m "fix test"')).toEqual(['git', 'commit', '-m', 'fix test']);
+  });
+});
+
+describe('validateAllowedCommandEntry', () => {
+  it('接受白名单内的命令（含后续参数）', () => {
+    expect(validateAllowedCommandEntry('npm test')).toBeNull();
+    expect(validateAllowedCommandEntry('npm test -- --runInBand')).toBeNull();
+    expect(validateAllowedCommandEntry('git status')).toBeNull();
+  });
+
+  it('拒绝非白名单命令与绝对路径可执行', () => {
+    expect(validateAllowedCommandEntry('bash -c "x"')).toContain('白名单');
+    expect(validateAllowedCommandEntry('/usr/bin/npm test')).toContain('绝对路径');
+  });
+
+  it('拒绝多行 / shell 特殊字符', () => {
+    expect(validateAllowedCommandEntry('npm test\nls')).toBeTruthy();
+    expect(validateAllowedCommandEntry('npm test && ls')).toBeTruthy();
+  });
+
+  it('拒绝工具级禁止的旗标', () => {
+    expect(validateAllowedCommandEntry('git --upload-pack=/bin/sh clone x')).toBeTruthy();
   });
 });

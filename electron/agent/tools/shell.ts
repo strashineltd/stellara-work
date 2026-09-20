@@ -227,14 +227,14 @@ export function parseCommand(command: string): ParsedCommand | { error: string }
     return { error: '命令包含 shell 特殊字符（| & ; < > ` $ ( )）。请拆成多次 run_command 调用，且不要用 shell 特性。' };
   }
 
-  const tokens = tokenize(trimmed);
+  const tokens = tokenizeCommand(trimmed);
   if (tokens.length === 0) return { error: '命令解析失败' };
   const exe = tokens[0]!;
   const args = tokens.slice(1);
   return { exe, args, raw: trimmed };
 }
 
-function tokenize(s: string): string[] {
+export function tokenizeCommand(s: string): string[] {
   const out: string[] = [];
   let cur = '';
   let quote: '"' | "'" | null = null;
@@ -938,6 +938,23 @@ export async function runCommand(args: RunCommandArgs, cwd: string): Promise<Too
       finish({ ok: false, output: stdout + stderr, error: `Timeout after ${timeoutMs}ms` });
     }, timeoutMs);
   });
+}
+
+/**
+ * 校验一条"命令白名单"项本身可被 shell 策略执行（保存时预检）。
+ * 返回 null 表示合法；否则返回中文错误。
+ */
+export function validateAllowedCommandEntry(entry: string): string | null {
+  const parsed = parseCommand(entry);
+  if ('error' in parsed) return parsed.error;
+  if (isAbsolutePathArg(parsed.exe)) return `不允许使用绝对路径执行命令：${parsed.exe}`;
+  const exeBase = path.basename(parsed.exe).toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
+  if (!allowedCommands().has(exeBase)) return `命令不在白名单内：${parsed.exe}`;
+  const forbidden = findForbiddenToolArg(exeBase, parsed.args);
+  if (forbidden !== null) return forbidden;
+  const subErr = subcommandError(exeBase, parsed.args);
+  if (subErr !== null) return subErr;
+  return null;
 }
 
 function errorMessage(err: unknown): string {
