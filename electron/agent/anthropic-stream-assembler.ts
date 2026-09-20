@@ -26,6 +26,10 @@ export class AnthropicStreamAssembler {
   private readonly blocks = new Map<number, AnthropicContent>();
   private readonly order: number[] = [];
   private readonly inputJson = new Map<number, string>();
+  /** 已 start 未 stop 的块（提前中断检测） */
+  private readonly openBlocks = new Set<number>();
+  private messageStopped = false;
+  private stopReasonSeen = false;
   private stopReason: AnthropicResponse['stop_reason'] = 'end_turn';
   private readonly usage = { input_tokens: 0, output_tokens: 0 };
 
@@ -43,8 +47,10 @@ export class AnthropicStreamAssembler {
       case 'content_block_start': {
         const block = event.content_block;
         if (block && typeof event.index === 'number') {
-          this.order.push(event.index);
+          // 重复 index 视为覆盖（异常流），不重复登记，避免同一块输出两次
+          if (!this.blocks.has(event.index)) this.order.push(event.index);
           this.blocks.set(event.index, { ...block });
+          this.openBlocks.add(event.index);
           if (block.type === 'tool_use') this.inputJson.set(event.index, '');
         }
         return null;
@@ -57,8 +63,11 @@ export class AnthropicStreamAssembler {
           if (block && block.type === 'text') block.text = (block.text ?? '') + delta.text;
           return { text: delta.text };
         }
-        if (delta.type === 'thinking_delta' && typeof delta.text === 'string') {
-          return { reasoning: delta.text };
+        if (delta.type === 'thinking_delta') {
+          // 官方字段为 thinking；text 兜底兼容非标准网关
+          const thinking = typeof delta.thinking === 'string' ? delta.thinking : delta.text;
+          if (typeof thinking === 'string' && thinking) return { reasoning: thinking };
+          return null;
         }
         if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           this.inputJson.set(index, (this.inputJson.get(index) ?? '') + delta.partial_json);
@@ -68,9 +77,10 @@ export class AnthropicStreamAssembler {
       }
       case 'content_block_stop': {
         const index = event.index;
-        if (typeof index === 'number' && this.inputJson.has(index)) {
+        if (typeof index === 'number') {
+          this.openBlocks.delete(index);
           const block = this.blocks.get(index);
-          if (block && block.type === 'tool_use') {
+          if (block && block.type === 'tool_use' && this.inputJson.has(index)) {
             const partial = this.inputJson.get(index) ?? '';
             // 未收到任何分片时保留 start 块自带的 input（部分兼容网关如此）
             if (partial) {
@@ -88,11 +98,16 @@ export class AnthropicStreamAssembler {
         const stop = event.delta?.stop_reason;
         if (typeof stop === 'string') {
           this.stopReason = stop as AnthropicResponse['stop_reason'];
+          this.stopReasonSeen = true;
         }
         if (event.usage) {
           if (typeof event.usage.input_tokens === 'number') this.usage.input_tokens = event.usage.input_tokens;
           if (typeof event.usage.output_tokens === 'number') this.usage.output_tokens = event.usage.output_tokens;
         }
+        return null;
+      }
+      case 'message_stop': {
+        this.messageStopped = true;
         return null;
       }
       case 'error': {
@@ -103,8 +118,30 @@ export class AnthropicStreamAssembler {
     }
   }
 
-  /** 装配完成后的完整响应（仅保留 text/tool_use 块，按 index 排序） */
+  /**
+   * 装配完成后的完整响应（仅保留 text/tool_use 块，按 index 排序）。
+   * 流被提前截断时抛错，避免把不完整响应当作成功（尤其禁止执行半截工具参数）。
+   */
   finish(): AssembledAnthropicResponse {
+    // 未收尾的 tool_use 块：分片完整则补收尾，不完整则视为中断
+    for (const index of this.openBlocks) {
+      const block = this.blocks.get(index);
+      if (block?.type === 'tool_use') {
+        const partial = this.inputJson.get(index) ?? '';
+        if (partial) {
+          try {
+            block.input = JSON.parse(partial);
+          } catch {
+            throw new Error('Anthropic 流提前结束：工具调用参数不完整');
+          }
+        }
+      }
+    }
+
+    if (!this.messageStopped && !this.stopReasonSeen) {
+      throw new Error('Anthropic 流提前结束（未收到 message_stop），已丢弃不完整响应');
+    }
+
     const content = this.order
       .slice()
       .sort((left, right) => left - right)

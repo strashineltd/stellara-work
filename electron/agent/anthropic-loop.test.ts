@@ -689,13 +689,14 @@ describe('runAnthropicAgentLoop', () => {
     const client = {
       async *createStream() {
         yield { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 1 } } } as never;
-        yield { type: 'content_block_start', index: 0, content_block: { type: 'thinking', text: '' } } as never;
-        yield { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', text: '想一想' } };
+        yield { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } } as never;
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '想一想' } };
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } };
         yield { type: 'content_block_stop', index: 0 };
         yield { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } };
         yield { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '答案' } };
         yield { type: 'content_block_stop', index: 1 };
-        yield { type: 'message_delta', delta: { type: 'message_delta', stop_reason: 'end_turn' }, usage: { output_tokens: 2 } };
+        yield { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } };
         yield { type: 'message_stop' };
       },
     };
@@ -711,5 +712,31 @@ describe('runAnthropicAgentLoop', () => {
     }
     expect(reasoning).toEqual(['想一想']);
     expect(contents).toEqual(['答案']);
+  });
+
+  it('流提前结束时不落盘、不当作完成', async () => {
+    const client = {
+      async *createStream() {
+        yield { type: 'message_start', message: { usage: { input_tokens: 3, output_tokens: 0 } } } as never;
+        yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } };
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '半截' } };
+        // 流在此中断：没有 content_block_stop / message_delta / message_stop
+      },
+    };
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    const contents: string[] = [];
+    await expect((async () => {
+      for await (const event of runAnthropicAgentLoop('任务', {
+        model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+        client,
+      })) {
+        if (event.type === 'content' && event.content) contents.push(event.content);
+      }
+    })()).rejects.toThrow('提前结束');
+
+    expect(contents).toEqual(['半截']);
+    const hasAssistantMessage = hub.getResponseItems()
+      .some((item) => item.type === 'message' && (item as { role?: string }).role === 'assistant');
+    expect(hasAssistantMessage).toBe(false);
   });
 });
