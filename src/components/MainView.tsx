@@ -1163,6 +1163,7 @@ export function MainView(props: MainViewProps) {
                   window.electronAPI.chat.approve(pendingApproval.id, approved);
                   setPendingApproval(null);
                 }}
+                onApprovalExpired={() => setPendingApproval(null)}
                 pendingApproval={pendingApproval}
                 pendingPlanApproval={pendingPlanApproval}
                 onApprovePlan={() => {
@@ -1175,6 +1176,7 @@ export function MainView(props: MainViewProps) {
                   window.electronAPI.chat.approve(pendingPlanApproval.id, false);
                   setPendingPlanApproval(null);
                 }}
+                onPlanApprovalExpired={() => setPendingPlanApproval(null)}
               />
               {extractedNotice && activeSessionId === extractedNotice.sessionId && (
                 <div className="memory-extracted-hint motion-feedback-enter" role="status">

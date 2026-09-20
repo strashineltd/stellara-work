@@ -1,16 +1,28 @@
+import { useState } from 'react';
 import type { ApprovalRequest } from '../../shared/ipc';
-import { prettyApprovalArgs } from '../lib/chat-utils';
+import { prettyApprovalArgs, summarizeApprovalArgs } from '../lib/chat-utils';
+import { useApprovalExpiry } from '../hooks/useApprovalExpiry';
 import { Icon } from './Icon';
+
+/** 审批参数折叠阈值（字符数） */
+const ARGS_PREVIEW_CHARS = 1200;
 
 interface ApprovalTopBarProps {
   request: ApprovalRequest;
   onApprove: () => void;
   onReject: () => void;
+  /** 超时自动拒绝后的清理回调（父组件移除卡片） */
+  onExpired?: () => void;
 }
 
-export function ApprovalTopBar({ request, onApprove, onReject }: ApprovalTopBarProps) {
-  const subagentDefId = parseSubagentDefId(request.id);
+export function ApprovalTopBar({ request, onApprove, onReject, onExpired }: ApprovalTopBarProps) {
+  const subagentDefId = request.subagentId ?? parseSubagentDefId(request.id);
   const browserSummary = browserApprovalSummary(request.toolName, request.args);
+  const [expanded, setExpanded] = useState(false);
+  const { secondsLeft, expired } = useApprovalExpiry(request.expiresAt, onExpired);
+  const prettyArgs = prettyApprovalArgs(request.args);
+  const folded = summarizeApprovalArgs(prettyArgs, ARGS_PREVIEW_CHARS);
+
   return (
     <div className="approval-top-bar motion-feedback-enter" role="alertdialog" aria-label="确认敏感操作">
       <div className="approval-top-bar__inner">
@@ -20,14 +32,30 @@ export function ApprovalTopBar({ request, onApprove, onReject }: ApprovalTopBarP
             {subagentDefId ? `子代理 ${subagentDefId} 请求：` : '需要确认'}
           </span>
           <code className="approval-top-bar__tool">{request.toolName}</code>
+          {secondsLeft !== null && !expired && (
+            <span className="approval-top-bar__countdown" role="timer">{`剩余 ${secondsLeft}s`}</span>
+          )}
+          {expired && (
+            <span className="approval-top-bar__expired" role="status">已超时，自动拒绝</span>
+          )}
         </div>
         {browserSummary && (
           <div className="approval-top-bar__browser-summary">{browserSummary}</div>
         )}
-        <pre className="approval-top-bar__args">{prettyApprovalArgs(request.args)}</pre>
+        <div className="approval-top-bar__args-wrap">
+          <pre className="approval-top-bar__args">
+            {expanded ? prettyArgs : folded.text}
+            {!expanded && folded.truncated ? '…' : ''}
+          </pre>
+          {folded.truncated && (
+            <button className="btn btn-secondary btn-small" onClick={() => setExpanded((value) => !value)} type="button">
+              {expanded ? '收起' : `展开全部（${prettyArgs.length} 字符）`}
+            </button>
+          )}
+        </div>
         <div className="approval-top-bar__actions">
-          <button className="btn btn-secondary" onClick={onReject} type="button">拒绝</button>
-          <button className="btn btn-primary" onClick={onApprove} type="button">允许这一次</button>
+          <button className="btn btn-secondary" onClick={onReject} disabled={expired} type="button">拒绝</button>
+          <button className="btn btn-primary" onClick={onApprove} disabled={expired} type="button">允许这一次</button>
         </div>
       </div>
     </div>
@@ -35,7 +63,7 @@ export function ApprovalTopBar({ request, onApprove, onReject }: ApprovalTopBarP
 }
 
 /**
- * 从审批 id 解析子代理 def.id。主进程格式：sub-{defId}-{ts}-{rand}；
+ * 从审批 id 解析子代理 def.id（旧格式回退）。主进程格式：sub-{defId}-{ts}-{rand}；
  * 兼容旧格式（sub- 前缀的任意 id）时取第一段。
  */
 function parseSubagentDefId(approvalId: string): string | null {

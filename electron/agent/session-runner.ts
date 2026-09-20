@@ -20,6 +20,7 @@ import type { ChatStreamRegistry } from '../chat/stream-registry';
 import { ContextHub, type PlanStep } from '../context/context-hub';
 import { SubagentCoordinator, type SubagentContextPacket } from './subagent-coordinator';
 import { setSubagentRunner } from './tools/dispatch-subagents';
+import { clampApprovalTimeout } from '../chat/approval-timing';
 import { runResponsesLoop } from './responses-loop';
 import { runAnthropicAgentLoop } from './anthropic-loop';
 
@@ -118,21 +119,27 @@ export async function runAgentSession(
 
   const onApproval = async (toolCall: ToolCall): Promise<boolean> => {
     const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timeoutMs = clampApprovalTimeout(request.approvalTimeoutMs, 60_000);
     send({
       type: 'approval_required',
-      approval: { id: approvalId, toolName: toolCall.function.name, args: toolCall.function.arguments, toolCallId: toolCall.id },
+      approval: {
+        id: approvalId,
+        toolName: toolCall.function.name,
+        args: toolCall.function.arguments,
+        toolCallId: toolCall.id,
+        expiresAt: Date.now() + timeoutMs,
+      },
     });
-    const requestedTimeout = request.approvalTimeoutMs ?? 60_000;
-    return deps.chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
+    return deps.chatStreams.requestApproval(streamId, approvalId, timeoutMs);
   };
   const onPlanApproval = async (plan: { objective: string; constraints: string[]; steps: PlanStep[] }): Promise<boolean> => {
     const approvalId = `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timeoutMs = clampApprovalTimeout(request.approvalTimeoutMs, 300_000);
     send({
       type: 'plan_approval_required',
-      planApproval: { id: approvalId, plan: plan.steps.map((step) => step.description) },
+      planApproval: { id: approvalId, plan: plan.steps.map((step) => step.description), expiresAt: Date.now() + timeoutMs },
     });
-    const requestedTimeout = request.approvalTimeoutMs ?? 300_000;
-    return deps.chatStreams.requestApproval(streamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
+    return deps.chatStreams.requestApproval(streamId, approvalId, timeoutMs);
   };
 
   try {

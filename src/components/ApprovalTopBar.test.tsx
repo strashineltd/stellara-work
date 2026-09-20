@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act, useState } from 'react';
 import { ApprovalTopBar } from './ApprovalTopBar';
@@ -69,6 +69,10 @@ function getByRole(container: HTMLElement, role: string, name?: string | RegExp)
 describe('ApprovalTopBar', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('shows the tool name', () => {
@@ -198,5 +202,81 @@ describe('ApprovalTopBar', () => {
     fireClick(getByRole(container, 'button', /拒绝|reject/i));
     expect(onReject).toHaveBeenCalledOnce();
     expect(querySelector('.approval-top-bar')).toBeNull();
+  });
+
+  it('shows a countdown when expiresAt is provided', () => {
+    vi.useFakeTimers();
+    const view = render(
+      <ApprovalTopBar request={{ ...REQ, expiresAt: Date.now() + 5_000 }} onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    expect(view.getByText(/剩余 5s/)).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(2_100);
+    });
+    expect(view.getByText(/剩余 3s/)).toBeTruthy();
+    view.unmount();
+  });
+
+  it('shows no countdown without expiresAt', () => {
+    const view = render(
+      <ApprovalTopBar request={REQ} onApprove={vi.fn()} onReject={vi.fn()} />,
+    );
+    expect(view.querySelector('.approval-top-bar__countdown')).toBeNull();
+    view.unmount();
+  });
+
+  it('expires: disables buttons, shows expired label, calls onExpired after delay', () => {
+    vi.useFakeTimers();
+    const onExpired = vi.fn();
+    const view = render(
+      <ApprovalTopBar
+        request={{ ...REQ, expiresAt: Date.now() + 1_000 }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onExpired={onExpired}
+      />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(1_100);
+    });
+    expect(view.getByText('已超时，自动拒绝')).toBeTruthy();
+    const approveBtn = getByRole(view.container, 'button', /允许|approve/i) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(true);
+    expect(onExpired).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(onExpired).toHaveBeenCalledOnce();
+    view.unmount();
+  });
+
+  it('folds oversized args and expands on demand', () => {
+    const longContent = 'z'.repeat(3_000);
+    const view = render(
+      <ApprovalTopBar
+        request={{ ...REQ, args: JSON.stringify({ path: 'big.txt', content: longContent }) }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+    const pre = view.querySelector('.approval-top-bar__args') as HTMLElement;
+    expect(pre.textContent!.length).toBeLessThanOrEqual(1_201);
+    fireClick(getByRole(view.container, 'button', /展开全部/));
+    const expandedPre = view.querySelector('.approval-top-bar__args') as HTMLElement;
+    expect(expandedPre.textContent).toContain(longContent);
+    expect(getByRole(view.container, 'button', /收起/)).toBeTruthy();
+    view.unmount();
+  });
+
+  it('labels subagent approvals from the subagentId field (no regex parsing)', () => {
+    const view = render(
+      <ApprovalTopBar
+        request={{ ...REQ, id: 'approval-123', subagentId: 'builder-1' }}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+    expect(view.getByText('子代理 builder-1 请求：')).toBeTruthy();
+    view.unmount();
   });
 });

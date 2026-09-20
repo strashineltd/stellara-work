@@ -120,11 +120,17 @@ export interface ApprovalRequest {
   toolName: string;
   args: string;
   toolCallId: string;
+  /** 自动拒绝的截止时间（epoch ms）；缺省表示无本地超时（如 server 桥接审批） */
+  expiresAt?: number;
+  /** 子代理发起的审批：所属子代理 def id（优先于从 id 前缀解析） */
+  subagentId?: string;
 }
 
 export interface PlanApprovalRequest {
   id: string;
   plan: string[];
+  /** 自动拒绝的截止时间（epoch ms） */
+  expiresAt?: number;
 }
 
 /** API usage 信息（estimated=true 表示来自本地估算而非 provider 上报） */

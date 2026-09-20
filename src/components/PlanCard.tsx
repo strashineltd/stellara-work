@@ -1,4 +1,5 @@
 import { Icon } from './Icon';
+import { useApprovalExpiry } from '../hooks/useApprovalExpiry';
 
 export interface PlanCardStep {
   description: string;
@@ -11,6 +12,10 @@ interface PlanCardProps {
   awaitingApproval?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
+  /** 审批自动拒绝的截止时间（epoch ms） */
+  approvalExpiresAt?: number;
+  /** 超时自动拒绝后的清理回调 */
+  onApprovalExpired?: () => void;
 }
 
 function statusLabel(status: string): string {
@@ -19,7 +24,20 @@ function statusLabel(status: string): string {
   return '待处理';
 }
 
-export function PlanCard({ steps, running, awaitingApproval, onApprove, onReject }: PlanCardProps) {
+export function PlanCard({
+  steps,
+  running,
+  awaitingApproval,
+  onApprove,
+  onReject,
+  approvalExpiresAt,
+  onApprovalExpired,
+}: PlanCardProps) {
+  const { secondsLeft, expired } = useApprovalExpiry(
+    awaitingApproval ? approvalExpiresAt : undefined,
+    onApprovalExpired,
+  );
+
   return (
     <div className="tool-card tool-card-plan" role="group" aria-label="执行计划">
       <div className="tool-card-header">
@@ -42,8 +60,14 @@ export function PlanCard({ steps, running, awaitingApproval, onApprove, onReject
       </ol>
       {awaitingApproval && (
         <div className="plan-actions motion-feedback-enter" role="alertdialog" aria-label="确认执行计划">
-          <button className="btn btn-secondary btn-small" onClick={onReject} type="button">拒绝</button>
-          <button className="btn btn-primary btn-small" onClick={onApprove} type="button">批准执行</button>
+          {secondsLeft !== null && !expired && (
+            <span className="plan-actions__countdown" role="timer">{`剩余 ${secondsLeft}s`}</span>
+          )}
+          {expired && (
+            <span className="plan-actions__expired" role="status">已超时，自动拒绝</span>
+          )}
+          <button className="btn btn-secondary btn-small" onClick={onReject} disabled={expired} type="button">拒绝</button>
+          <button className="btn btn-primary btn-small" onClick={onApprove} disabled={expired} type="button">批准执行</button>
         </div>
       )}
     </div>
