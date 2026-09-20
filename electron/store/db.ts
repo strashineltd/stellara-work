@@ -3,7 +3,7 @@ import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import { getAppDataDir } from '../config/data-dir';
 import { bestEffortChmodSync } from '../security/file-permissions';
-import type { ScheduledRun, ScheduledTask } from '@shared/ipc';
+import type { ScheduledRun, ScheduledTask, ScheduledTaskPolicy } from '@shared/ipc';
 
 let dbPathOverride: string | null = null;
 let _db: Database.Database | null = null;
@@ -204,6 +204,14 @@ export function getDb(): Database.Database {
     .all() as Array<{ name: string }>;
   if (!messageColumns.some((column) => column.name === 'attachments')) {
     _db.exec('ALTER TABLE messages ADD COLUMN attachments TEXT');
+  }
+
+  // v0.10 定时任务写操作策略（旧库加列，幂等）
+  const scheduledColumns = _db
+    .prepare('PRAGMA table_info(scheduled_tasks)')
+    .all() as Array<{ name: string }>;
+  if (!scheduledColumns.some((column) => column.name === 'policy')) {
+    _db.exec('ALTER TABLE scheduled_tasks ADD COLUMN policy TEXT');
   }
 
   // H10 本地身份隔离：三表补 user_id（幂等），旧数据默认归 'default' 档
@@ -1129,10 +1137,20 @@ function rowToScheduledTask(row: Record<string, unknown>): ScheduledTask {
     lastRunAt: (row.last_run_at as number | null) ?? null,
     lastStatus: (row.last_status as string | null) ?? null,
     allowDangerous: row.allow_dangerous === 1,
+    policy: parseStoredPolicy(row.policy),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     userId: (row.user_id as string | null) ?? 'default',
   };
+}
+
+function parseStoredPolicy(value: unknown): ScheduledTask['policy'] {
+  if (typeof value !== 'string' || value.length === 0) return undefined;
+  try {
+    return JSON.parse(value) as ScheduledTask['policy'];
+  } catch {
+    return undefined;
+  }
 }
 
 function rowToScheduledRun(row: Record<string, unknown>): ScheduledRun {
@@ -1187,6 +1205,8 @@ export function createScheduledTask(input: {
   enabled?: boolean;
   nextRunAt?: number | null;
   allowDangerous?: boolean;
+  /** 写操作预声明策略（缺省 = 只读） */
+  policy?: ScheduledTaskPolicy;
   userId?: string;
 }): ScheduledTask {
   const now = Date.now();
@@ -1197,13 +1217,13 @@ export function createScheduledTask(input: {
   const userId = input.userId ?? 'default';
   getDb()
     .prepare(
-      `INSERT INTO scheduled_tasks (id, name, prompt, project_id, work_dir, runtime, server_id, model_id, schedule_kind, schedule_expr, enabled, next_run_at, allow_dangerous, created_at, updated_at, user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO scheduled_tasks (id, name, prompt, project_id, work_dir, runtime, server_id, model_id, schedule_kind, schedule_expr, enabled, next_run_at, allow_dangerous, policy, created_at, updated_at, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id, input.name, input.prompt, input.projectId ?? null, input.workDir ?? null,
       runtime, input.serverId ?? null, input.modelId ?? null, input.scheduleKind, input.scheduleExpr,
-      enabled ? 1 : 0, nextRunAt, allowDangerous ? 1 : 0, now, now, userId,
+      enabled ? 1 : 0, nextRunAt, allowDangerous ? 1 : 0, input.policy ? JSON.stringify(input.policy) : null, now, now, userId,
     );
   return {
     id: input.id,
@@ -1221,6 +1241,7 @@ export function createScheduledTask(input: {
     lastRunAt: null,
     lastStatus: null,
     allowDangerous,
+    policy: input.policy,
     createdAt: now,
     updatedAt: now,
     userId,
@@ -1243,6 +1264,8 @@ export function updateScheduledTask(id: string, patch: {
   lastRunAt?: number | null;
   lastStatus?: string | null;
   allowDangerous?: boolean;
+  /** 写操作预声明策略；null 显式清空，undefined 不动 */
+  policy?: ScheduledTaskPolicy | null;
 }): ScheduledTask {
   const sets: string[] = [];
   const params: Array<string | number | null> = [];
@@ -1264,6 +1287,7 @@ export function updateScheduledTask(id: string, patch: {
   if (patch.lastRunAt !== undefined) add('last_run_at', patch.lastRunAt);
   if (patch.lastStatus !== undefined) add('last_status', patch.lastStatus);
   if (patch.allowDangerous !== undefined) add('allow_dangerous', patch.allowDangerous ? 1 : 0);
+  if (patch.policy !== undefined) add('policy', patch.policy ? JSON.stringify(patch.policy) : null);
   if (sets.length > 0) {
     add('updated_at', Date.now());
     params.push(id);

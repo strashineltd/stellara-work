@@ -84,6 +84,7 @@ describe('scheduled ipc contract (H10)', () => {
     const interval: ScheduledTaskInput = {
       name: '间隔', prompt: 'p', runtime: 'server', serverId: 'srv-1',
       scheduleKind: 'interval', scheduleExpr: '30', enabled: false, allowDangerous: true,
+      policy: { allowedTools: ['run_command'], fileScopes: [], allowedCommands: ['npm test'] },
     };
     const cron: ScheduledTaskInput = {
       name: 'cron', prompt: 'p', runtime: 'local', projectId: 'proj-1',

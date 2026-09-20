@@ -235,4 +235,18 @@ describe('scheduled run repository', () => {
     expect(listRuns(assertScheduledTaskOwned('u1-task', 'u1').id).map((r) => r.id)).toEqual(['r1']);
     expect(() => assertScheduledTaskOwned('u2-task', 'u1')).toThrow(/无权限访问该数据/);
   });
+
+  it('policy JSON 往返', () => {
+    const policy = { allowedTools: ['edit_file' as const, 'run_command' as const], fileScopes: ['src/**'], allowedCommands: ['npm test'] };
+    makeTask('t-policy', { policy });
+    expect(getScheduledTask('t-policy')!.policy).toEqual(policy);
+  });
+
+  it('update 缺省不动 policy；显式 null 清空', () => {
+    makeTask('t-p2', { policy: { allowedTools: ['edit_file'], fileScopes: ['a/**'], allowedCommands: [] } });
+    updateScheduledTask('t-p2', { name: '改名' });
+    expect(getScheduledTask('t-p2')!.policy).toBeTruthy();
+    updateScheduledTask('t-p2', { policy: null });
+    expect(getScheduledTask('t-p2')!.policy).toBeUndefined();
+  });
 });

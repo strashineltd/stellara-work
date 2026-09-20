@@ -936,8 +936,10 @@ export interface ScheduledTask {
   nextRunAt: number | null;
   lastRunAt: number | null;
   lastStatus: string | null;
-  /** 无交互调度运行中是否允许危险工具（UI 风险确认；运行时沿用失败关闭） */
+  /** @deprecated 由 policy 取代；保留一个迁移周期后移除 */
   allowDangerous: boolean;
+  /** 写操作预声明策略；缺省 = 只读（危险工具不注入） */
+  policy?: ScheduledTaskPolicy;
   createdAt: number;
   updatedAt: number;
   /** 归属身份（主进程内部字段，渲染层不传） */
@@ -973,7 +975,10 @@ export interface ScheduledTaskInput {
   scheduleKind: ScheduledTaskKind;
   scheduleExpr: string;
   enabled?: boolean;
+  /** @deprecated 由 policy 取代；保留一个迁移周期后移除 */
   allowDangerous?: boolean;
+  /** 写操作预声明策略；缺省 = 只读 */
+  policy?: ScheduledTaskPolicy;
 }
 
 /** 局部更新任务（不含 userId；归属由主进程按活动身份校验） */
@@ -988,7 +993,10 @@ export interface ScheduledTaskPatch {
   scheduleKind?: ScheduledTaskKind;
   scheduleExpr?: string;
   enabled?: boolean;
+  /** @deprecated 由 policy 取代；保留一个迁移周期后移除 */
   allowDangerous?: boolean;
+  /** 写操作预声明策略；null 显式清空，undefined 不动 */
+  policy?: ScheduledTaskPolicy | null;
 }
 
 // ============================================
