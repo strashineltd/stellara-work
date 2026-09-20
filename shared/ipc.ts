@@ -909,6 +909,16 @@ export type ScheduledTaskKind = 'once' | 'interval' | 'cron';
 
 export type ScheduledRunStatus = 'running' | 'success' | 'error' | 'missed' | 'aborted';
 
+/** 定时任务写操作预声明策略（缺省 = 只读） */
+export interface ScheduledTaskPolicy {
+  /** 允许危险工具白名单（仅这三个可选） */
+  allowedTools: Array<'write_file' | 'edit_file' | 'run_command'>;
+  /** 可写文件范围（glob/目录）；write/edit 路径与 run_command 的 cwd 必须落于其中 */
+  fileScopes: string[];
+  /** 命令白名单（token 边界前缀匹配） */
+  allowedCommands: string[];
+}
+
 export interface ScheduledTask {
   id: string;
   name: string;
