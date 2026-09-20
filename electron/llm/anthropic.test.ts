@@ -97,4 +97,47 @@ describe('AnthropicClient', () => {
     expect(seen).toEqual(['message_stop']);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('首个事件前 HTTP 429 保持重试（状态码分类不丢失）', async () => {
+    const encoder = new TextEncoder();
+    const good = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: async () => JSON.stringify({ error: { message: 'rate limited', type: 'rate_limit_error' } }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, body: good } as unknown as Response);
+
+    const client = new AnthropicClient({ baseUrl: 'https://x', apiKey: 'k', model: 'm' });
+    const seen: string[] = [];
+    for await (const event of client.createStream({ model: 'm', max_tokens: 16, messages: [] })) {
+      seen.push(event.type);
+    }
+
+    expect(seen).toEqual(['message_stop']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('HTTP 401 不重试且抛出可读错误', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: async () => JSON.stringify({ error: { message: 'invalid x-api-key', type: 'authentication_error' } }),
+    } as unknown as Response);
+
+    const client = new AnthropicClient({ baseUrl: 'https://x', apiKey: 'k', model: 'm' });
+    await expect((async () => {
+      for await (const _event of client.createStream({ model: 'm', max_tokens: 16, messages: [] })) { /* 消费 */ }
+    })()).rejects.toThrow(/api-?key/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -26,6 +26,21 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504, 529]);
 
+/**
+ * HTTP 非 2xx 错误：携带原始分类，供重试层保留状态码语义。
+ * （classifyThrownError 只看 message，会对 429/5xx 的引导文案失去可重试判定）
+ */
+class AnthropicHttpError extends Error {
+  constructor(
+    message: string,
+    readonly meta: ErrorMeta,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'AnthropicHttpError';
+  }
+}
+
 // ─── 类型定义 ─────────────────────────────────────────
 
 export interface AnthropicConfig {
@@ -91,7 +106,7 @@ export interface AnthropicStreamEvent {
   type: string;
   // 事件特定字段
   index?: number;
-  delta?: { type: string; text?: string; partial_json?: string; stop_reason?: string };
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string };
   content_block?: AnthropicContent;
   message?: AnthropicResponse;
   error?: { type: string; message: string };
@@ -289,8 +304,9 @@ export class AnthropicClient {
           throw new Error('请求已取消');
         }
 
-        const errorMeta = classifyThrownError(err);
-        lastError = new Error(errorMeta.hint);
+        const httpError = err instanceof AnthropicHttpError ? err : null;
+        const errorMeta = httpError ? httpError.meta : classifyThrownError(err);
+        lastError = httpError ?? new Error(errorMeta.hint || (err as Error).message);
 
         // 已经产出过事件：重试会整段重放（内容/工具调用重复），直接向上抛
         if (errorMeta.retryable && attempt < MAX_RETRIES && !emitted) {
@@ -322,7 +338,7 @@ export class AnthropicClient {
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       const errorMeta = this.classifyError(response.status, errorText);
-      throw new Error(errorMeta.hint);
+      throw new AnthropicHttpError(errorMeta.hint || `HTTP ${response.status}`, errorMeta, response.status);
     }
 
     if (!response.body) {
