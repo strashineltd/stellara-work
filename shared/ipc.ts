@@ -909,6 +909,16 @@ export type ScheduledTaskKind = 'once' | 'interval' | 'cron';
 
 export type ScheduledRunStatus = 'running' | 'success' | 'error' | 'missed' | 'aborted';
 
+/** 定时任务写操作预声明策略（缺省 = 只读） */
+export interface ScheduledTaskPolicy {
+  /** 允许危险工具白名单（仅这三个可选） */
+  allowedTools: Array<'write_file' | 'edit_file' | 'run_command'>;
+  /** 可写文件范围（glob/目录）：write/edit 的目标必须匹配；run_command 显式提供的 cwd 也必须在范围内（未提供时在工作目录根执行） */
+  fileScopes: string[];
+  /** 命令白名单（token 边界前缀匹配） */
+  allowedCommands: string[];
+}
+
 export interface ScheduledTask {
   id: string;
   name: string;
@@ -926,8 +936,8 @@ export interface ScheduledTask {
   nextRunAt: number | null;
   lastRunAt: number | null;
   lastStatus: string | null;
-  /** 无交互调度运行中是否允许危险工具（UI 风险确认；运行时沿用失败关闭） */
-  allowDangerous: boolean;
+  /** 写操作预声明策略；缺省 = 只读（危险工具不注入） */
+  policy?: ScheduledTaskPolicy;
   createdAt: number;
   updatedAt: number;
   /** 归属身份（主进程内部字段，渲染层不传） */
@@ -963,7 +973,8 @@ export interface ScheduledTaskInput {
   scheduleKind: ScheduledTaskKind;
   scheduleExpr: string;
   enabled?: boolean;
-  allowDangerous?: boolean;
+  /** 写操作预声明策略；缺省 = 只读 */
+  policy?: ScheduledTaskPolicy;
 }
 
 /** 局部更新任务（不含 userId；归属由主进程按活动身份校验） */
@@ -978,7 +989,8 @@ export interface ScheduledTaskPatch {
   scheduleKind?: ScheduledTaskKind;
   scheduleExpr?: string;
   enabled?: boolean;
-  allowDangerous?: boolean;
+  /** 写操作预声明策略；null 显式清空，undefined 不动 */
+  policy?: ScheduledTaskPolicy | null;
 }
 
 // ============================================

@@ -150,7 +150,7 @@ let previewScheduledTasks: ScheduledTask[] = [
     projectId: 'product', workDir: previewWorkDir, runtime: 'local', modelId: previewModel.id,
     scheduleKind: 'cron', scheduleExpr: '0 9 * * *', enabled: true,
     nextRunAt: now + 3_600_000, lastRunAt: now - 43_200_000, lastStatus: 'success',
-    allowDangerous: false, createdAt: now - 86_400_000, updatedAt: now - 43_200_000,
+    policy: { allowedTools: ['edit_file'], fileScopes: ['src/**'], allowedCommands: [] }, createdAt: now - 86_400_000, updatedAt: now - 43_200_000,
     running: true,
   },
   {
@@ -159,7 +159,7 @@ let previewScheduledTasks: ScheduledTask[] = [
     runtime: 'server', serverId: 'srv-preview',
     scheduleKind: 'interval', scheduleExpr: '30', enabled: false,
     nextRunAt: null, lastRunAt: null, lastStatus: null,
-    allowDangerous: true, createdAt: now - 3_600_000, updatedAt: now - 3_600_000,
+    createdAt: now - 3_600_000, updatedAt: now - 3_600_000,
   },
 ];
 let previewScheduledRuns: ScheduledRun[] = [
@@ -195,7 +195,7 @@ function previewPatchToTask(patch: ScheduledTaskPatch): Partial<ScheduledTask> {
   if (patch.scheduleKind !== undefined) next.scheduleKind = patch.scheduleKind;
   if (patch.scheduleExpr !== undefined) next.scheduleExpr = patch.scheduleExpr;
   if (patch.enabled !== undefined) next.enabled = patch.enabled;
-  if (patch.allowDangerous !== undefined) next.allowDangerous = patch.allowDangerous;
+  if (patch.policy !== undefined) next.policy = patch.policy ?? undefined;
   return next;
 }
 
@@ -544,7 +544,7 @@ export function installDevPreviewApi(): void {
           ...input,
           id: `scheduled-${stamp}`,
           enabled: input.enabled ?? true,
-          allowDangerous: input.allowDangerous ?? false,
+          policy: input.policy,
           nextRunAt: previewNextRunAt(input.scheduleKind, input.scheduleExpr),
           lastRunAt: null, lastStatus: null,
           createdAt: stamp, updatedAt: stamp,

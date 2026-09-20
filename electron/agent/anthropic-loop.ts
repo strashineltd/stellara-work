@@ -15,7 +15,7 @@ import { allTools, planModeTools } from './tools';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { parsePlanFromContent } from './plan-parser';
 import { mcpManager } from '../mcp/mcp-manager';
-import { needsApproval } from './shared/tool-policy';
+import { needsApproval, filterToolsByPolicy } from './shared/tool-policy';
 import { findPlanStepForTool } from './shared/plan-steps';
 import { executeToolCall } from './shared/tool-pipeline';
 import { runBudgetCheck } from './shared/context-budget';
@@ -40,6 +40,10 @@ export interface AnthropicLoopOptions {
   extraTools?: OpenAITool[];
   /** plan 模式下额外注入的只读工具（如 planVisible 的 MCP 工具） */
   planExtraTools?: OpenAITool[];
+  /** 工具子集过滤（策略）：未提供时不过滤 */
+  allowedToolNames?: ReadonlySet<string>;
+  /** 工具拒绝谓词（调度策略）：命中的工具始终不注入 */
+  isToolDenied?: (name: string) => boolean;
   /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
   memoryProjectId?: string;
   /** 会话归属身份（记忆注入时按身份检索，缺省 default） */
@@ -48,8 +52,9 @@ export interface AnthropicLoopOptions {
   onApproval?: (toolCall: ToolCall) => Promise<boolean>;
   /**
    * 子代理执行护栏：返回非空字符串时拒绝执行该工具调用并回传错误。
+   * 可为异步（调度策略的文件范围校验需要 realpath）。
    */
-  toolGuard?: (name: string, args: Record<string, unknown>) => string | null;
+  toolGuard?: (name: string, args: Record<string, unknown>) => string | null | Promise<string | null>;
   onPlanApproval?: (plan: { objective: string; constraints: string[]; steps: PlanStep[] }) => Promise<boolean>;
   rolePrompt?: string;
   agentId?: string;
@@ -73,12 +78,17 @@ export async function* runAnthropicAgentLoop(
 ): AsyncGenerator<ChatStreamEvent> {
   const client = options.client ?? new AnthropicClient(options.model);
   let planMode = options.planMode ?? false;
-  const executableTools = options.allowSubagents === false
-    ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
-    : allTools;
+  const executableTools = filterToolsByPolicy(
+    options.allowSubagents === false
+      ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
+      : allTools,
+    options.allowedToolNames,
+    options.isToolDenied,
+  );
+  const allowedExtraTools = (options.extraTools ?? []).filter((tool) => !options.isToolDenied?.(tool.function.name));
   let tools = (planMode
-    ? [...planModeTools, ...(options.planExtraTools ?? [])]
-    : [...executableTools, ...(options.extraTools ?? [])])
+    ? [...filterToolsByPolicy(planModeTools, options.allowedToolNames, options.isToolDenied), ...(options.planExtraTools ?? [])]
+    : [...executableTools, ...allowedExtraTools])
     .map(toAnthropicTool);
   migrateHistoryToHub(options.contextHub, options.history);
   let messages: AnthropicMessage[] = projectAnthropicMessages(options.contextHub.getResponseItems());
@@ -305,7 +315,7 @@ export async function* runAnthropicAgentLoop(
         }
       }
 
-      const guardError = options.toolGuard?.(name, args);
+      const guardError = await options.toolGuard?.(name, args);
       if (guardError) {
         const output = JSON.stringify({ ok: false, error: guardError });
         outputs.push({ type: 'tool_result', tool_use_id: callId, content: output });

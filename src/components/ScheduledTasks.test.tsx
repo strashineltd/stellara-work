@@ -18,7 +18,6 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     nextRunAt: Date.now() + HOUR,
     lastRunAt: Date.now() - HOUR,
     lastStatus: 'success',
-    allowDangerous: false,
     createdAt: Date.now() - 2 * HOUR,
     updatedAt: Date.now() - HOUR,
     ...overrides,
@@ -366,38 +365,67 @@ describe('ScheduledTasks 对话框校验', () => {
   });
 });
 
-describe('ScheduledTasks allowDangerous 风险确认', () => {
-  it('does not save allowDangerous when the second confirmation is declined', async () => {
+describe('ScheduledTasks 写操作策略', () => {
+  it('未选择写工具时保存不带 policy', async () => {
     const { api } = stubApi([]);
     const { container } = await renderScheduled();
     const dialog = await openCreateDialog(container);
     await fillRequiredFields(dialog);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
-
-    const dangerSwitch = byLabel(dialog, '允许危险工具')!;
-    await click(dangerSwitch);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(dangerSwitch.getAttribute('aria-checked')).toBe('false');
-
-    await click(exactButton(dialog, '创建'));
-    expect(api.scheduled.create.mock.calls[0][0].allowDangerous).toBe(false);
-  });
-
-  it('requires and records the second confirmation before save includes allowDangerous', async () => {
-    const { api } = stubApi([]);
-    const { container } = await renderScheduled();
-    const dialog = await openCreateDialog(container);
-    await fillRequiredFields(dialog);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    const dangerSwitch = byLabel(dialog, '允许危险工具')!;
-    await click(dangerSwitch);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(dangerSwitch.getAttribute('aria-checked')).toBe('true');
-
     await click(exactButton(dialog, '创建'));
     expect(api.scheduled.create).toHaveBeenCalledTimes(1);
-    expect(api.scheduled.create.mock.calls[0][0].allowDangerous).toBe(true);
+    expect(api.scheduled.create.mock.calls[0][0].policy).toBeUndefined();
+  });
+
+  it('选择写工具但缺少范围时提示且不保存', async () => {
+    const { api } = stubApi([]);
+    const { container } = await renderScheduled();
+    const dialog = await openCreateDialog(container);
+    await fillRequiredFields(dialog);
+    await click(byLabel(dialog, '编辑文件'));
+    await click(exactButton(dialog, '创建'));
+    expect(api.scheduled.create).not.toHaveBeenCalled();
+    expect(dialog.textContent).toContain('可写范围');
+  });
+
+  it('填写完整并确认后保存带 policy', async () => {
+    const { api } = stubApi([]);
+    const { container } = await renderScheduled();
+    const dialog = await openCreateDialog(container);
+    await fillRequiredFields(dialog);
+    await click(byLabel(dialog, '编辑文件'));
+    setInput(byLabel(dialog, '可写范围') as HTMLTextAreaElement | null, 'src/**');
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await click(exactButton(dialog, '创建'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(api.scheduled.create.mock.calls[0][0].policy).toEqual({
+      allowedTools: ['edit_file'], fileScopes: ['src/**'], allowedCommands: [],
+    });
+  });
+
+  it('风险确认被拒绝时不保存', async () => {
+    const { api } = stubApi([]);
+    const { container } = await renderScheduled();
+    const dialog = await openCreateDialog(container);
+    await fillRequiredFields(dialog);
+    await click(byLabel(dialog, '运行命令'));
+    setInput(byLabel(dialog, '命令白名单') as HTMLTextAreaElement | null, 'npm test');
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await click(exactButton(dialog, '创建'));
+    expect(api.scheduled.create).not.toHaveBeenCalled();
+  });
+
+  it('卡片展示策略摘要', async () => {
+    stubApi([makeTask({ policy: { allowedTools: ['edit_file'], fileScopes: ['src/**'], allowedCommands: [] } })]);
+    const { container } = await renderScheduled();
+    const row = taskRow(container, 't1');
+    expect(row.textContent).toContain('写操作：编辑文件');
+    expect(row.textContent).toContain('范围 src/**');
+  });
+
+  it('server 任务卡片显示由远端治理', async () => {
+    stubApi([makeTask({ runtime: 'server', serverId: 'srv-1' })]);
+    const { container } = await renderScheduled();
+    expect(taskRow(container, 't1').textContent).toContain('由远端治理');
   });
 });
 

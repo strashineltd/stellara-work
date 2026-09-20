@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DANGEROUS_TOOLS, PLAN_MODE_SENSITIVE_TOOLS, needsApproval } from './tool-policy';
+import { DANGEROUS_TOOLS, PLAN_MODE_SENSITIVE_TOOLS, filterToolsByPolicy, needsApproval } from './tool-policy';
+import type { OpenAITool } from '../../../shared/ipc';
+
+function tool(name: string): OpenAITool {
+  return { type: 'function', function: { name, description: '', parameters: {} } };
+}
 
 describe('needsApproval', () => {
   it('危险工具始终需要审批', async () => {
@@ -31,5 +36,28 @@ describe('needsApproval', () => {
 
   it('MCP 工具缺少审批回调时 fail-closed', async () => {
     expect(await needsApproval({ toolName: 'mcp__s1__read', planMode: false, forceApproval: false })).toBe(true);
+  });
+});
+
+describe('filterToolsByPolicy', () => {
+  it('未提供集合时原样返回', () => {
+    const tools = [tool('write_file'), tool('read_file')];
+    expect(filterToolsByPolicy(tools)).toBe(tools);
+  });
+
+  it('过滤未授权的危险工具并保留 task_complete 与只读工具', () => {
+    const tools = [tool('write_file'), tool('read_file'), tool('run_command'), tool('task_complete'), tool('edit_file')];
+    expect(filterToolsByPolicy(tools, new Set(['edit_file'])).map((t) => t.function.name).sort())
+      .toEqual(['edit_file', 'read_file', 'task_complete']);
+  });
+
+  it('isDenied 谓词优先于白名单（调度拒绝 MCP/浏览器工具）', () => {
+    const tools = [tool('browser_navigate'), tool('read_file'), tool('mcp__s1__read')];
+    const filtered = filterToolsByPolicy(
+      tools,
+      new Set(['read_file']),
+      (name) => name.startsWith('browser_') || name.startsWith('mcp__'),
+    );
+    expect(filtered.map((t) => t.function.name)).toEqual(['read_file']);
   });
 });
