@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   applyStreamEventToEntries, formatRelativeTime, formatFileSize,
   messagesToEntries, entriesToMessages, buildHistory, clearEntryEnterMotion,
+  summarizeApprovalArgs,
   type DisplayEntry, type PresentEntry,
 } from './chat-utils';
 import type { AttachmentMeta, ChatStreamEvent, MessageRow, PlanApprovalRequest } from '../../shared/ipc';
@@ -417,5 +418,25 @@ describe('attachments round-trip (user entries)', () => {
       expect(tool.meta).toBeUndefined();
       expect(tool.output).toBe('boom');
     }
+  });
+});
+
+describe('summarizeApprovalArgs', () => {
+  it('短参数原样返回', () => {
+    const text = '{\n  "path": "a.txt"\n}';
+    expect(summarizeApprovalArgs(text, 1200)).toEqual({ text, truncated: false });
+  });
+
+  it('恰好等于上限不截断', () => {
+    const text = 'y'.repeat(1200);
+    expect(summarizeApprovalArgs(text, 1200)).toEqual({ text, truncated: false });
+  });
+
+  it('超长参数截断到上限并标记 truncated', () => {
+    const text = 'x'.repeat(2000);
+    const result = summarizeApprovalArgs(text, 1200);
+    expect(result.truncated).toBe(true);
+    expect(result.text).toHaveLength(1200);
+    expect(text.startsWith(result.text)).toBe(true);
   });
 });

@@ -2982,6 +2982,27 @@ button.attach-chip:hover {
   white-space: pre-wrap;
 }
 
+.approval-top-bar__args-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.approval-top-bar__args-wrap .btn {
+  align-self: flex-start;
+}
+
+.approval-top-bar__countdown {
+  color: var(--color-text-soft);
+  font-size: var(--fs-xs);
+}
+
+.approval-top-bar__expired {
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+}
+
 .approval-top-bar__actions {
   display: flex;
   gap: var(--space-2);
@@ -4612,6 +4633,7 @@ button.attach-chip:hover {
   }
 
   .approval-top-bar__args,
+  .approval-top-bar__args-wrap,
   .approval-top-bar__actions {
     grid-column: 1 / -1;
   }
@@ -4827,6 +4849,16 @@ button.attach-chip:hover {
   justify-content: flex-end;
   gap: 8px;
   padding: 0 12px 12px;
+}
+.plan-actions__countdown,
+.plan-actions__expired {
+  margin-right: auto;
+  align-self: center;
+  font-size: 12px;
+  color: var(--color-text-soft);
+}
+.plan-actions__expired {
+  color: var(--color-danger);
 }
 .verify-chip {
   margin: 6px 0;

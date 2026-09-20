@@ -27,10 +27,14 @@ interface ChatStreamProps {
   onAbort: () => void;
   onApprove: (approved: boolean) => void;
   pendingApproval: ApprovalRequest | null;
+  /** 工具审批超时自动拒绝后的清理 */
+  onApprovalExpired?: () => void;
   /** 等待计划批准（plan_approval_required） */
   pendingPlanApproval?: PlanApprovalRequest | null;
   onApprovePlan?: () => void;
   onRejectPlan?: () => void;
+  /** 计划审批超时自动拒绝后的清理 */
+  onPlanApprovalExpired?: () => void;
 }
 
 export function ChatStream(props: ChatStreamProps) {
@@ -53,9 +57,11 @@ export function ChatStream(props: ChatStreamProps) {
     <main className="main-chat" id="task-stream" ref={props.chatRef} tabIndex={-1}>
       {props.pendingApproval && (
         <ApprovalTopBar
+          key={props.pendingApproval.id}
           request={props.pendingApproval}
           onApprove={() => props.onApprove(true)}
           onReject={() => props.onApprove(false)}
+          onExpired={props.onApprovalExpired}
         />
       )}
       {props.modelMissing && (
@@ -127,6 +133,8 @@ export function ChatStream(props: ChatStreamProps) {
                   steps={e.steps}
                   running={props.busy}
                   awaitingApproval={!!props.pendingPlanApproval}
+                  approvalExpiresAt={props.pendingPlanApproval?.expiresAt}
+                  onApprovalExpired={props.onPlanApprovalExpired}
                   onApprove={() => props.onApprovePlan?.()}
                   onReject={() => props.onRejectPlan?.()}
                 />

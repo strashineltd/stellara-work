@@ -9,6 +9,7 @@ import { runAgentSession } from './agent/session-runner';
 import { runAnthropicAgentLoop } from './agent/anthropic-loop';
 import { ChatStreamRegistry } from './chat/stream-registry';
 import { buildSubagentApprovalId } from './chat/approval-ids';
+import { clampApprovalTimeout } from './chat/approval-timing';
 import { createSubagentToolGuard } from './agent/subagent-guard';
 import { ContextHub } from './context/context-hub';
 import { resolveSessionModel } from './chat/session-context';
@@ -1826,6 +1827,7 @@ async function runOneSubagent(
   const toolGuard = createSubagentToolGuard({ readOnly, cwd, fileScopes: definition.fileScopes });
   const onApproval = async (toolCall: ToolCall): Promise<boolean> => {
     const approvalId = buildSubagentApprovalId(definition.id);
+    const timeoutMs = clampApprovalTimeout(approvalTimeoutMs, 60_000);
     parentSend({
       type: 'approval_required',
       approval: {
@@ -1833,10 +1835,11 @@ async function runOneSubagent(
         toolName: toolCall.function.name,
         args: toolCall.function.arguments,
         toolCallId: toolCall.id,
+        expiresAt: Date.now() + timeoutMs,
+        subagentId: definition.id,
       },
     });
-    const requestedTimeout = approvalTimeoutMs ?? 60_000;
-    return chatStreams.requestApproval(parentStreamId, approvalId, Math.min(Math.max(requestedTimeout, 1_000), 300_000));
+    return chatStreams.requestApproval(parentStreamId, approvalId, timeoutMs);
   };
   const contextHub = new ContextHub(
     `${parentSessionId}:${definition.id}`,
@@ -2411,6 +2414,7 @@ app.whenReady().then(async () => {
     const streamId = browserSessionStreams.get(req.sessionId ?? 'default');
     if (!streamId) return false;
     const approvalId = `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timeoutMs = clampApprovalTimeout(undefined, 60_000);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('chat-stream', {
         streamId,
@@ -2421,11 +2425,12 @@ app.whenReady().then(async () => {
             toolName: req.toolName,
             args: JSON.stringify(req.args),
             toolCallId: `browser-${approvalId}`,
+            expiresAt: Date.now() + timeoutMs,
           },
         },
       });
     }
-    return chatStreams.requestApproval(streamId, approvalId, 60_000);
+    return chatStreams.requestApproval(streamId, approvalId, timeoutMs);
   });
 
   browserService.setMainContentView(() => {

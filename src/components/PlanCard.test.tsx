@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createRoot, Root } from 'react-dom/client';
 import { act, useState } from 'react';
 import { PlanCard } from './PlanCard';
@@ -143,5 +143,62 @@ describe('PlanCard', () => {
     });
     expect(onReject).toHaveBeenCalledOnce();
     expect(querySelector('.plan-actions')).toBeNull();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows a countdown when approvalExpiresAt is provided', () => {
+    vi.useFakeTimers();
+    const view = render(
+      <PlanCard
+        steps={[{ description: 'a', status: 'pending' }]}
+        running={false}
+        awaitingApproval
+        approvalExpiresAt={Date.now() + 5_000}
+      />,
+    );
+    expect(view.getByText(/剩余 5s/)).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(2_100);
+    });
+    expect(view.getByText(/剩余 3s/)).not.toBeNull();
+    view.unmount();
+  });
+
+  it('expires: disables buttons, shows expired label, calls onApprovalExpired after delay', () => {
+    vi.useFakeTimers();
+    const onApprovalExpired = vi.fn();
+    const view = render(
+      <PlanCard
+        steps={[{ description: 'a', status: 'pending' }]}
+        running={false}
+        awaitingApproval
+        approvalExpiresAt={Date.now() + 1_000}
+        onApprovalExpired={onApprovalExpired}
+      />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(1_100);
+    });
+    expect(view.getByText('已超时，自动拒绝')).not.toBeNull();
+    const buttons = Array.from(view.container.querySelectorAll('button')) as HTMLButtonElement[];
+    expect(buttons.every((b) => b.disabled)).toBe(true);
+    expect(onApprovalExpired).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(onApprovalExpired).toHaveBeenCalledOnce();
+    view.unmount();
+  });
+
+  it('keeps buttons enabled without approvalExpiresAt', () => {
+    const view = render(
+      <PlanCard steps={[{ description: 'a', status: 'pending' }]} running={false} awaitingApproval />,
+    );
+    const buttons = Array.from(view.container.querySelectorAll('.plan-actions button')) as HTMLButtonElement[];
+    expect(buttons.every((b) => !b.disabled)).toBe(true);
+    view.unmount();
   });
 });

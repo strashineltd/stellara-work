@@ -68,6 +68,14 @@ export function prettyApprovalArgs(args: string): string {
   }
 }
 
+/**
+ * 审批参数折叠：超长时截断到 maxChars 供卡片预览；调用方负责「展开全部」。
+ */
+export function summarizeApprovalArgs(pretty: string, maxChars: number): { text: string; truncated: boolean } {
+  if (pretty.length <= maxChars) return { text: pretty, truncated: false };
+  return { text: pretty.slice(0, maxChars), truncated: true };
+}
+
 // ============================================================================
 // Stream event → DisplayEntry 累积
 // ============================================================================

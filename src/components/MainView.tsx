@@ -75,6 +75,11 @@ function parseServerModelId(modelId: string | undefined): { providerID: string; 
   return { providerID: modelId.slice(0, slash), modelID: modelId.slice(slash + 1) };
 }
 
+/** 审批是否已过自动拒绝截止时间（用于 done/error 时保留超时反馈） */
+function isApprovalExpired(expiresAt: number | undefined): boolean {
+  return expiresAt !== undefined && Date.now() >= expiresAt;
+}
+
 export function MainView(props: MainViewProps) {
   const {
     config, info: _info, sidebarOpen, workspaceMode, activeSessionId, projects, sessions,
@@ -787,8 +792,10 @@ export function MainView(props: MainViewProps) {
           setLastUserForRetry(userContent);
         }
         if (ev.type === 'done' || ev.type === 'error') {
-          setPendingApproval(null);
-          setPendingPlanApproval(null);
+          // 已过期的审批保留给卡片展示超时反馈（由 onExpired/onPlanApprovalExpired 清理）；
+          // 用函数式更新读取最新状态，避免闭包快照
+          setPendingApproval((current) => (isApprovalExpired(current?.expiresAt) ? current : null));
+          setPendingPlanApproval((current) => (isApprovalExpired(current?.expiresAt) ? current : null));
           break;
         }
       }
@@ -1163,6 +1170,7 @@ export function MainView(props: MainViewProps) {
                   window.electronAPI.chat.approve(pendingApproval.id, approved);
                   setPendingApproval(null);
                 }}
+                onApprovalExpired={() => setPendingApproval(null)}
                 pendingApproval={pendingApproval}
                 pendingPlanApproval={pendingPlanApproval}
                 onApprovePlan={() => {
@@ -1175,6 +1183,7 @@ export function MainView(props: MainViewProps) {
                   window.electronAPI.chat.approve(pendingPlanApproval.id, false);
                   setPendingPlanApproval(null);
                 }}
+                onPlanApprovalExpired={() => setPendingPlanApproval(null)}
               />
               {extractedNotice && activeSessionId === extractedNotice.sessionId && (
                 <div className="memory-extracted-hint motion-feedback-enter" role="status">
