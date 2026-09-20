@@ -26,6 +26,21 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504, 529]);
 
+/**
+ * HTTP 非 2xx 错误：携带原始分类，供重试层保留状态码语义。
+ * （classifyThrownError 只看 message，会对 429/5xx 的引导文案失去可重试判定）
+ */
+class AnthropicHttpError extends Error {
+  constructor(
+    message: string,
+    readonly meta: ErrorMeta,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'AnthropicHttpError';
+  }
+}
+
 // ─── 类型定义 ─────────────────────────────────────────
 
 export interface AnthropicConfig {
@@ -91,10 +106,12 @@ export interface AnthropicStreamEvent {
   type: string;
   // 事件特定字段
   index?: number;
-  delta?: { type: string; text?: string; partial_json?: string };
+  delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string };
   content_block?: AnthropicContent;
   message?: AnthropicResponse;
   error?: { type: string; message: string };
+  /** message_delta 携带的累计用量（部分网关同时给 input/output） */
+  usage?: { input_tokens?: number; output_tokens?: number };
 }
 
 // ─── 工具函数 ─────────────────────────────────────────
@@ -275,18 +292,24 @@ export class AnthropicClient {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (signal.aborted) throw new Error('请求已取消');
 
+      let emitted = false;
       try {
-        yield* this.fetchStream(url, body, signal);
+        for await (const event of this.fetchStream(url, body, signal)) {
+          emitted = true;
+          yield event;
+        }
         return;
       } catch (err) {
         if ((err as Error).name === 'AbortError' || signal.aborted) {
           throw new Error('请求已取消');
         }
 
-        const errorMeta = classifyThrownError(err);
-        lastError = new Error(errorMeta.hint);
+        const httpError = err instanceof AnthropicHttpError ? err : null;
+        const errorMeta = httpError ? httpError.meta : classifyThrownError(err);
+        lastError = httpError ?? new Error(errorMeta.hint || (err as Error).message);
 
-        if (errorMeta.retryable && attempt < MAX_RETRIES) {
+        // 已经产出过事件：重试会整段重放（内容/工具调用重复），直接向上抛
+        if (errorMeta.retryable && attempt < MAX_RETRIES && !emitted) {
           const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
           log.warn(`Anthropic stream 异常，${delay}ms 后重试 (${attempt + 1}/${MAX_RETRIES}): ${errorMeta.hint}`);
           await sleep(delay);
@@ -315,7 +338,7 @@ export class AnthropicClient {
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       const errorMeta = this.classifyError(response.status, errorText);
-      throw new Error(errorMeta.hint);
+      throw new AnthropicHttpError(errorMeta.hint || `HTTP ${response.status}`, errorMeta, response.status);
     }
 
     if (!response.body) {

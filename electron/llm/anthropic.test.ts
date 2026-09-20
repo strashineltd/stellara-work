@@ -46,4 +46,98 @@ describe('AnthropicClient', () => {
     expect(body.stream).toBe(false);
     expect(body.tools[0].input_schema).toEqual({ type: 'object' });
   });
+
+  it('流式部分输出后失败不重试（避免重复内容）', async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"部分"}}\n\n'));
+      },
+      pull(controller) {
+        controller.error(new Error('ETIMEDOUT'));
+      },
+    });
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, body } as unknown as Response);
+
+    const client = new AnthropicClient({ baseUrl: 'https://x', apiKey: 'k', model: 'm' });
+    const seen: string[] = [];
+    await expect((async () => {
+      for await (const event of client.createStream({ model: 'm', max_tokens: 16, messages: [] })) {
+        seen.push(event.type);
+      }
+    })()).rejects.toThrow();
+
+    expect(seen).toEqual(['content_block_delta']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('首个事件到达前失败仍按现有策略重试', async () => {
+    const encoder = new TextEncoder();
+    const failing = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('ETIMEDOUT'));
+      },
+    });
+    const good = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200, body: failing } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, body: good } as unknown as Response);
+
+    const client = new AnthropicClient({ baseUrl: 'https://x', apiKey: 'k', model: 'm' });
+    const seen: string[] = [];
+    for await (const event of client.createStream({ model: 'm', max_tokens: 16, messages: [] })) {
+      seen.push(event.type);
+    }
+
+    expect(seen).toEqual(['message_stop']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('首个事件前 HTTP 429 保持重试（状态码分类不丢失）', async () => {
+    const encoder = new TextEncoder();
+    const good = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: async () => JSON.stringify({ error: { message: 'rate limited', type: 'rate_limit_error' } }),
+      } as unknown as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, body: good } as unknown as Response);
+
+    const client = new AnthropicClient({ baseUrl: 'https://x', apiKey: 'k', model: 'm' });
+    const seen: string[] = [];
+    for await (const event of client.createStream({ model: 'm', max_tokens: 16, messages: [] })) {
+      seen.push(event.type);
+    }
+
+    expect(seen).toEqual(['message_stop']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('HTTP 401 不重试且抛出可读错误', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: async () => JSON.stringify({ error: { message: 'invalid x-api-key', type: 'authentication_error' } }),
+    } as unknown as Response);
+
+    const client = new AnthropicClient({ baseUrl: 'https://x', apiKey: 'k', model: 'm' });
+    await expect((async () => {
+      for await (const _event of client.createStream({ model: 'm', max_tokens: 16, messages: [] })) { /* 消费 */ }
+    })()).rejects.toThrow(/api-?key/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
