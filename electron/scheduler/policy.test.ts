@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesCommandAllowlist, normalizeScheduledPolicy, validateTaskPolicy } from './policy';
+import { buildScheduledPolicyRuntime, matchesCommandAllowlist, normalizeScheduledPolicy, validateTaskPolicy } from './policy';
 
 const VALID = {
   allowedTools: ['edit_file', 'run_command'] as const,
@@ -72,5 +72,39 @@ describe('matchesCommandAllowlist', () => {
   it('空白名单/空命令不命中', () => {
     expect(matchesCommandAllowlist('npm test', [])).toBe(false);
     expect(matchesCommandAllowlist('', ALLOW)).toBe(false);
+  });
+});
+
+describe('buildScheduledPolicyRuntime', () => {
+  const POLICY = {
+    allowedTools: ['edit_file', 'run_command'] as const,
+    fileScopes: ['src/**'],
+    allowedCommands: ['npm test'],
+  };
+
+  it('无策略：空工具集、审批恒 false', () => {
+    const runtime = buildScheduledPolicyRuntime(undefined, '/tmp/ws');
+    expect([...runtime.allowedToolNames]).toEqual([]);
+    expect(runtime.shouldApprove('edit_file')).toBe(false);
+    expect(runtime.shouldApprove('read_file')).toBe(false);
+  });
+
+  it('有策略：只批准白名单工具', () => {
+    const runtime = buildScheduledPolicyRuntime({ ...POLICY, allowedTools: [...POLICY.allowedTools] }, '/tmp/ws');
+    expect(runtime.shouldApprove('edit_file')).toBe(true);
+    expect(runtime.shouldApprove('run_command')).toBe(true);
+    expect(runtime.shouldApprove('write_file')).toBe(false);
+  });
+
+  it('guard：范围内写入放行、范围外拒绝', () => {
+    const runtime = buildScheduledPolicyRuntime({ ...POLICY, allowedTools: [...POLICY.allowedTools] }, '/tmp/ws');
+    expect(runtime.toolGuard('edit_file', { path: 'src/a.ts' })).toBeNull();
+    expect(runtime.toolGuard('edit_file', { path: '../outside.ts' })).toContain('超出');
+  });
+
+  it('guard：白名单外命令拒绝、白名单内放行', () => {
+    const runtime = buildScheduledPolicyRuntime({ ...POLICY, allowedTools: [...POLICY.allowedTools] }, '/tmp/ws');
+    expect(runtime.toolGuard('run_command', { command: 'npm test -- --runInBand' })).toBeNull();
+    expect(runtime.toolGuard('run_command', { command: 'npm install' })).toContain('命令不在任务白名单内');
   });
 });

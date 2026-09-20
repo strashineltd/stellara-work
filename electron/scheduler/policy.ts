@@ -2,6 +2,7 @@
  * 定时任务写操作策略：保存时校验与运行时匹配（纯函数）。
  */
 import { tokenizeCommand, validateAllowedCommandEntry, isAbsolutePathArg } from '../agent/tools/shell';
+import { createSubagentToolGuard } from '../agent/subagent-guard';
 import type { ScheduledTaskPolicy } from '../../shared/ipc';
 
 const ALLOWED_POLICY_TOOLS = new Set(['write_file', 'edit_file', 'run_command']);
@@ -56,4 +57,44 @@ export function matchesCommandAllowlist(command: string, allowlist: readonly str
     if (match) return true;
   }
   return false;
+}
+
+export interface ScheduledPolicyRuntime {
+  allowedToolNames: ReadonlySet<string>;
+  shouldApprove: (toolName: string) => boolean;
+  toolGuard: (name: string, args: Record<string, unknown>) => string | null;
+}
+
+/**
+ * 把任务策略翻译成运行时三件套（工具过滤集合 + 审批器 + 护栏）。
+ * 无策略：空集合 + 恒拒绝 + 空范围护栏（危险工具也不会被注入）。
+ */
+export function buildScheduledPolicyRuntime(
+  policy: ScheduledTaskPolicy | undefined,
+  cwd: string,
+): ScheduledPolicyRuntime {
+  const normalized = normalizeScheduledPolicy(policy);
+  const allowedToolNames = new Set<string>(normalized?.allowedTools ?? []);
+  const allowedCommands = normalized?.allowedCommands ?? [];
+  const baseGuard = createSubagentToolGuard({
+    readOnly: false,
+    cwd,
+    fileScopes: normalized?.fileScopes ?? [],
+  });
+
+  return {
+    allowedToolNames,
+    shouldApprove: (toolName) => allowedToolNames.has(toolName),
+    toolGuard: (name, args) => {
+      const baseError = baseGuard(name, args);
+      if (baseError) return baseError;
+      if (name === 'run_command') {
+        const command = typeof args.command === 'string' ? args.command : '';
+        if (!matchesCommandAllowlist(command, allowedCommands)) {
+          return '命令不在任务白名单内（已拒绝）';
+        }
+      }
+      return null;
+    },
+  };
 }
