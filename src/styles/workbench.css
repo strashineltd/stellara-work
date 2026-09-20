@@ -4633,6 +4633,7 @@ button.attach-chip:hover {
   }
 
   .approval-top-bar__args,
+  .approval-top-bar__args-wrap,
   .approval-top-bar__actions {
     grid-column: 1 / -1;
   }

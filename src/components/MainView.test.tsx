@@ -261,6 +261,32 @@ describe('MainView shortcut wiring', () => {
     });
     expect(approve).toHaveBeenCalledWith('ap1', false);
   });
+
+  it('计划审批超时后 done 仍保留超时反馈', async () => {
+    (window as any).electronAPI.chat.start = vi.fn().mockResolvedValue({
+      streamId: 's1',
+      events: (async function* () {
+        yield { type: 'plan', plan: ['步骤一'] };
+        yield { type: 'plan_approval_required', planApproval: { id: 'plan1', plan: ['步骤一'], expiresAt: Date.now() - 5_000 } };
+        // 真实流式在事件之间会让出事件循环，React 会先渲染一次
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        yield { type: 'done' };
+      })(),
+    });
+    const { querySelector } = await renderMainView();
+    const textarea = querySelector('textarea')!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '先计划');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+    });
+    await act(async () => {});
+    expect(querySelector('.plan-actions')).not.toBeNull();
+    expect(querySelector('.plan-actions__expired')).not.toBeNull();
+  });
 });
 
 describe('MainView model-missing banner', () => {
