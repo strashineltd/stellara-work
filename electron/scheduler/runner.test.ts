@@ -267,7 +267,7 @@ describe('runLocalTask', () => {
     expect(h.loopRequests[0]!.cwd).toBe('/tmp/model-workdir');
   });
 
-  it('never hands an approval callback to the loop, even with allowDangerous (P9 fail-closed)', async () => {
+  it('runner 不注入审批回调（审批由 main.ts 按策略构造）', async () => {
     const h = createHarness({
       loop: errorLoop('危险工具 write_file 已被拒绝（无审批通道）'),
     });
@@ -275,9 +275,17 @@ describe('runLocalTask', () => {
 
     expect(h.loopRequests).toHaveLength(1);
     expect((h.loopRequests[0] as { onApproval?: unknown }).onApproval).toBeUndefined();
+    expect(h.loopRequests[0]!.policy).toBeUndefined();
     expect(run.status).toBe('error');
     expect(run.error).toBe('危险工具 write_file 已被拒绝（无审批通道）');
     expect(h.notifications).toEqual([{ completed: false, failed: true, aborted: false }]);
+  });
+
+  it('把任务的 policy 透传给本地循环', async () => {
+    const policy = { allowedTools: ['edit_file'] as const, fileScopes: ['src/**'], allowedCommands: [] };
+    const h = createHarness();
+    await runLocalTask(makeTask({ policy: { ...policy, allowedTools: [...policy.allowedTools] } }), h.deps);
+    expect(h.loopRequests[0]!.policy).toEqual({ ...policy, allowedTools: [...policy.allowedTools] });
   });
 
   it('records an error with the reason when the model cannot be resolved', async () => {

@@ -15,6 +15,7 @@ import type {
   ModelConfig,
   ScheduledRun,
   ScheduledTask,
+  ScheduledTaskPolicy,
 } from '@shared/ipc';
 import { computeNextRun } from './engine';
 
@@ -82,8 +83,8 @@ export interface RunnerChatBridge {
 }
 
 /**
- * 本地循环入参。刻意不含 `onApproval` —— 调度运行没有审批通道，
- * 危险工具按既有失败关闭语义被拒绝（C1/P9）。
+ * 本地循环入参。刻意不含 `onApproval` —— 审批由 main.ts 按任务策略（policy）
+ * 构造；未配置策略时危险工具按既有失败关闭语义被拒绝（C1/P9）。
  */
 export interface LocalLoopRequest {
   prompt: string;
@@ -93,6 +94,8 @@ export interface LocalLoopRequest {
   signal: AbortSignal;
   memoryProjectId?: string;
   memoryUserId?: string;
+  /** 写操作预声明策略；缺省 = 只读 */
+  policy?: ScheduledTaskPolicy;
 }
 
 export type LocalLoopRunner = (request: LocalLoopRequest) => AsyncIterable<ChatStreamEvent>;
@@ -317,6 +320,7 @@ async function runLocalBody(
     signal: context.signal,
     ...(task.projectId !== undefined ? { memoryProjectId: task.projectId } : {}),
     memoryUserId: context.userId,
+    ...(task.policy !== undefined ? { policy: task.policy } : {}),
   })) {
     if (context.signal.aborted) break;
     if (event.type === 'content' && event.content) finalText += event.content;

@@ -20,6 +20,7 @@ import { ServerChatBridge } from './server/chat-bridge';
 import { computeMissed, computeNextRun, SchedulerEngine } from './scheduler/engine';
 import { enableNextRunAt, nextRunPatchForUpdate } from './scheduler/next-run';
 import { abortRun, executeTask, isRunning, type SchedulerRunnerDeps } from './scheduler/runner';
+import { buildScheduledPolicyRuntime, normalizeScheduledPolicy, validateTaskPolicy } from './scheduler/policy';
 import { installAppMenu } from './menu';
 import { createAppTray, type TrayHandle } from './tray';
 import { shouldHideOnClose } from './tray-logic';
@@ -1369,8 +1370,11 @@ function registerIpcHandlers(): void {
     // P19：排期非法 / once 时间已过一律拒绝；id / userId / nextRunAt 由主进程注入
     const nextRunAt = computeNextRun(input.scheduleKind, input.scheduleExpr, new Date());
     if (!nextRunAt) throw new Error('调度表达式无效或时间已过，请检查后重试');
+    const policyError = validateTaskPolicy(input.policy);
+    if (policyError) throw new Error(policyError);
     const task = db.createScheduledTask({
       ...input,
+      policy: normalizeScheduledPolicy(input.policy),
       id: uuid(),
       userId: getActiveUserId(),
       nextRunAt: nextRunAt.getTime(),
@@ -1382,6 +1386,11 @@ function registerIpcHandlers(): void {
   handle('scheduled:update', async (_e, id: string, patch: ScheduledTaskPatch): Promise<ScheduledTask> => {
     const db = await import('./store/db');
     const current = db.assertScheduledTaskOwned(id, getActiveUserId());
+    if (patch.policy !== undefined) {
+      const policyError = validateTaskPolicy(patch.policy ?? undefined);
+      if (policyError) throw new Error(policyError);
+      patch = { ...patch, policy: normalizeScheduledPolicy(patch.policy ?? undefined) ?? null };
+    }
     // P19：排期 / 启停变化时无条件校验表达式（含停用操作），再按最终启用状态落 nextRunAt
     const recalc = nextRunPatchForUpdate(current, patch, new Date());
     const task = db.updateScheduledTask(id, recalc.changed ? { ...patch, nextRunAt: recalc.nextRunAt } : patch);
@@ -2229,13 +2238,14 @@ app.whenReady().then(async () => {
         watch: watchServerStream,
       },
       runLocalLoop: (request) => {
-        // 复用交互式 Agent 循环；刻意不传 onApproval（危险工具失败关闭，P9/C1）
+        // 策略在保存时校验；运行时翻译为工具过滤 + 自动审批 + 护栏（任一未授权调用失败关闭）
         const contextHub = new ContextHub(
           request.sessionId,
           request.cwd,
           request.model.contextWindow ?? 256000,
           request.model.maxOutputTokens ?? 16384,
         );
+        const runtime = buildScheduledPolicyRuntime(request.policy, request.cwd);
         const common = {
           model: request.model,
           cwd: request.cwd,
@@ -2245,6 +2255,9 @@ app.whenReady().then(async () => {
           signal: request.signal,
           ...(request.memoryProjectId !== undefined ? { memoryProjectId: request.memoryProjectId } : {}),
           memoryUserId: request.memoryUserId,
+          allowedToolNames: runtime.allowedToolNames,
+          onApproval: async (toolCall: ToolCall) => runtime.shouldApprove(toolCall.function.name),
+          toolGuard: (name: string, args: Record<string, unknown>) => runtime.toolGuard(name, args),
         };
         const loop = request.model.wireApi === 'anthropic'
           ? runAnthropicAgentLoop(request.prompt, common)
