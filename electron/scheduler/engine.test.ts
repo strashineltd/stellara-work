@@ -16,7 +16,6 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     nextRunAt: T0.getTime() + 60_000,
     lastRunAt: null,
     lastStatus: null,
-    allowDangerous: false,
     createdAt: T0.getTime(),
     updatedAt: T0.getTime(),
     ...overrides,

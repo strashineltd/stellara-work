@@ -42,7 +42,6 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     nextRunAt: T0.getTime() + 60_000,
     lastRunAt: null,
     lastStatus: null,
-    allowDangerous: false,
     createdAt: T0.getTime(),
     updatedAt: T0.getTime(),
     userId: 'u1',
@@ -271,7 +270,7 @@ describe('runLocalTask', () => {
     const h = createHarness({
       loop: errorLoop('危险工具 write_file 已被拒绝（无审批通道）'),
     });
-    const run = await runLocalTask(makeTask({ allowDangerous: true }), h.deps);
+    const run = await runLocalTask(makeTask(), h.deps);
 
     expect(h.loopRequests).toHaveLength(1);
     expect((h.loopRequests[0] as { onApproval?: unknown }).onApproval).toBeUndefined();

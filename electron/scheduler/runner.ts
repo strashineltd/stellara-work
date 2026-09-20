@@ -3,7 +3,7 @@
  *
  * - 纯 DI（不 import electron）：main.ts 注入真实依赖，runner.test.ts 用 fake。
  * - 安全（P9/C1）：本地运行不向 Agent 循环传 `onApproval`，危险工具失败关闭；
- *   `task.allowDangerous` 仅 UI 风险确认，运行时无效果（已知限制，见报告）。
+ *   写操作由任务策略（policy）授权：未配置策略时危险工具不注入（只读）。
  * - P16：本地运行落库最小消息（用户提示词 + 最终 assistant 文本），会话可在历史中查看。
  * - P17：服务器未连接 / 断线 → run 记 error 并通知；调度仍推进到下一次（不立即重试）。
  * - 运行生命周期：running → success / error / aborted → pruneRuns(200) →

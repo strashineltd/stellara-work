@@ -178,7 +178,7 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
         modelId: input.modelId ?? null,
         scheduleKind: input.scheduleKind,
         scheduleExpr: input.scheduleExpr,
-        allowDangerous: input.allowDangerous ?? false,
+        policy: input.policy ?? null,
       });
     } else {
       await window.electronAPI.scheduled.create(input);

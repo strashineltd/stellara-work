@@ -62,7 +62,7 @@ The **0.9.3 shell is redesigned**: a top bar with back/forward navigation and si
 
 **Tray residency**: closing the main window hides it to the tray and scheduling keeps running; `Cmd+Q` (or tray → Quit) exits completely. Settings → App has **关闭窗口后保持后台运行（调度继续）**, on by default — turn it off to restore the previous behavior where closing the window quits.
 
-**Execution model**: scheduled runs are non-interactive — there is no approval channel, so dangerous tools (file writes, shell commands, …) fail closed and are denied by default. Read-only automations work today; write-type automations need a dedicated design in a future release. The per-task **allow dangerous tools** checkbox is only a UI risk acknowledgment and does not change the runtime denial.
+**Execution model**: scheduled runs are non-interactive — there is no human approval channel. Each task can declare a **write policy** (allowed tools + writable file scopes + command allowlist). The policy is validated on save and enforced at runtime: in-policy calls are auto-approved, everything else fails closed. Tasks without a policy stay read-only. Grant the minimum scope you need (e.g. allow only `npm test`, open only `src/**`).
 
 ---
 

@@ -62,7 +62,6 @@ describe('scheduled task repository', () => {
       nextRunAt: null,
       lastRunAt: null,
       lastStatus: null,
-      allowDangerous: false,
       userId: 'default',
     });
     expect(task.projectId).toBeUndefined();
@@ -74,11 +73,11 @@ describe('scheduled task repository', () => {
     const nextRunAt = 1_800_000_000_000;
     makeTask('t1', {
       projectId: 'p1', workDir: '/tmp/w', runtime: 'server', serverId: 'srv', modelId: 'm1',
-      nextRunAt, allowDangerous: true,
+      nextRunAt,
     });
     expect(getScheduledTask('t1')).toMatchObject({
       projectId: 'p1', workDir: '/tmp/w', runtime: 'server', serverId: 'srv', modelId: 'm1',
-      nextRunAt, allowDangerous: true,
+      nextRunAt,
     });
   });
 
@@ -115,7 +114,6 @@ describe('scheduled task repository', () => {
       nextRunAt: null,
       lastRunAt: 222,
       lastStatus: 'success',
-      allowDangerous: true,
     });
     expect(updated).toMatchObject({
       name: '新名字',
@@ -128,7 +126,6 @@ describe('scheduled task repository', () => {
       nextRunAt: null,
       lastRunAt: 222,
       lastStatus: 'success',
-      allowDangerous: true,
       userId: 'u1',
     });
     expect(updated.workDir).toBeUndefined();

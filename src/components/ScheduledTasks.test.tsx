@@ -18,7 +18,6 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
     nextRunAt: Date.now() + HOUR,
     lastRunAt: Date.now() - HOUR,
     lastStatus: 'success',
-    allowDangerous: false,
     createdAt: Date.now() - 2 * HOUR,
     updatedAt: Date.now() - HOUR,
     ...overrides,

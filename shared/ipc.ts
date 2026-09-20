@@ -936,8 +936,6 @@ export interface ScheduledTask {
   nextRunAt: number | null;
   lastRunAt: number | null;
   lastStatus: string | null;
-  /** @deprecated 由 policy 取代；保留一个迁移周期后移除 */
-  allowDangerous: boolean;
   /** 写操作预声明策略；缺省 = 只读（危险工具不注入） */
   policy?: ScheduledTaskPolicy;
   createdAt: number;
@@ -975,8 +973,6 @@ export interface ScheduledTaskInput {
   scheduleKind: ScheduledTaskKind;
   scheduleExpr: string;
   enabled?: boolean;
-  /** @deprecated 由 policy 取代；保留一个迁移周期后移除 */
-  allowDangerous?: boolean;
   /** 写操作预声明策略；缺省 = 只读 */
   policy?: ScheduledTaskPolicy;
 }
@@ -993,8 +989,6 @@ export interface ScheduledTaskPatch {
   scheduleKind?: ScheduledTaskKind;
   scheduleExpr?: string;
   enabled?: boolean;
-  /** @deprecated 由 policy 取代；保留一个迁移周期后移除 */
-  allowDangerous?: boolean;
   /** 写操作预声明策略；null 显式清空，undefined 不动 */
   policy?: ScheduledTaskPolicy | null;
 }
