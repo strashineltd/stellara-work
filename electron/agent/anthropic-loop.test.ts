@@ -643,4 +643,24 @@ describe('runAnthropicAgentLoop', () => {
     const roles = msgs.map((m) => m.role);
     expect(roles.every((role, i) => i === 0 || role !== roles[i - 1])).toBe(true);
   });
+
+  it('allowedToolNames 过滤未授权的危险工具（task_complete 保留）', async () => {
+    mockCreate.mockResolvedValueOnce({
+      id: 'msg-1', type: 'message', role: 'assistant', model: 'custom-model', stop_reason: 'end_turn',
+      usage: { input_tokens: 1, output_tokens: 1 },
+      content: [{ type: 'text', text: 'ok' }],
+    });
+    const hub = new ContextHub('sub-session', workDir, 256_000, 16_384, { persist: false });
+    for await (const _event of runAnthropicAgentLoop('任务', {
+      model, cwd: workDir, sessionId: 'sub-session', contextHub: hub, allowSubagents: false,
+      client: { create: mockCreate }, allowedToolNames: new Set(['read_file']),
+    })) { /* 消费事件 */ }
+
+    const firstRequest = mockCreate.mock.calls[0]![0] as { tools: Array<{ name: string }> };
+    const names = firstRequest.tools.map((entry) => entry.name);
+    expect(names).toContain('read_file');
+    expect(names).toContain('task_complete');
+    expect(names).not.toContain('write_file');
+    expect(names).not.toContain('run_command');
+  });
 });

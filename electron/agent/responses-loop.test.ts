@@ -825,4 +825,22 @@ describe('上下文压缩接线', () => {
       if (prev && prev.type === 'reasoning') expect(kept.has(prev)).toBe(true);
     }
   });
+
+  it('allowedToolNames 过滤未授权的危险工具（task_complete 保留）', async () => {
+    const hub = new ContextHub('sess-001', tmpDir);
+    const gen = runResponsesLoop('test', {
+      model: DEFAULT_MODEL,
+      cwd: tmpDir,
+      sessionId: 'sess-001',
+      contextHub: hub,
+      allowedToolNames: new Set(['read_file']),
+    });
+    for await (const _event of gen) { /* 消费事件 */ }
+
+    const toolNames = (responseRequests[0]?.tools ?? []).map((entry) => entry.name);
+    expect(toolNames).toContain('read_file');
+    expect(toolNames).toContain('task_complete');
+    expect(toolNames).not.toContain('write_file');
+    expect(toolNames).not.toContain('run_command');
+  });
 });

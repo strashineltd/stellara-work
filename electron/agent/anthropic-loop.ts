@@ -15,7 +15,7 @@ import { allTools, planModeTools } from './tools';
 import { getSystemPrompt, type AgentPlatformInfo } from './plan';
 import { parsePlanFromContent } from './plan-parser';
 import { mcpManager } from '../mcp/mcp-manager';
-import { needsApproval } from './shared/tool-policy';
+import { needsApproval, filterToolsByPolicy } from './shared/tool-policy';
 import { findPlanStepForTool } from './shared/plan-steps';
 import { executeToolCall } from './shared/tool-pipeline';
 import { runBudgetCheck } from './shared/context-budget';
@@ -40,6 +40,8 @@ export interface AnthropicLoopOptions {
   extraTools?: OpenAITool[];
   /** plan 模式下额外注入的只读工具（如 planVisible 的 MCP 工具） */
   planExtraTools?: OpenAITool[];
+  /** 工具子集过滤（策略）：未提供时不过滤 */
+  allowedToolNames?: ReadonlySet<string>;
   /** 会话所属项目 id（记忆注入时按项目检索项目记忆） */
   memoryProjectId?: string;
   /** 会话归属身份（记忆注入时按身份检索，缺省 default） */
@@ -73,11 +75,14 @@ export async function* runAnthropicAgentLoop(
 ): AsyncGenerator<ChatStreamEvent> {
   const client = options.client ?? new AnthropicClient(options.model);
   let planMode = options.planMode ?? false;
-  const executableTools = options.allowSubagents === false
-    ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
-    : allTools;
+  const executableTools = filterToolsByPolicy(
+    options.allowSubagents === false
+      ? allTools.filter((tool) => tool.function.name !== 'dispatch_subagents')
+      : allTools,
+    options.allowedToolNames,
+  );
   let tools = (planMode
-    ? [...planModeTools, ...(options.planExtraTools ?? [])]
+    ? [...filterToolsByPolicy(planModeTools, options.allowedToolNames), ...(options.planExtraTools ?? [])]
     : [...executableTools, ...(options.extraTools ?? [])])
     .map(toAnthropicTool);
   migrateHistoryToHub(options.contextHub, options.history);

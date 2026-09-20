@@ -4,6 +4,7 @@
  * 两条 agent loop（Responses / Anthropic）共用；新增危险工具或调整审批
  * 规则只改这里。MCP 查询以回调注入，避免 shared → mcp 的反向依赖。
  */
+import type { OpenAITool } from '../../../shared/ipc';
 
 export const DANGEROUS_TOOLS: ReadonlySet<string> = new Set([
   'write_file',
@@ -41,4 +42,18 @@ export async function needsApproval(input: ApprovalDecisionInput): Promise<boole
     return mcpRequiresApproval ? await mcpRequiresApproval(toolName) : true;
   }
   return false;
+}
+
+/**
+ * 工具子集过滤：未提供 allowedToolNames 时不变；
+ * 提供时仅保留"只读/非危险工具 + 白名单内的危险工具 + task_complete"。
+ */
+export function filterToolsByPolicy(tools: OpenAITool[], allowedToolNames?: ReadonlySet<string>): OpenAITool[] {
+  if (!allowedToolNames) return tools;
+  return tools.filter((tool) => {
+    const name = tool.function.name;
+    if (name === 'task_complete') return true;
+    if (!DANGEROUS_TOOLS.has(name)) return true;
+    return allowedToolNames.has(name);
+  });
 }
