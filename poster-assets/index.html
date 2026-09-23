@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1600">
+<title>Stellara Work</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1600px;
+    height: 2000px;
+    font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #ffffff;
+    color: #111827;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 背景装饰 */
+  .bg-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.35;
+    z-index: 0;
+  }
+  .bg-blob-1 {
+    width: 600px; height: 600px;
+    background: #DBEAFE;
+    top: -150px; right: -100px;
+  }
+  .bg-blob-2 {
+    width: 500px; height: 500px;
+    background: #E0E7FF;
+    bottom: 100px; left: -120px;
+  }
+  .bg-grid {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-image:
+      linear-gradient(rgba(47,124,244,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(47,124,244,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    z-index: 0;
+  }
+
+  /* 主内容 */
+  .container {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 100px 80px 60px;
+  }
+
+  /* 品牌区 */
+  .brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .brand-icon {
+    width: 140px;
+    height: 140px;
+    margin-bottom: 36px;
+    filter: drop-shadow(0 12px 32px rgba(47,124,244,0.25));
+  }
+  .brand-title {
+    font-size: 64px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    color: #111827;
+    margin-bottom: 14px;
+  }
+  .brand-subtitle {
+    font-size: 24px;
+    font-weight: 400;
+    color: #6B7280;
+    letter-spacing: 0.5px;
+    margin-bottom: 32px;
+  }
+  .brand-desc {
+    font-size: 20px;
+    line-height: 1.8;
+    color: #374151;
+    max-width: 900px;
+    margin-bottom: 40px;
+  }
+
+  /* 特性标签 */
+  .tags {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 70px;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 22px;
+    background: #EEF4FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 100px;
+    font-size: 17px;
+    font-weight: 500;
+    color: #2F7CF4;
+  }
+  .tag svg {
+    width: 18px; height: 18px;
+    stroke: #2F7CF4;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* 界面展示区 */
+  .screens {
+    position: relative;
+    width: 100%;
+    height: 900px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .window {
+    position: absolute;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow:
+      0 4px 6px -1px rgba(0,0,0,0.06),
+      0 20px 50px -12px rgba(47,124,244,0.18),
+      0 0 0 1px rgba(0,0,0,0.06);
+    background: #fff;
+  }
+  .window img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .window-bar {
+    height: 36px;
+    background: #F9FAFB;
+    border-bottom: 1px solid #E5E7EB;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 8px;
+  }
+  .window-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+  }
+  .dot-red { background: #EF4444; }
+  .dot-yellow { background: #F59E0B; }
+  .dot-green { background: #10B981; }
+
+  .window-back {
+    width: 720px;
+    left: 80px;
+    top: 60px;
+    transform: rotate(-3deg);
+    z-index: 1;
+    opacity: 0.92;
+  }
+  .window-front {
+    width: 780px;
+    right: 80px;
+    top: 120px;
+    transform: rotate(2.5deg);
+    z-index: 2;
+  }
+
+  /* 浮动标注 */
+  .annotation {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: #fff;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+  }
+  .annotation::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #2F7CF4;
+  }
+  .ann-1 { top: 30px; left: 50%; transform: translateX(-50%); }
+  .ann-2 { bottom: 80px; left: 120px; }
+  .ann-3 { bottom: 40px; right: 160px; }
+
+  /* 底部 */
+  .footer {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    z-index: 1;
+  }
+  .footer-line {
+    width: 120px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #2F7CF4, transparent);
+    margin: 0 auto 20px;
+  }
+  .footer-text {
+    font-size: 15px;
+    color: #9CA3AF;
+    letter-spacing: 1px;
+  }
+  .footer-text span {
+    margin: 0 8px;
+    color: #D1D5DB;
+  }
+</style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-blob bg-blob-1"></div>
+  <div class="bg-blob bg-blob-2"></div>
+
+  <div class="container">
+    <!-- 品牌区 -->
+    <div class="brand">
+      <img class="brand-icon" src="assets/icon.png" alt="Stellara Work">
+      <h1 class="brand-title">Stellara Work</h1>
+      <p class="brand-subtitle">Local-first Desktop Agent</p>
+      <p class="brand-desc">
+        运行在你电脑上的个人 AI 编程助手。自带 API Key，会话与文件全部本地存储，永不离开你的设备。<br>
+        计划模式配合审批门控，每一次代码修改和命令执行都在你的掌控之中。
+      </p>
+      <div class="tags">
+        <div class="tag">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          本地优先隐私
+        </div>
+        <div class="tag">
+          <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          多模型支持
+        </div>
+        <div class="tag">
+          <svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          审批门控工作流
+        </div>
+      </div>
+    </div>
+
+    <!-- 界面展示 -->
+    <div class="screens">
+      <div class="annotation ann-1">真实产品界面</div>
+
+      <!-- 后方窗口：首页 -->
+      <div class="window window-back">
+        <div class="window-bar">
+          <div class="window-dot dot-red"></div>
+          <div class="window-dot dot-yellow"></div>
+          <div class="window-dot dot-green"></div>
+        </div>
+        <img src="assets/home.png" alt="Stellara Work 首页">
+      </div>
+
+      <!-- 前方窗口：聊天 -->
+      <div class="window window-front">
+        <div class="window-bar">
+          <div class="window-dot dot-red"></div>
+          <div class="window-dot dot-yellow"></div>
+          <div class="window-dot dot-green"></div>
+        </div>
+        <img src="assets/chat.png" alt="Stellara Work 工作记录">
+      </div>
+
+      <div class="annotation ann-2">任务输入 · 项目管理</div>
+      <div class="annotation ann-3">代码 Diff · 执行记录</div>
+    </div>
+  </div>
+
+  <!-- 底部 -->
+  <div class="footer">
+    <div class="footer-line"></div>
+    <p class="footer-text">Windows <span>·</span> macOS <span>·</span> MIT Open Source <span>·</span> v0.9.3</p>
+  </div>
+</body>
+</html>
