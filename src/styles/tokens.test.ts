@@ -250,8 +250,10 @@ describe('grounded design system', () => {
   });
 
   it('keeps the workspace inspector available across all main sections', () => {
-    expect(mainView).toMatch(/const workspacePresent\s*=\s*props\.workspaceOpen\s*&&\s*Boolean\(activeWorkDir\)/);
-    expect(mainView).toMatch(/\{workspacePresence\.mounted\s*&&\s*retainedWorkDirRef\.current\s*&&\s*\(/);
+    // 开关只由用户状态决定：无 workDir（未选项目）时也能打开，面板内显示空状态
+    expect(mainView).toMatch(/const workspacePresence\s*=\s*usePresence\(props\.workspaceOpen\)/);
+    expect(mainView).not.toMatch(/workspacePresent\s*=[^\n]*activeWorkDir/);
+    expect(mainView).toMatch(/\{workspacePresence\.mounted\s*&&\s*\(/);
     expect(mainView).not.toMatch(/activeSection\s*===\s*['"]tasks['"]\s*&&\s*props\.workspaceOpen/);
   });
 

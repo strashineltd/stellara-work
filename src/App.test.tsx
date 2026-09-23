@@ -188,6 +188,26 @@ describe('App panel shortcut focus management', () => {
   });
 });
 
+describe('App workspace inspector availability', () => {
+  it('opens the workspace inspector when no project or session work dir exists yet', async () => {
+    (window as any).electronAPI.models.list.mockResolvedValue({
+      presets: [],
+      configured: { ...CONFIG, workDir: undefined },
+    });
+    (window as any).electronAPI.sessions.list.mockResolvedValue([]);
+    const container = await renderApp();
+    const toggle = container.querySelector('[data-panel-toggle="workspace"]') as HTMLButtonElement;
+    expect(container.querySelector('.main-layout > .workspace-panel')).toBeNull();
+
+    await fireClick(toggle);
+
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    const inspector = container.querySelector('.main-layout > .workspace-panel');
+    expect(inspector).not.toBeNull();
+    expect(inspector!.textContent).toContain('先创建或选择一个项目');
+  });
+});
+
 describe('App Settings presence and focus management', () => {
   it('retains Settings as inert and hidden until only the backdrop transition completes exit', async () => {
     const container = await renderApp();

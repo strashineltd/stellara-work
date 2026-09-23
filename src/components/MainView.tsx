@@ -102,10 +102,6 @@ export function MainView(props: MainViewProps) {
   const activeProject = projects.find((project) => project.id === activeSession?.projectId);
   const activeWorkDir = activeProject?.workDir ?? activeSession?.workDir ?? config?.workDir;
   const sidebarPresence = usePresence(sidebarOpen);
-  const workspacePresent = props.workspaceOpen && Boolean(activeWorkDir);
-  const workspacePresence = usePresence(workspacePresent);
-  const retainedWorkDirRef = useRef<string | null>(activeWorkDir ?? null);
-  if (activeWorkDir) retainedWorkDirRef.current = activeWorkDir;
 
   // ---- State ----
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
@@ -170,6 +166,12 @@ export function MainView(props: MainViewProps) {
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
   // 会话结束后已沉淀记忆的提示（memories-extracted 事件）
   const [extractedNotice, setExtractedNotice] = useState<{ sessionId: string; count: number } | null>(null);
+  // 右侧检查器：只要用户打开就渲染；没有 workDir（如首页尚未选择项目）时显示空状态。
+  // 首页选中的项目也作为检查器工作目录，选择后即可查看其文件。
+  const panelWorkDir = activeWorkDir ?? homeProject?.workDir;
+  const workspacePresence = usePresence(props.workspaceOpen);
+  const retainedWorkDirRef = useRef<string | null>(panelWorkDir ?? null);
+  if (panelWorkDir) retainedWorkDirRef.current = panelWorkDir;
   const fileTreePresence = usePresence(fileTree.present);
   const clearTaskPresence = usePresence(clearTask.present);
   const commandPresence = usePresence(commandPaletteOpen);
@@ -1310,10 +1312,10 @@ export function MainView(props: MainViewProps) {
             />
           )}
         </div>
-        {workspacePresence.mounted && retainedWorkDirRef.current && (
+        {workspacePresence.mounted && (
           <WorkspacePanel
             presence={workspacePresence}
-            workDir={retainedWorkDirRef.current}
+            workDir={retainedWorkDirRef.current ?? undefined}
             goal={workspaceGoal}
             progress={{ completed: toolResultCount, total: toolCallCount }}
             deliverables={workspaceDeliverables}

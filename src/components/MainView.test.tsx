@@ -1258,6 +1258,38 @@ describe('MainView panel presence', () => {
     view.unmount();
   });
 
+  it('mounts the inspector without a work dir and shows the file section hint', async () => {
+    const view = await renderMainView(
+      { workspaceOpen: true, config: { ...CONFIG }, projects: [] },
+      MainView,
+      { navigateToTasks: false },
+    );
+    const inspector = view.container.querySelector('.main-layout > .workspace-panel');
+
+    expect(inspector).not.toBeNull();
+    expect(inspector?.textContent).toContain('先创建或选择一个项目');
+    view.unmount();
+  });
+
+  it('uses the project picked on Home as the inspector work dir', async () => {
+    const project: ProjectSummary = { id: 'p1', name: '项目一', workDir: 'D:/proj-one', updatedAt: 0, sessionCount: 0 };
+    const view = await renderMainView(
+      { workspaceOpen: true, config: { ...CONFIG }, projects: [project] },
+      MainView,
+      { navigateToTasks: false },
+    );
+
+    const trigger = view.container.querySelector('.home-composer__project');
+    expect(trigger).not.toBeNull();
+    fireClick(trigger);
+    const option = Array.from(view.container.querySelectorAll('.home-composer__project-item'))
+      .find((el) => el.textContent?.includes('项目一'));
+    fireClick(option);
+
+    expect((window as any).electronAPI.fs.listTree).toHaveBeenCalledWith('D:/proj-one', 3);
+    view.unmount();
+  });
+
   it('cancels both exits when the panels rapidly reopen', async () => {
     const view = await renderMainView({
       workspaceOpen: true,

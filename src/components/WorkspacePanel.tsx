@@ -104,7 +104,8 @@ function fmtK(n: number): string {
 }
 
 interface WorkspacePanelProps extends PresenceMotionProps {
-  workDir: string;
+  /** 当前任务/项目的工作目录；尚未选择项目时为 undefined，文件区显示空状态 */
+  workDir?: string;
   goal: Goal | null;
   progress: Progress;
   deliverables: Deliverable[];
@@ -220,7 +221,16 @@ export function WorkspacePanel({
       <SubagentsSection subagents={subagents} />
       <DeliverablesSection deliverables={deliverables} />
       <MemoryInjectSection memoryContext={memoryContext} />
-      <FileSection workDir={workDir} touchedFiles={touchedFiles} />
+      {workDir ? (
+        <FileSection workDir={workDir} touchedFiles={touchedFiles} />
+      ) : (
+        <details className="workspace-section" open>
+          <summary className="workspace-section-header">
+            <span>文件</span>
+          </summary>
+          <div className="empty-hint">先创建或选择一个项目</div>
+        </details>
+      )}
     </aside>
   );
 }
@@ -336,7 +346,15 @@ function ProgressSection({
 
 function ContextStatsSection({ contextStats, contextWindow }: { contextStats: ContextStats | null | undefined; contextWindow?: number }) {
   if (!contextStats) {
-    return <div className="context-stats__empty">暂无任务数据</div>;
+    // 空状态也必须挂在 workspace-section 内：直接挂在面板根节点会失去区块内边距，文字顶到面板边缘
+    return (
+      <details className="workspace-section" open>
+        <summary className="workspace-section-header">
+          <span>上下文</span>
+        </summary>
+        <div className="empty-hint">暂无任务数据</div>
+      </details>
+    );
   }
   const pct = contextStats.inputUsageRatio != null
     ? contextStats.inputUsageRatio * 100

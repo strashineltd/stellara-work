@@ -81,6 +81,22 @@ describe('WorkspacePanel', () => {
     ).not.toThrow();
   });
 
+  it('shows a file section hint without a work dir and skips the tree request', () => {
+    const { container } = render(
+      <WorkspacePanel
+        goal={null}
+        progress={{ completed: 0, total: 0 }}
+        deliverables={[]}
+        touchedFiles={new Set()}
+      />,
+    );
+    const fileSection = Array.from(container.querySelectorAll('.workspace-section'))
+      .find((section) => section.querySelector('.workspace-section-header')?.textContent === '文件');
+
+    expect(fileSection?.textContent).toContain('先创建或选择一个项目');
+    expect((window as any).electronAPI.fs.listTree).not.toHaveBeenCalled();
+  });
+
   it('uses token-driven class name workspace-panel', () => {
     const { querySelector } = render(
       <WorkspacePanel
@@ -301,6 +317,18 @@ describe('WorkspacePanel context stats', () => {
     const { container } = render(<WorkspacePanel {...BASE} contextStats={null} />);
     expect(container.textContent).toContain('暂无任务数据');
     expect(container.querySelector('.context-stats')).toBeNull();
+  });
+
+  it('keeps the empty context state inside a section so the text stays aligned', () => {
+    const { container } = render(<WorkspacePanel {...BASE} contextStats={null} />);
+    const emptyHint = Array.from(container.querySelectorAll('.empty-hint'))
+      .find((el) => el.textContent === '暂无任务数据');
+
+    expect(emptyHint).toBeTruthy();
+    // 必须挂在带「上下文」标题的 workspace-section 内，直接挂在面板根节点会顶到面板边缘
+    const section = emptyHint?.closest('.workspace-section');
+    expect(section).not.toBeNull();
+    expect(section?.querySelector('.workspace-section-header')?.textContent).toContain('上下文');
   });
 });
 
