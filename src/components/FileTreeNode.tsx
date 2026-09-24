@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { FsNode } from '../../shared/ipc';
 import { Icon } from './Icon';
 import { usePresence } from '../hooks/usePresence';
@@ -14,6 +14,19 @@ export interface FileTreeNodeProps {
   onSelect: (path: string) => void;
   /** Optional compact marker displayed at the end of a row. */
   badge?: (node: FsNode) => string | undefined;
+}
+
+function fileTreePropsEqual(a: FileTreeNodeProps, b: FileTreeNodeProps): boolean {
+  return (
+    a.node === b.node &&
+    a.depth === b.depth &&
+    a.workDir === b.workDir &&
+    a.onToggle === b.onToggle &&
+    a.onSelect === b.onSelect &&
+    a.badge === b.badge &&
+    a.expanded.has(a.node.path) === b.expanded.has(b.node.path) &&
+    (a.selected === a.node.path) === (b.selected === b.node.path)
+  );
 }
 
 type ContextMenuState = {
@@ -53,8 +66,9 @@ function getPointerFocusTarget(target: EventTarget | null): HTMLElement | null {
 /**
  * 文件树节点（递归）。
  * 复用 FileTreeModal 的实现，独立成模块给 WorkspacePanel 也用。
+ * P10：自定义 memo —— expanded Set 引用变化时仅重渲开合状态真正变化的行。
  */
-export function FileTreeNode({
+export const FileTreeNode = memo(function FileTreeNode({
   node,
   depth,
   expanded,
@@ -177,7 +191,7 @@ export function FileTreeNode({
       )}
     </li>
   );
-}
+}, fileTreePropsEqual);
 
 function ContextMenu({ x, y, isDir, path, onClose, workDir, side, presence }: {
   x: number;

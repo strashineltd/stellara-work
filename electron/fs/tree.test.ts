@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createDirectory, createEmptyFile, listTree, readFileContent } from './tree';
+import { createDirectory, createEmptyFile, listTree, listTreeChildren, invalidateTreeCache, readFileContent } from './tree';
 
 let tmpDir: string;
 
@@ -73,6 +73,27 @@ describe('listTree', () => {
     const tree = await listTree(tmpDir, 2);
     const types = tree.children!.map((c) => `${c.type}:${c.name}`);
     expect(types).toEqual(['dir:a-dir', 'file:a.txt', 'file:z.txt']);
+  });
+
+  it('P9 caches listTree and invalidateTreeCache clears it', async () => {
+    await fs.writeFile(path.join(tmpDir, 'a.txt'), '1');
+    const t1 = await listTree(tmpDir, 2);
+    await fs.writeFile(path.join(tmpDir, 'b.txt'), '2');
+    const t2 = await listTree(tmpDir, 2);
+    // TTL 内命中缓存，看不到新文件
+    expect(t2.children).toHaveLength(1);
+    expect(t1).toBe(t2);
+    invalidateTreeCache(tmpDir);
+    const t3 = await listTree(tmpDir, 2);
+    expect(t3.children).toHaveLength(2);
+  });
+
+  it('P9 listTreeChildren lists one level under a dir', async () => {
+    await fs.mkdir(path.join(tmpDir, 'src'));
+    await fs.writeFile(path.join(tmpDir, 'src', 'a.ts'), '');
+    await fs.writeFile(path.join(tmpDir, 'src', 'b.ts'), '');
+    const kids = await listTreeChildren(tmpDir, path.join(tmpDir, 'src'));
+    expect(kids.map((k) => k.name).sort()).toEqual(['a.ts', 'b.ts']);
   });
 
   it('does not follow symlink pointing outside cwd', async () => {

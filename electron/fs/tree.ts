@@ -23,11 +23,51 @@ const MAX_TEXT_BYTES = 100 * 1024; // 预览截断
  * - maxDepth=2：根 + 1 层子目录
  * - 默认 4 层
  * - 跳过符号链接（安全考虑）
+ *
+ * P9：同层子节点并行 stat；按 (cwd, maxDepth) 短 TTL 缓存，避免侧栏/Modal 反复全量扫盘。
  */
+const TREE_CACHE_TTL_MS = 3000;
+const treeCache = new Map<string, { at: number; node: FsNode }>();
+
 export async function listTree(cwd: string, maxDepth = 4): Promise<FsNode> {
   const root = path.resolve(cwd);
+  const cacheKey = `${root}::${maxDepth}`;
+  const hit = treeCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < TREE_CACHE_TTL_MS) return hit.node;
   const realRoot = await canonicalCwd(root);
-  return buildNode(root, root, realRoot, 0, maxDepth);
+  const node = await buildNode(root, root, realRoot, 0, maxDepth);
+  treeCache.set(cacheKey, { at: Date.now(), node });
+  if (treeCache.size > 32) {
+    const oldest = treeCache.keys().next().value;
+    if (oldest) treeCache.delete(oldest);
+  }
+  return node;
+}
+
+/** 测试 / 写文件后失效缓存 */
+export function invalidateTreeCache(workDir?: string): void {
+  if (!workDir) {
+    treeCache.clear();
+    return;
+  }
+  const root = path.resolve(workDir);
+  for (const key of [...treeCache.keys()]) {
+    if (key.startsWith(`${root}::`)) treeCache.delete(key);
+  }
+}
+
+/**
+ * 懒展开：只列 dirPath 的直接子节点（深度 1），用于展开时再加载。
+ */
+export async function listTreeChildren(cwd: string, dirPath: string): Promise<FsNode[]> {
+  const root = path.resolve(cwd);
+  const target = path.resolve(dirPath);
+  if (!isWithinDir(target, root) && target !== root) {
+    throw new Error(`路径超出允许范围：${dirPath}`);
+  }
+  const realRoot = await canonicalCwd(root);
+  const node = await buildNode(target, root, realRoot, 0, 1);
+  return node.children ?? [];
 }
 
 async function buildNode(absPath: string, root: string, realRoot: string, depth: number, maxDepth: number): Promise<FsNode> {
@@ -63,19 +103,40 @@ async function buildNode(absPath: string, root: string, realRoot: string, depth:
   }
 
   const entries = await fs.readdir(absPath, { withFileTypes: true });
-  const children: FsNode[] = [];
-  for (const e of entries) {
-    if (SKIP_DIRS.has(e.name)) continue;
-    if (e.name.startsWith('.') && !ALLOW_DOT.has(e.name)) continue;
-    const childPath = path.join(absPath, e.name);
-    children.push(await buildNode(childPath, root, realRoot, depth + 1, maxDepth));
-  }
+  const wanted = entries.filter((e) => {
+    if (SKIP_DIRS.has(e.name)) return false;
+    if (e.name.startsWith('.') && !ALLOW_DOT.has(e.name)) return false;
+    return true;
+  });
+  // P9：同层并行（有界），避免大目录串行 lstat 拖垮主进程
+  const children = await mapWithConcurrency(
+    wanted,
+    16,
+    (e) => buildNode(path.join(absPath, e.name), root, realRoot, depth + 1, maxDepth),
+  );
   children.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
   node.children = children;
   return node;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 /**
@@ -176,6 +237,7 @@ export async function createEmptyFile(
     throw error;
   }
 
+  invalidateTreeCache(root);
   return { path: check.realPath };
 }
 
@@ -220,5 +282,6 @@ export async function createDirectory(
     throw error;
   }
 
+  invalidateTreeCache(root);
   return { path: check.realPath };
 }
