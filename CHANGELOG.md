@@ -2,6 +2,33 @@
 
 All notable changes to Stellara Work are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.9.4] - 2026-09-23
+
+### Security · 安全
+
+- **调度工作目录**：创建/更新任务须经选择器或已有项目/模型授权，堵住任意路径逃逸
+- **命令面收紧**：移除 `sed`/`brew`/`plutil`/`git clean`；`find` 禁止 `-delete`/`-fprint*`；`defaults`/`diskutil` 仅只读子命令；调度白名单拒绝过宽的 `npm run`/裸 `install`，省略 `cwd` 时强制校验 `fileScopes`
+- **原生审批**：`write_file` / `edit_file` / `run_command` / `browser_exec_js` / `dispatch_subagents` 改为系统对话框确认，渲染层无法自批
+- **凭据边界**：MCP 鉴权头入密钥库，列表只回 `hasAuth`；LLM `baseUrl` 拒绝非回环明文 HTTP 与云元数据；连接期 IP Pinning
+- **浏览器 SSRF**：同步拒绝私网/保留 IP 字面量；审批 hook 未接线时 fail-closed
+- **迁移与日志**：迁移备份脱敏并清除遗留 `.env`/`config.json.bak`；日志与供应商错误先脱敏
+- **打包加固**：Electron Fuses（关 `RunAsNode`/inspect，开 Cookie 加密与 ASAR 完整性）
+- **消息写入面**：移除渲染层 `appendMessage`，`saveMessages` 强制归属与连续 position
+- **Skills 信任**：工作区技能默认 opt-in，正文标注不可信；写入路径 TOCTOU 重验 + `O_NOFOLLOW`
+
+### Performance · 性能
+
+- 流式 `content`/`reasoning` 合并刷屏；消息按 position upsert，busy 时降频落库
+- 首窗前提收窄（调度器/托盘后台化）；DiffCard 默认折叠并懒加载 CodeMirror
+- ContextHub 检查点播种 + 压缩窗口 SQL OFFSET 恢复
+- 聊天行级 memo；会话搜索 FTS5；文件树并行扫描与节点 memo
+- 记忆注入批量访问计数、抽取窗口化限流；token 估算缓存
+- Vite 分包 CodeMirror / markdown / react-vendor；`settings-changed` 分 reason 按需刷新
+
+### Docs · 文档
+
+- 隐私表述对齐可选云账号与远端服务器流量（不再写「绝不离开本机」）
+
 ## [0.9.3.2] - 2026-09-17
 
 ### Added · 新增

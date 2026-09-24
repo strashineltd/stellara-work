@@ -1,6 +1,6 @@
 {
   "name": "stellara-work",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "A local-first desktop agent for Windows and macOS with Responses API and Anthropic Messages support.",
   "main": "electron/dist/electron/main.js",
   "author": "Stellara Work",
@@ -85,7 +85,7 @@
     "productName": "Stellara Work",
     "npmRebuild": false,
     "extraMetadata": {
-      "version": "0.9.3.2"
+      "version": "0.9.4"
     },
     "directories": {
       "output": "release",
