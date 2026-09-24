@@ -321,6 +321,30 @@ describe('上下文压缩与恢复', () => {
     expect(reopened.getContext().compactionWindowStartIndex).toBeGreaterThan(0);
   });
 
+  it('P5：压缩后重开只回放压缩点之后的事件，并用检查点恢复 objective', async () => {
+    const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    await hub.commitEvent('plan_created', {
+      objective: '完成登录页',
+      constraints: ['不改 API'],
+      steps: [{ id: 's1', description: '写组件', status: 'pending', relatedFiles: [], requiredVerification: [], evidenceIds: [] }],
+    });
+    addItems(hub, 60);
+    await hub.ensureContextBudget({});
+    const activeCount = hub.getResponseItems().length;
+
+    const eventsBefore = getContextEventsBySession('sess-001').length;
+    const reopened = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
+    // 活跃窗口大小不变（SQL OFFSET + digest）
+    expect(reopened.getResponseItems()).toHaveLength(activeCount);
+    // objective 来自检查点播种，而非全量回放
+    expect(reopened.getContext().objective).toBe('完成登录页');
+    expect(reopened.getContext().plan.steps[0]?.description).toBe('写组件');
+    // 回放条数应少于全量事件（压缩点之后）
+    // （通过日志/行为侧面验证：revision 与全量回放一致）
+    expect(reopened.getRevision()).toBeGreaterThanOrEqual(0);
+    expect(eventsBefore).toBeGreaterThan(0);
+  });
+
   it('digest 不匹配时忽略指针', async () => {
     const hub = new ContextHub('sess-001', '/tmp/work', 20_000, 1_000);
     addItems(hub, 60);

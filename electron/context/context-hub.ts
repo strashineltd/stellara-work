@@ -15,6 +15,8 @@ import log from 'electron-log/main';
 import {
   insertContextEvent,
   getContextEventsBySession,
+  getContextEventsSince,
+  getLastContextEventByType,
   getMaxSequence,
   insertResponseItem,
   getResponseItemsBySession,
@@ -208,9 +210,39 @@ export class ContextHub {
     this.sequence = this.shouldPersist ? getMaxSequence(sessionId) : 0;
     this.context = this.initializeContext();
     if (this.shouldPersist) {
-      this.replayEvents();
-      this.restoreResponseItems();
-      this.applyCompactionPointer();
+      // P5：优先用最近压缩点 + 检查点恢复，避免全量事件回放与全表 JSON.parse
+      const compacted = getLastContextEventByType(this.sessionId, 'context_compacted');
+      const checkpoint = getLatestCheckpoint(this.sessionId);
+      if (checkpoint) this.seedFromCheckpoint(checkpoint);
+      this.replayEvents(compacted?.sequence ?? 0);
+      this.restoreResponseItems(compacted);
+    }
+  }
+
+  /** P5：用最新检查点播种 objective / plan / 已改文件，减少回放依赖 */
+  private seedFromCheckpoint(checkpoint: ContextCheckpoint): void {
+    this.context.objective = checkpoint.objective;
+    this.context.constraints = [...checkpoint.constraints];
+    this.context.plan = {
+      steps: checkpoint.planState.map((s) => ({
+        id: s.id,
+        description: s.description,
+        status: (s.status as PlanStep['status']) || 'pending',
+        relatedFiles: [],
+        requiredVerification: [],
+        evidenceIds: [],
+      })),
+    };
+    this.context.workspaceRevision = checkpoint.workspaceRevision;
+    this.context.checkpointId = checkpoint.id;
+    for (const filePath of checkpoint.filesChanged) {
+      this.context.workspace.modifiedFiles.set(filePath, {
+        filePath,
+        agentId: 'main',
+        workspaceRevision: checkpoint.workspaceRevision,
+        createdAt: checkpoint.createdAt,
+      });
+      this.context.workspace.unverifiedFiles.add(filePath);
     }
   }
 
@@ -255,20 +287,59 @@ export class ContextHub {
   }
 
   /**
-   * 从数据库重放事件恢复状态
+   * 从数据库重放事件恢复状态。
+   * P5：`sinceSequence` 之前的历史由检查点/压缩点覆盖，不再回放。
    */
-  private replayEvents(): void {
-    const events = getContextEventsBySession(this.sessionId);
+  private replayEvents(sinceSequence = 0): void {
+    const events = sinceSequence > 0
+      ? getContextEventsSince(this.sessionId, sinceSequence)
+      : getContextEventsBySession(this.sessionId);
     this.replaying = true;
     for (const event of events) {
       this.applyEvent(event);
     }
     this.replaying = false;
-    log.info(`Context Hub: 重放 ${events.length} 个事件，revision=${this.context.revision}`);
+    log.info(`Context Hub: 重放 ${events.length} 个事件（since=${sinceSequence}），revision=${this.context.revision}`);
   }
 
-  private restoreResponseItems(): void {
-    const rows = getResponseItemsBySession(this.sessionId);
+  /**
+   * 恢复 Response Items。
+   * P5：存在压缩点时按 windowStartIndex 在 SQL 层 OFFSET，只 parse 活跃窗口；
+   * digest 不匹配则回退全量再走 applyCompactionPointer。
+   */
+  private restoreResponseItems(compacted?: ContextEventEnvelope | null): void {
+    const data = (compacted?.data ?? {}) as {
+      windowStartIndex?: number;
+      windowDigest?: string;
+    };
+    const windowStart = typeof data.windowStartIndex === 'number' && data.windowStartIndex > 0
+      ? data.windowStartIndex
+      : 0;
+    const windowDigest = typeof data.windowDigest === 'string' ? data.windowDigest : undefined;
+
+    let rows = getResponseItemsBySession(this.sessionId, windowStart);
+    if (windowStart > 0 && windowDigest && rows.length > 0) {
+      if (digestItem(rows[0]!.itemData as ResponseItem) !== windowDigest) {
+        log.warn('Context Hub: 压缩指针 digest 不匹配，回退全量加载');
+        rows = getResponseItemsBySession(this.sessionId, 0);
+        this.loadResponseRows(rows);
+        this.context.compactionWindowStartIndex = windowStart;
+        this.context.compactionWindowDigest = windowDigest;
+        this.applyCompactionPointer();
+        return;
+      }
+    }
+
+    this.loadResponseRows(rows);
+    if (windowStart > 0) {
+      // 已按窗口加载：保留 start 供二次压缩 previousWindowStartIndex 使用
+      this.context.compactionWindowStartIndex = windowStart;
+      this.context.compactionWindowDigest = windowDigest;
+      this.context.usage = this.calculateUsage();
+    }
+  }
+
+  private loadResponseRows(rows: ReturnType<typeof getResponseItemsBySession>): void {
     this.responseItemSequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0);
     const persisted = rows.map((row) => row.itemData as ResponseItem);
     const hasPersistedUser = persisted.some((item) => item.type === 'message' && item.role === 'user');

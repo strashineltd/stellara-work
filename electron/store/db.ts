@@ -925,9 +925,13 @@ export function insertResponseItem(item: {
 }
 
 /**
- * 查询 session 的 Response Items（按 sequence 排序）
+ * 查询 session 的 Response Items（按 sequence 排序）。
+ * P5：`offset` 跳过压缩窗口之前的行，避免 JSON.parse 全表。
  */
-export function getResponseItemsBySession(sessionId: string): Array<{
+export function getResponseItemsBySession(
+  sessionId: string,
+  offset = 0,
+): Array<{
   id: string;
   sessionId: string;
   sequence: number;
@@ -937,7 +941,13 @@ export function getResponseItemsBySession(sessionId: string): Array<{
   itemData: unknown;
 }> {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM response_items WHERE session_id = ? ORDER BY sequence ASC').all(sessionId) as Record<string, unknown>[];
+  const rows = (
+    offset > 0
+      ? db.prepare('SELECT * FROM response_items WHERE session_id = ? ORDER BY sequence ASC LIMIT -1 OFFSET ?')
+          .all(sessionId, offset) as Record<string, unknown>[]
+      : db.prepare('SELECT * FROM response_items WHERE session_id = ? ORDER BY sequence ASC')
+          .all(sessionId) as Record<string, unknown>[]
+  );
   return rows.map(row => ({
     id: row.id as string,
     sessionId: row.session_id as string,
@@ -946,6 +956,55 @@ export function getResponseItemsBySession(sessionId: string): Array<{
     workspaceRevision: row.workspace_revision as number,
     itemType: row.item_type as string,
     itemData: JSON.parse(row.item_data as string),
+  }));
+}
+
+/**
+ * 取某类型最新一条 Context Event（P5：用于定位压缩窗口，无需全量回放）。
+ */
+export function getLastContextEventByType(
+  sessionId: string,
+  eventType: ContextEventEnvelope['event'],
+): ContextEventEnvelope | null {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT * FROM context_events WHERE session_id = ? AND event_type = ? ORDER BY sequence DESC LIMIT 1',
+  ).get(sessionId, eventType) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    sequence: row.sequence as number,
+    contextRevision: row.context_revision as number,
+    workspaceRevision: row.workspace_revision as number,
+    sourceAgentId: row.source_agent_id as string,
+    event: row.event_type as ContextEventEnvelope['event'],
+    data: row.event_data ? JSON.parse(row.event_data as string) : undefined,
+    createdAt: row.created_at as string,
+  };
+}
+
+/**
+ * 查询 sequence >= sinceSequence 的 Context Events（P5：跳过压缩前历史）。
+ */
+export function getContextEventsSince(
+  sessionId: string,
+  sinceSequence: number,
+): ContextEventEnvelope[] {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT * FROM context_events WHERE session_id = ? AND sequence >= ? ORDER BY sequence ASC',
+  ).all(sessionId, sinceSequence) as Record<string, unknown>[];
+  return rows.map(row => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    sequence: row.sequence as number,
+    contextRevision: row.context_revision as number,
+    workspaceRevision: row.workspace_revision as number,
+    sourceAgentId: row.source_agent_id as string,
+    event: row.event_type as ContextEventEnvelope['event'],
+    data: row.event_data ? JSON.parse(row.event_data as string) : undefined,
+    createdAt: row.created_at as string,
   }));
 }
 
