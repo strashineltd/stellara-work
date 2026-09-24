@@ -133,9 +133,22 @@ export function SettingsPanel({ initialTab = 'models', focusRequest = 0, onClose
         className="modal settings-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="设置"
+        aria-labelledby="settings-dialog-title"
         onClick={(e) => e.stopPropagation()}
       >
+        <header className="settings-modal__header">
+          <h1 id="settings-dialog-title">设置</h1>
+          <button
+            className="settings-modal__close"
+            type="button"
+            aria-label="关闭设置"
+            onClick={() => {
+              if (!closing) onClose();
+            }}
+          >
+            <Icon name="x" size={16} />
+          </button>
+        </header>
         <nav ref={navRef} className="settings-nav" role="tablist" aria-label="设置分类" aria-orientation="vertical">
           {SETTINGS_TABS.map((item) => (
             <button

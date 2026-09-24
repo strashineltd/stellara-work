@@ -78,7 +78,7 @@ export default function App() {
   }, []);
   const [shortcuts, setShortcuts] = useState<ShortcutBindings>(DEFAULT_SHORTCUTS);
   const [theme, setTheme] = useState<ThemeName>('light');
-  const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('sidebar');
+  const [workspaceMode, setWorkspaceMode] = useState<'sidebar' | 'tabs'>('tabs');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('models');
   const [settingsFocusRequest, setSettingsFocusRequest] = useState(0);

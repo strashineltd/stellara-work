@@ -58,73 +58,6 @@ export function HomeComposer(props: HomeComposerProps) {
 
   return (
     <div className="home-composer">
-      <div className="home-composer__chips">
-        {props.serverTarget
-          ? null
-          : props.projectControl ?? (
-            <span className="home-composer__project-menu">
-              <button
-                ref={projectTriggerRef}
-                className="home-composer__chip home-composer__project"
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={projectMenuOpen}
-                onClick={() => setProjectMenuOpen((value) => !value)}
-              >
-                <Icon name="folder" size={13} />
-                <span className="home-composer__project-name">
-                  {activeProject?.name ?? props.projectName ?? '选择项目'}
-                </span>
-                <Icon name="chevron-down" size={12} />
-              </button>
-              {projectPresence.mounted && (
-                <div
-                  className="home-composer__project-list"
-                  role="listbox"
-                  aria-label="选择项目"
-                  {...presenceRootProps(projectPresence)}
-                >
-                  {props.projects.map((project) => (
-                    <button
-                      key={project.id}
-                      className={`home-composer__project-item${project.id === props.activeProjectId ? ' active' : ''}`}
-                      type="button"
-                      role="option"
-                      aria-selected={project.id === props.activeProjectId}
-                      onClick={() => {
-                        props.onSelectProject(project.id);
-                        setProjectMenuOpen(false);
-                      }}
-                    >
-                      <span className="home-composer__project-item-name">{project.name}</span>
-                      {project.id === props.activeProjectId && <Icon name="check" size={13} />}
-                    </button>
-                  ))}
-                  {props.projects.length > 0 && (
-                    <span className="home-composer__project-separator" role="separator" />
-                  )}
-                  <button
-                    className="home-composer__project-item home-composer__project-item--new"
-                    type="button"
-                    onClick={() => {
-                      setProjectMenuOpen(false);
-                      props.onCreateProject(projectTriggerRef.current);
-                    }}
-                  >
-                    <Icon name="plus" size={13} />
-                    <span className="home-composer__project-item-name">新建项目…</span>
-                  </button>
-                </div>
-              )}
-            </span>
-          )}
-        {props.branch !== null && (
-          <span className="home-composer__chip home-composer__branch">
-            <Icon name="file-tree" size={13} />
-            {props.branch}
-          </span>
-        )}
-      </div>
       <textarea
         ref={props.textareaRef}
         rows={3}
@@ -155,8 +88,75 @@ export function HomeComposer(props: HomeComposerProps) {
                 : undefined
           }
         />
-        <ApprovalModeMenu mode={props.approvalMode} onModeChange={props.onApprovalModeChange} disabled={props.busy} />
+        <div className="home-composer__chips">
+          {props.serverTarget
+            ? null
+            : props.projectControl ?? (
+              <span className="home-composer__project-menu">
+                <button
+                  ref={projectTriggerRef}
+                  className="home-composer__chip home-composer__project"
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded={projectMenuOpen}
+                  onClick={() => setProjectMenuOpen((value) => !value)}
+                >
+                  <Icon name="monitor" size={13} />
+                  <span className="home-composer__project-name">
+                    {activeProject?.name ?? props.projectName ?? '选择项目'}
+                  </span>
+                  <Icon name="chevron-down" size={12} />
+                </button>
+                {projectPresence.mounted && (
+                  <div
+                    className="home-composer__project-list"
+                    role="listbox"
+                    aria-label="选择项目"
+                    {...presenceRootProps(projectPresence)}
+                  >
+                    {props.projects.map((project) => (
+                      <button
+                        key={project.id}
+                        className={`home-composer__project-item${project.id === props.activeProjectId ? ' active' : ''}`}
+                        type="button"
+                        role="option"
+                        aria-selected={project.id === props.activeProjectId}
+                        onClick={() => {
+                          props.onSelectProject(project.id);
+                          setProjectMenuOpen(false);
+                        }}
+                      >
+                        <span className="home-composer__project-item-name">{project.name}</span>
+                        {project.id === props.activeProjectId && <Icon name="check" size={13} />}
+                      </button>
+                    ))}
+                    {props.projects.length > 0 && (
+                      <span className="home-composer__project-separator" role="separator" />
+                    )}
+                    <button
+                      className="home-composer__project-item home-composer__project-item--new"
+                      type="button"
+                      onClick={() => {
+                        setProjectMenuOpen(false);
+                        props.onCreateProject(projectTriggerRef.current);
+                      }}
+                    >
+                      <Icon name="plus" size={13} />
+                      <span className="home-composer__project-item-name">新建项目…</span>
+                    </button>
+                  </div>
+                )}
+              </span>
+            )}
+          {props.branch !== null && (
+            <span className="home-composer__chip home-composer__branch">
+              <Icon name="file-tree" size={13} />
+              {props.branch}
+            </span>
+          )}
+        </div>
         {props.modelControl}
+        <ApprovalModeMenu mode={props.approvalMode} onModeChange={props.onApprovalModeChange} disabled={props.busy} />
         <button
           className="home-composer__send"
           type="button"

@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react';
 import type { ModelPreset, ModelConfig, ConfiguredModel, PresetModelId } from '../../shared/ipc';
+import { Icon } from './Icon';
+
+type OnboardingStep = 'welcome' | 'pick' | 'connection';
+
+const ONBOARDING_STEPS: ReadonlyArray<{ id: OnboardingStep; label: string }> = [
+  { id: 'welcome', label: '欢迎' },
+  { id: 'pick', label: '选择模型' },
+  { id: 'connection', label: '配置密钥' },
+];
 
 interface OnboardingProps {
   presets: ModelPreset[];
@@ -11,7 +20,7 @@ interface OnboardingProps {
 
 /** Wizard: welcome → model pick → connection；三步均可跳过 */
 export function Onboarding({ presets, initialConfig, onComplete }: OnboardingProps) {
-  const [step, setStep] = useState<'welcome' | 'pick' | 'connection'>(
+  const [step, setStep] = useState<OnboardingStep>(
     initialConfig ? 'connection' : 'welcome',
   );
   const [selectedId, setSelectedId] = useState<PresetModelId>(
@@ -97,33 +106,63 @@ export function Onboarding({ presets, initialConfig, onComplete }: OnboardingPro
 
   return (
     <div className="onboarding">
-      {step === 'welcome' ? (
-        <WelcomePage onStart={() => setStep('pick')} onSkip={handleSkip} />
-      ) : step === 'pick' ? (
-        <PickPage
-          presets={presets}
-          selectedId={selectedId}
-          onPick={setSelectedId}
-          onNext={() => setStep('connection')}
-          onSkip={handleSkip}
-        />
-      ) : (
-        <ConnectionPage
-          apiKey={apiKey}
-          onApiKeyChange={setApiKey}
-          baseUrl={baseUrl}
-          onBaseUrlChange={setBaseUrl}
-          model={model}
-          onModelChange={setModel}
-          initialConfig={initialConfig}
-          saveStatus={saveStatus}
-          saveError={saveError}
-          onComplete={handleComplete}
-          onSkip={handleSkip}
-          onBack={() => setStep('pick')}
-        />
-      )}
+      <div className="ob-shell">
+        <button className="ob-skip" onClick={handleSkip} type="button">
+          跳过
+        </button>
+        <OnboardingProgress step={step} />
+        {step === 'welcome' ? (
+          <WelcomePage onStart={() => setStep('pick')} onSkip={handleSkip} />
+        ) : step === 'pick' ? (
+          <PickPage
+            presets={presets}
+            selectedId={selectedId}
+            onPick={setSelectedId}
+            onBack={() => setStep('welcome')}
+            onNext={() => setStep('connection')}
+          />
+        ) : (
+          <ConnectionPage
+            apiKey={apiKey}
+            onApiKeyChange={setApiKey}
+            baseUrl={baseUrl}
+            onBaseUrlChange={setBaseUrl}
+            model={model}
+            onModelChange={setModel}
+            initialConfig={initialConfig}
+            saveStatus={saveStatus}
+            saveError={saveError}
+            onComplete={handleComplete}
+            onBack={() => setStep('pick')}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+function OnboardingProgress({ step }: { step: OnboardingStep }) {
+  const currentIndex = ONBOARDING_STEPS.findIndex((item) => item.id === step);
+
+  return (
+    <ol className="ob-progress" aria-label="配置进度">
+      {ONBOARDING_STEPS.map((item, index) => {
+        const completed = index < currentIndex;
+        const active = index === currentIndex;
+        return (
+          <li
+            key={item.id}
+            className={`ob-progress__item${completed ? ' completed' : ''}${active ? ' active' : ''}`}
+            aria-current={active ? 'step' : undefined}
+          >
+            <span className="ob-progress__marker" aria-hidden="true">
+              {completed ? <Icon name="check" size={14} /> : index + 1}
+            </span>
+            <span className="ob-progress__label">{item.label}</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -197,24 +236,20 @@ function PickPage({
   presets,
   selectedId,
   onPick,
+  onBack,
   onNext,
-  onSkip,
 }: {
   presets: ModelPreset[];
   selectedId: PresetModelId;
   onPick: (id: PresetModelId) => void;
+  onBack: () => void;
   onNext: () => void;
-  onSkip: () => void;
 }) {
   return (
     <div className="ob-page" data-motion="onboarding-step-enter" data-step="pick">
       <div className="ob-card">
         <div className="ob-brand ob-brand--tight">
-          <div className="ob-steps" aria-hidden="true">
-            <span className="ob-step on" />
-            <span className="ob-step" />
-          </div>
-          <p className="ob-kicker">第 1 步 / 共 2 步</p>
+          <p className="ob-kicker">第 2 步 / 共 3 步</p>
           <h1 className="ob-title">选择模型</h1>
           <p className="ob-sub">选择后可在设置中随时更换；也可以先跳过。</p>
         </div>
@@ -226,26 +261,32 @@ function PickPage({
               data-model-id={p.id}
               className={`model-card ${p.id === selectedId ? 'selected' : ''}`}
               onClick={() => onPick(p.id)}
+              aria-pressed={p.id === selectedId}
               type="button"
             >
-              <span className="model-card-name">
-                {p.label}
+              <span className="model-card-icon" aria-hidden="true">
+                <Icon name={p.isCustom ? 'server' : 'database'} size={22} />
               </span>
-              <span className="model-card-base">
-                {p.isCustom ? 'Responses API' : '中文模型'}
+              <span className="model-card-copy">
+                <span className="model-card-name">{p.label}</span>
+                <span className="model-card-base">
+                  {p.isCustom ? '通过兼容接口连接' : '适合开发任务'}
+                </span>
               </span>
+              <span className="model-card-radio" aria-hidden="true" />
             </button>
           ))}
         </div>
 
-        <div className="ob-actions">
-          <button className="btn btn-ghost" onClick={onSkip} type="button">
-            跳过
+        <div className="ob-actions ob-actions--split">
+          <button className="btn btn-ghost" onClick={onBack} type="button">
+            上一步
           </button>
           <button className="btn btn-primary" onClick={onNext} type="button">
             下一步
           </button>
         </div>
+        <p className="ob-step-count" aria-hidden="true">第 2 步，共 3 步</p>
       </div>
     </div>
   );
@@ -264,7 +305,6 @@ function ConnectionPage({
   saveStatus,
   saveError,
   onComplete,
-  onSkip,
   onBack,
 }: {
   apiKey: string;
@@ -277,7 +317,6 @@ function ConnectionPage({
   saveStatus: string;
   saveError: string;
   onComplete: () => void;
-  onSkip: () => void;
   onBack: () => void;
 }) {
   const isReconfig = !!initialConfig;
@@ -285,16 +324,8 @@ function ConnectionPage({
   return (
     <div className="ob-page" data-motion="onboarding-step-enter" data-step="connection">
       <div className="ob-card">
-        <button className="btn btn-ghost ob-back" onClick={onBack} type="button">
-          返回
-        </button>
-
         <div className="ob-brand ob-brand--tight">
-          <div className="ob-steps" aria-hidden="true">
-            <span className="ob-step on" />
-            <span className="ob-step on" />
-          </div>
-          <p className="ob-kicker">第 2 步 / 共 2 步</p>
+          <p className="ob-kicker">第 3 步 / 共 3 步</p>
           <h1 className="ob-title">配置密钥</h1>
           <p className="ob-sub">密钥只保存在本机。也可以先跳过，稍后在设置中配置。</p>
         </div>
@@ -364,9 +395,9 @@ function ConnectionPage({
           </div>
         )}
 
-        <div className="ob-actions">
-          <button className="btn btn-ghost" onClick={onSkip} type="button">
-            跳过
+        <div className="ob-actions ob-actions--split">
+          <button className="btn btn-ghost" onClick={onBack} type="button">
+            上一步
           </button>
           <button
             className="btn btn-primary"
@@ -377,6 +408,7 @@ function ConnectionPage({
             {saveStatus === 'testing' ? '测试中…' : saveStatus === 'saving' ? '保存中…' : '完成配置'}
           </button>
         </div>
+        <p className="ob-step-count" aria-hidden="true">第 3 步，共 3 步</p>
       </div>
     </div>
   );

@@ -46,38 +46,43 @@ export function HomeView(props: HomeViewProps) {
         </div>
       )}
       <div className="home-view__center">
-        <span className="home-view__glyph" aria-hidden="true"><Icon name="terminal" size={22} /></span>
-        <h1 id="home-title">你想让我们在 Stellara Work 中构建什么?</h1>
-        <CapabilityCards
-          onPick={(prompt) => {
-            props.onInputChange(prompt);
-            textareaRef.current?.focus();
-          }}
+        <header className="home-view__intro">
+          <h1 id="home-title">开始一个新任务</h1>
+          <p>选择项目并描述你想完成的工作</p>
+        </header>
+        <HomeComposer
+          textareaRef={textareaRef}
+          input={props.input}
+          busy={props.busy}
+          attachments={props.attachments}
+          hasWorkDir={props.hasWorkDir}
+          projects={props.projects}
+          activeProjectId={props.activeProjectId}
+          projectName={activeProject?.name}
+          serverTarget={props.serverTarget}
+          branch={props.branch}
+          approvalMode={props.approvalMode}
+          modelControl={props.modelControl}
+          projectControl={props.projectControl}
+          onSelectProject={props.onSelectProject}
+          onCreateProject={props.onCreateProject}
+          onInputChange={props.onInputChange}
+          onAttachmentsChange={props.onAttachmentsChange}
+          onAddPaths={props.onAddPaths}
+          onPickAttachments={props.onPickAttachments}
+          onSend={props.onSend}
+          onApprovalModeChange={props.onApprovalModeChange}
         />
+        <section className="home-view__suggestions" aria-labelledby="home-suggestions-title">
+          <h2 id="home-suggestions-title">最近使用</h2>
+          <CapabilityCards
+            onPick={(prompt) => {
+              props.onInputChange(prompt);
+              textareaRef.current?.focus();
+            }}
+          />
+        </section>
       </div>
-      <HomeComposer
-        textareaRef={textareaRef}
-        input={props.input}
-        busy={props.busy}
-        attachments={props.attachments}
-        hasWorkDir={props.hasWorkDir}
-        projects={props.projects}
-        activeProjectId={props.activeProjectId}
-        projectName={activeProject?.name}
-        serverTarget={props.serverTarget}
-        branch={props.branch}
-        approvalMode={props.approvalMode}
-        modelControl={props.modelControl}
-        projectControl={props.projectControl}
-        onSelectProject={props.onSelectProject}
-        onCreateProject={props.onCreateProject}
-        onInputChange={props.onInputChange}
-        onAttachmentsChange={props.onAttachmentsChange}
-        onAddPaths={props.onAddPaths}
-        onPickAttachments={props.onPickAttachments}
-        onSend={props.onSend}
-        onApprovalModeChange={props.onApprovalModeChange}
-      />
     </main>
   );
 }

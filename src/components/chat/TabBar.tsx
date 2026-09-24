@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Icon } from '../Icon';
+import { Icon, type IconName } from '../Icon';
 import { usePresence } from '../../hooks/usePresence';
 import { presenceRootProps, restoreFocusTarget } from '../../lib/presence-ui';
 
@@ -7,6 +7,8 @@ export type TabBarTab = {
   id: string;
   title: string;
   status: 'active' | 'waiting' | 'idle';
+  /** Optional project icon. Tabs default to the neutral desktop-project glyph. */
+  icon?: IconName;
 };
 
 interface TabBarProps {
@@ -107,7 +109,11 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
   return (
     <div className="tab-bar" role="tablist" aria-label="打开的会话">
       {tabs.map((t, index) => (
-        <div key={t.id} className={`tab-chip-shell${t.id === activeId ? ' tab-chip-shell--active' : ''}`}>
+        <div
+          key={t.id}
+          className={`tab-chip-shell${t.id === activeId ? ' tab-chip-shell--active' : ''}`}
+          data-status={t.status}
+        >
           <button
             role="tab"
             type="button"
@@ -139,7 +145,9 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNewTab, onRename, 
               });
             }}
           >
-            <span className={`tab-chip-dot tab-chip-dot--${t.status}`} aria-hidden="true" />
+            <span className="tab-chip-icon" aria-hidden="true">
+              <Icon name={t.icon ?? 'monitor'} size={15} />
+            </span>
             <span className="tab-chip-title">{t.title}</span>
           </button>
           <button

@@ -141,9 +141,9 @@ describe('Sidebar', () => {
     document.body.replaceChildren();
   });
 
-  it('renders the project-and-session library heading', () => {
-    const { getByText } = render(<Sidebar sessions={SESSIONS} activeId="a" onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
-    expect(getByText(/项目与会话/i)).toBeTruthy();
+  it('renders the task library heading', () => {
+    const { querySelector } = render(<Sidebar sessions={SESSIONS} activeId="a" onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
+    expect(querySelector('.sidebar-library-heading span:first-child')?.textContent).toBe('任务');
   });
 
   it('marks the active session with an accent border + soft background', () => {
@@ -166,10 +166,10 @@ describe('Sidebar', () => {
     expect(onSelect).toHaveBeenCalledWith('a');
   });
 
-  it('invokes onNew when the new-session button is clicked', () => {
+  it('invokes onNew when the new-task button is clicked', () => {
     const onNew = vi.fn();
     const { getByText } = render(<Sidebar sessions={[]} activeId={null} onSelect={vi.fn()} onNew={onNew} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
-    const button = getByText(/new session|新建会话/i)?.closest('button') as HTMLButtonElement;
+    const button = getByText('新建任务')?.closest('button') as HTMLButtonElement;
     fireClick(button);
     expect(onNew).toHaveBeenCalledOnce();
     expect(onNew).toHaveBeenCalledWith(button);
@@ -184,23 +184,24 @@ describe('Sidebar', () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
-  it('renders the primary navigation as 新对话, Pull Request and 已安排 without 插件', () => {
-    const { querySelectorAll } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
+  it('renders only 新建任务 in the primary navigation without 插件', () => {
+    const { querySelector, querySelectorAll } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={vi.fn()} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
     const labels = Array.from(querySelectorAll('.sidebar-primary-item')).map((el) => el.textContent);
-    expect(labels).toEqual(['新对话', 'Pull Request', '已安排']);
+    expect(labels).toEqual(['新建任务']);
     expect(labels.some((label) => label?.includes('插件'))).toBe(false);
+    expect(querySelector('.sidebar-primary')?.getAttribute('aria-label')).toBe('主要导航');
   });
 
-  it('invokes onNew from the 新对话 primary action', () => {
+  it('invokes onNew from the 新建任务 primary action', () => {
     const onNew = vi.fn();
     const { getByText } = render(<Sidebar sessions={SESSIONS} activeId={null} onSelect={vi.fn()} onNew={onNew} onDelete={vi.fn()} onRename={vi.fn()} onExport={vi.fn()} {...PROJECT_PROPS} />);
-    const button = getByText('新对话')?.closest('button') as HTMLButtonElement;
+    const button = getByText('新建任务')?.closest('button') as HTMLButtonElement;
     fireClick(button);
     expect(onNew).toHaveBeenCalledOnce();
     expect(onNew).toHaveBeenCalledWith(button);
   });
 
-  it('navigates to Pull Request and 已安排 from the primary navigation', () => {
+  it('navigates to Pull Request and 自动化 from the bottom tools', () => {
     const onNavigate = vi.fn();
     const { getByText } = render(
       <Sidebar
@@ -217,7 +218,7 @@ describe('Sidebar', () => {
     );
     fireClick(getByText('Pull Request'));
     expect(onNavigate).toHaveBeenCalledWith('pull-requests');
-    fireClick(getByText('已安排'));
+    fireClick(getByText('自动化'));
     expect(onNavigate).toHaveBeenCalledWith('scheduled');
   });
 
@@ -235,14 +236,14 @@ describe('Sidebar', () => {
         {...PROJECT_PROPS}
       />,
     );
-    const btn = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+    const btn = Array.from(querySelectorAll('.sidebar-tool')).find(
       (el) => el.textContent && el.textContent.includes('Pull Request'),
     );
     expect(btn?.getAttribute('aria-current')).toBe('page');
-    expect(btn?.className).toContain('sidebar-primary-item--active');
+    expect(btn?.className).toContain('sidebar-tool--active');
   });
 
-  it('renders the bottom tools with 记忆, 文件 and 设置', () => {
+  it('renders the bottom tools with Pull Request, 记忆, 文件, 自动化 and 设置', () => {
     const onNavigate = vi.fn();
     const onOpenSettings = vi.fn();
     const { querySelectorAll } = render(
@@ -260,12 +261,16 @@ describe('Sidebar', () => {
       />,
     );
     const tools = Array.from(querySelectorAll('.sidebar-tool'));
-    expect(tools.map((el) => el.textContent)).toEqual(['记忆', '文件', '设置']);
+    expect(tools.map((el) => el.textContent)).toEqual(['Pull Request', '记忆', '文件', '自动化', '设置']);
     fireClick(tools[0]!);
-    expect(onNavigate).toHaveBeenCalledWith('memory');
+    expect(onNavigate).toHaveBeenCalledWith('pull-requests');
     fireClick(tools[1]!);
-    expect(onNavigate).toHaveBeenCalledWith('files');
+    expect(onNavigate).toHaveBeenCalledWith('memory');
     fireClick(tools[2]!);
+    expect(onNavigate).toHaveBeenCalledWith('files');
+    fireClick(tools[3]!);
+    expect(onNavigate).toHaveBeenCalledWith('scheduled');
+    fireClick(tools[4]!);
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 

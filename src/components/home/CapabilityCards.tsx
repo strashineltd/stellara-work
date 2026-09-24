@@ -14,11 +14,17 @@ interface CapabilityCardsProps {
 
 export function CapabilityCards({ onPick }: CapabilityCardsProps) {
   return (
-    <div className="capability-cards" role="group" aria-label="能力入口">
+    <div className="capability-cards" role="group" aria-label="最近使用">
       {CAPABILITY_CARDS.map((card) => (
-        <button key={card.id} className="capability-card" type="button" onClick={() => onPick(card.prompt)}>
-          <span className="capability-card__icon"><Icon name={card.icon} size={16} /></span>
+        <button
+          key={card.id}
+          className="capability-card"
+          type="button"
+          onClick={() => onPick(card.prompt)}
+        >
+          <span className="capability-card__icon" aria-hidden="true"><Icon name={card.icon} size={16} /></span>
           <span className="capability-card__label">{card.label}</span>
+          <Icon className="capability-card__arrow" name="arrow-right" size={14} />
         </button>
       ))}
     </div>

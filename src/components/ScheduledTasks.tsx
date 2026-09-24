@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type {
   ModelListItem, ProjectSummary, ScheduledRun, ScheduledTask, ScheduledTaskInput,
   ScheduledTaskKind, ScheduledTaskPolicy, ServerEntry,
@@ -49,6 +49,13 @@ const CRON_PRESETS: Array<{ label: string; expr: string }> = [
   { label: '每周一 9:00', expr: '0 9 * * 1' },
 ];
 
+type TaskFilter = 'all' | 'enabled' | 'disabled';
+
+interface RecentRunItem {
+  run: ScheduledRun;
+  task: ScheduledTask;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -68,6 +75,39 @@ function formatDuration(startedAt: number, finishedAt: number | null | undefined
   if (minutes < 60) return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
   const hours = Math.floor(minutes / 60);
   return `${hours} 小时 ${minutes % 60} 分`;
+}
+
+function scheduleSummary(task: ScheduledTask): string {
+  if (task.scheduleKind === 'once') {
+    const timestamp = Date.parse(task.scheduleExpr);
+    return Number.isNaN(timestamp) ? task.scheduleExpr : formatDateTime(timestamp);
+  }
+  if (task.scheduleKind === 'interval') {
+    const minutes = Number(task.scheduleExpr);
+    if (!Number.isFinite(minutes)) return task.scheduleExpr;
+    if (minutes >= 60 && minutes % 60 === 0) return `每 ${minutes / 60} 小时`;
+    return `每 ${minutes} 分钟`;
+  }
+
+  const fields = task.scheduleExpr.trim().split(/\s+/);
+  if (fields.length === 5) {
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+    const parsedMinute = Number(minute);
+    const parsedHour = Number(hour);
+    const hasFixedTime = Number.isInteger(parsedMinute) && Number.isInteger(parsedHour);
+    if (hasFixedTime && dayOfMonth === '*' && month === '*') {
+      const time = `${String(parsedHour).padStart(2, '0')}:${String(parsedMinute).padStart(2, '0')}`;
+      if (dayOfWeek === '*') return `每天 ${time}`;
+      const weekday = ['日', '一', '二', '三', '四', '五', '六'][Number(dayOfWeek)];
+      if (weekday) return `每周${weekday} ${time}`;
+    }
+  }
+  return task.scheduleExpr;
+}
+
+function basename(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.at(-1) ?? path;
 }
 
 /** ISO 字符串 → datetime-local 输入值（本地时区） */
@@ -96,6 +136,10 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
   const [servers, setServers] = useState<ServerEntry[]>([]);
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [recentRuns, setRecentRuns] = useState<RecentRunItem[]>([]);
+  const [recentRunsLoading, setRecentRunsLoading] = useState(false);
   const [editor, setEditor] = useState<{ present: boolean; task: ScheduledTask | null }>({
     present: false,
     task: null,
@@ -108,6 +152,26 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
   const historyPresence = usePresence(history.present);
   const editorReturnFocusRef = useRef<HTMLElement | null>(null);
   const historyReturnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const closeMenus = (event: PointerEvent) => {
+      document.querySelectorAll<HTMLDetailsElement>('details.scheduled-task-actions-menu[open]')
+        .forEach((menu) => {
+          if (!menu.contains(event.target as Node)) menu.removeAttribute('open');
+        });
+    };
+    const closeMenusOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      document.querySelectorAll<HTMLDetailsElement>('details.scheduled-task-actions-menu[open]')
+        .forEach((menu) => menu.removeAttribute('open'));
+    };
+    document.addEventListener('pointerdown', closeMenus);
+    document.addEventListener('keydown', closeMenusOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenus);
+      document.removeEventListener('keydown', closeMenusOnEscape);
+    };
+  }, []);
 
   const loadTasks = useCallback(async () => {
     try {
@@ -141,6 +205,53 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
       .catch(() => { /* ignore */ });
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const candidates = [...tasks]
+      .filter((task) => task.lastRunAt != null)
+      .sort((a, b) => (b.lastRunAt ?? 0) - (a.lastRunAt ?? 0))
+      .slice(0, 8);
+
+    if (candidates.length === 0) {
+      setRecentRuns([]);
+      setRecentRunsLoading(false);
+      return () => { alive = false; };
+    }
+
+    setRecentRunsLoading(true);
+    void Promise.allSettled(candidates.map(async (task) => ({
+      task,
+      runs: await window.electronAPI.scheduled.runs(task.id),
+    }))).then((results) => {
+      if (!alive) return;
+      const seen = new Set<string>();
+      const items: RecentRunItem[] = [];
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        for (const run of result.value.runs) {
+          if (seen.has(run.id)) continue;
+          seen.add(run.id);
+          items.push({ run, task: result.value.task });
+        }
+      }
+      items.sort((a, b) => b.run.startedAt - a.run.startedAt);
+      setRecentRuns(items.slice(0, 5));
+      setRecentRunsLoading(false);
+    });
+
+    return () => { alive = false; };
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => tasks.filter((task) => {
+    if (taskFilter === 'enabled' && !task.enabled) return false;
+    if (taskFilter === 'disabled' && task.enabled) return false;
+    if (projectFilter && task.projectId !== projectFilter) return false;
+    return true;
+  }), [projectFilter, taskFilter, tasks]);
+
+  const enabledCount = useMemo(() => tasks.filter((task) => task.enabled).length, [tasks]);
+  const disabledCount = tasks.length - enabledCount;
 
   function openEditor(task: ScheduledTask | null, returnFocus?: HTMLElement | null) {
     if (editor.present || history.present) return;
@@ -261,6 +372,14 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
     return server?.name ?? '服务器';
   }
 
+  function projectLabel(task: ScheduledTask): string {
+    if (task.projectId) {
+      return projects.find((project) => project.id === task.projectId)?.name ?? '未知项目';
+    }
+    if (task.workDir) return basename(task.workDir);
+    return task.runtime === 'server' ? runtimeLabel(task) : '未关联项目';
+  }
+
   function nextRunLabel(task: ScheduledTask): string {
     if (!task.enabled) return '已停用';
     if (task.nextRunAt == null) return '无';
@@ -276,8 +395,8 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
     <div className="scheduled-page" data-motion="page-enter" data-page="scheduled">
       <header className="scheduled-page__header">
         <div>
-          <h1>已安排</h1>
-          <p className="scheduled-page__sub">按计划自动运行本地或服务器任务；关闭窗口后可在后台继续</p>
+          <h1>自动化</h1>
+          <p className="scheduled-page__sub">按计划运行重复任务，并保留每次执行记录</p>
         </div>
         <button
           className="btn btn-primary"
@@ -315,90 +434,215 @@ export function ScheduledTasks({ onOpenSession }: ScheduledTasksProps) {
       )}
 
       {tasks.length > 0 && (
-        <div className="scheduled-task-list">
-          {tasks.map((task) => {
-            const pending = pendingActions.has(task.id);
-            const running = task.running === true;
-            return (
-              <div
-                key={task.id}
-                className="scheduled-task-row"
-                data-task-id={task.id}
-                data-enabled={task.enabled}
-              >
-                <div className="scheduled-task-row__main">
-                  <div className="scheduled-task-row__title">
-                    <strong>{task.name}</strong>
-                    <span className={`scheduled-badge scheduled-badge--${task.runtime}`}>
-                      {runtimeLabel(task)}
-                    </span>
-                    <span className="scheduled-badge scheduled-badge--kind">
-                      {KIND_LABELS[task.scheduleKind] ?? task.scheduleKind}
-                    </span>
+        <>
+          <div className="scheduled-page__filters">
+            <div className="scheduled-filter-tabs" role="group" aria-label="按任务状态筛选">
+              {([
+                ['all', '全部', tasks.length],
+                ['enabled', '运行中', enabledCount],
+                ['disabled', '已暂停', disabledCount],
+              ] as const).map(([value, label, count]) => (
+                <button
+                  key={value}
+                  className={`scheduled-filter-tab${taskFilter === value ? ' is-active' : ''}`}
+                  type="button"
+                  aria-pressed={taskFilter === value}
+                  onClick={() => setTaskFilter(value)}
+                >
+                  {label} <span>{count}</span>
+                </button>
+              ))}
+            </div>
+            <select
+              className="scheduled-page__project-filter"
+              aria-label="按项目筛选"
+              value={projectFilter}
+              onChange={(event) => setProjectFilter(event.target.value)}
+            >
+              <option value="">所有项目</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="scheduled-task-list" role="table" aria-label="自动化任务">
+            <div className="scheduled-task-list__head" role="row">
+              <span role="columnheader">名称</span>
+              <span role="columnheader">计划</span>
+              <span role="columnheader">项目</span>
+              <span role="columnheader">下次运行</span>
+              <span role="columnheader">状态</span>
+              <span role="columnheader" aria-label="操作" />
+            </div>
+
+            {filteredTasks.map((task) => {
+              const pending = pendingActions.has(task.id);
+              const running = task.running === true;
+              return (
+                <div
+                  key={task.id}
+                  className="scheduled-task-row"
+                  data-task-id={task.id}
+                  data-enabled={task.enabled}
+                  role="row"
+                >
+                  <div className="scheduled-task-row__main" role="cell">
+                    <div className="scheduled-task-row__title">
+                      <strong>{task.name}</strong>
+                    </div>
+                    <p className="scheduled-task-row__prompt" title={task.prompt}>{task.prompt}</p>
+                    <div className="scheduled-task-row__meta">
+                      <span className={`scheduled-badge scheduled-badge--${task.runtime}`}>
+                        {runtimeLabel(task)}
+                      </span>
+                      <span>最近：{lastStatusLabel(task)}</span>
+                      <span>{task.runtime === 'server' ? '由远端治理' : policySummary(task.policy)}</span>
+                    </div>
                   </div>
-                  <p className="scheduled-task-row__prompt" title={task.prompt}>{task.prompt}</p>
-                  <div className="scheduled-task-row__meta">
-                    <span>下次运行：{nextRunLabel(task)}</span>
-                    <span>最近：{lastStatusLabel(task)}</span>
-                    <span>{task.runtime === 'server' ? '由远端治理' : policySummary(task.policy)}</span>
+                  <div className="scheduled-task-row__schedule" role="cell">
+                    <span>{scheduleSummary(task)}</span>
+                    <small>{KIND_LABELS[task.scheduleKind] ?? task.scheduleKind}</small>
                   </div>
-                </div>
-                <div className="scheduled-task-row__actions">
-                  <button
-                    className="btn btn-ghost btn-small"
-                    type="button"
-                    onClick={() => void handleRunNow(task)}
-                    disabled={running || pending}
-                  >
-                    立即运行
-                  </button>
-                  {running && (
+                  <div className="scheduled-task-row__project" role="cell">
+                    <Icon name={task.runtime === 'server' ? 'server' : 'monitor'} size={15} />
+                    <span>{projectLabel(task)}</span>
+                  </div>
+                  <div className="scheduled-task-row__next" role="cell">
+                    <span className="scheduled-task-row__cell-label">下次运行：</span>
+                    {nextRunLabel(task)}
+                  </div>
+                  <div className="scheduled-task-row__state" role="cell">
+                    <span className={`scheduled-state-dot${task.enabled ? ' is-enabled' : ''}`} aria-hidden="true" />
+                    {task.enabled ? (running ? '运行中' : '启用') : '已暂停'}
+                  </div>
+                  <div className="scheduled-task-row__actions" role="cell">
                     <button
-                      className="btn btn-ghost btn-small"
+                      className={`settings-switch${task.enabled ? ' on' : ''}`}
+                      role="switch"
+                      aria-checked={task.enabled}
+                      aria-label={`${task.name}：启用或停用`}
+                      title={task.enabled ? '停用该任务' : '启用该任务'}
                       type="button"
-                      onClick={() => void handleAbort(task)}
+                      onClick={() => void handleToggle(task)}
                       disabled={pending}
-                    >
-                      停止
-                    </button>
-                  )}
-                  <button
-                    className="btn btn-ghost btn-small"
-                    type="button"
-                    onClick={(event) => openEditor(task, event.currentTarget)}
-                  >
-                    编辑
-                  </button>
-                  <button
-                    className="btn btn-ghost btn-small"
-                    type="button"
-                    onClick={() => void handleDelete(task)}
-                    disabled={pending}
-                  >
-                    删除
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-small"
-                    type="button"
-                    onClick={(event) => openHistory(task, event.currentTarget)}
-                  >
-                    历史
-                  </button>
-                  <button
-                    className={`settings-switch${task.enabled ? ' on' : ''}`}
-                    role="switch"
-                    aria-checked={task.enabled}
-                    aria-label={`${task.name}：启用或停用`}
-                    title={task.enabled ? '停用该任务' : '启用该任务'}
-                    type="button"
-                    onClick={() => void handleToggle(task)}
-                    disabled={pending}
-                  />
+                    />
+                    <details className="scheduled-task-actions-menu">
+                      <summary className="btn-icon btn-icon-small" aria-label={`${task.name}：更多操作`}>
+                        <Icon name="more" size={16} />
+                      </summary>
+                      <div className="scheduled-task-actions-menu__popover" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            void handleRunNow(task);
+                          }}
+                          disabled={running || pending}
+                        >
+                          立即运行
+                        </button>
+                        {running && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              void handleAbort(task);
+                            }}
+                            disabled={pending}
+                          >
+                            停止
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            openEditor(task, event.currentTarget);
+                          }}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            openHistory(task, event.currentTarget);
+                          }}
+                        >
+                          历史
+                        </button>
+                        <button
+                          className="is-danger"
+                          type="button"
+                          role="menuitem"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            void handleDelete(task);
+                          }}
+                          disabled={pending}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </details>
+                  </div>
                 </div>
+              );
+            })}
+
+            {filteredTasks.length === 0 && (
+              <p className="scheduled-page__hint scheduled-task-list__empty">没有符合筛选条件的任务</p>
+            )}
+          </div>
+
+          <section className="scheduled-recent" aria-labelledby="scheduled-recent-title">
+            <h2 id="scheduled-recent-title">最近运行</h2>
+            {recentRunsLoading && <p className="scheduled-page__hint" role="status">加载运行记录…</p>}
+            {!recentRunsLoading && recentRuns.length === 0 && (
+              <p className="scheduled-page__hint">暂无运行记录</p>
+            )}
+            {!recentRunsLoading && recentRuns.length > 0 && (
+              <div className="scheduled-recent__table" role="table" aria-label="最近运行记录">
+                <div className="scheduled-recent__head" role="row">
+                  <span role="columnheader">状态</span>
+                  <span role="columnheader">任务名称</span>
+                  <span role="columnheader">运行时间</span>
+                  <span role="columnheader">耗时</span>
+                  <span role="columnheader">操作</span>
+                </div>
+                {recentRuns.map(({ run, task }) => (
+                  <div
+                    key={run.id}
+                    className="scheduled-recent__row"
+                    data-status={run.status}
+                    role="row"
+                  >
+                    <span className={`scheduled-status scheduled-status--${run.status}`} role="cell">
+                      {RUN_STATUS_LABELS[run.status] ?? run.status}
+                    </span>
+                    <strong role="cell">{task.name}</strong>
+                    <time role="cell">{formatDateTime(run.startedAt)}</time>
+                    <span role="cell">{formatDuration(run.startedAt, run.finishedAt)}</span>
+                    <span role="cell">
+                      <button
+                        className="btn btn-ghost btn-small"
+                        type="button"
+                        onClick={(event) => openHistory(task, event.currentTarget)}
+                      >
+                        查看任务
+                      </button>
+                    </span>
+                  </div>
+                ))}
               </div>
-            );
-          })}
-        </div>
+            )}
+          </section>
+        </>
       )}
 
       {editorPresence.mounted && (

@@ -782,52 +782,11 @@ export function Sidebar({
     <>
       <aside className="sidebar" {...presenceRootProps(presence)}>
       <nav className="sidebar-primary" aria-label="主要导航">
-        <button className="sidebar-primary-item" type="button" onClick={(event) => onNew(event.currentTarget)}>
+        <button className="sidebar-primary-item sidebar-primary-item--new" type="button" onClick={(event) => onNew(event.currentTarget)}>
           <Icon name="plus" size={15} />
-          <span>新对话</span>
-        </button>
-        <button
-          className={`sidebar-primary-item${activeSection === 'pull-requests' ? ' sidebar-primary-item--active' : ''}`}
-          type="button"
-          aria-current={activeSection === 'pull-requests' ? 'page' : undefined}
-          onClick={() => onNavigate('pull-requests')}
-        >
-          <Icon name="copy" size={15} />
-          <span>Pull Request</span>
-        </button>
-        <button
-          className={`sidebar-primary-item${activeSection === 'scheduled' ? ' sidebar-primary-item--active' : ''}`}
-          type="button"
-          aria-current={activeSection === 'scheduled' ? 'page' : undefined}
-          onClick={() => onNavigate('scheduled')}
-        >
-          <Icon name="calendar" size={15} />
-          <span>已安排</span>
+          <span>新建任务</span>
         </button>
       </nav>
-
-      <div className="sidebar-library-heading">
-        <span>项目与会话</span>
-        <span>{sessions.length}</span>
-      </div>
-
-      {/* New session / New project buttons */}
-      <div className="sidebar-header">
-        <button className="btn-new-session" onClick={(event) => onNew(event.currentTarget)} type="button">
-          <Icon name="plus" size={15} />
-          <span>新建会话</span>
-        </button>
-        <button
-          className="btn-new-project"
-          onClick={(event) => onProjectCreate(event.currentTarget)}
-          type="button"
-          title="新建项目"
-          aria-label="新建项目"
-        >
-          <Icon name="folder" size={14} />
-          <span>项目</span>
-        </button>
-      </div>
 
       {projectFeedback && (
         <div
@@ -865,6 +824,24 @@ export function Sidebar({
         )}
       </div>
 
+      <div className="sidebar-library-heading">
+        <span>任务</span>
+        <span>{sessions.length}</span>
+      </div>
+
+      <div className="sidebar-header">
+        <button
+          className="btn-new-project"
+          onClick={(event) => onProjectCreate(event.currentTarget)}
+          type="button"
+          title="新建项目"
+          aria-label="新建项目"
+        >
+          <Icon name="folder" size={14} />
+          <span>新建项目</span>
+        </button>
+      </div>
+
       {/* 项目筛选 */}
       <div className="sidebar-filter">
         <select
@@ -882,7 +859,7 @@ export function Sidebar({
       </div>
 
       {/* Project tree */}
-      <ul className="session-list">
+      <ul className="session-list" aria-label="项目会话">
         {/* 有项目的会话分组 */}
         {renderedProjects.map((p) => {
           if (projectFilter !== 'all' && projectFilter !== p.id) return null;
@@ -931,13 +908,41 @@ export function Sidebar({
       )}
 
       <div className="sidebar-tools">
-        <button className="sidebar-tool" type="button" onClick={() => onNavigate('memory')}>
+        <button
+          className={`sidebar-tool${activeSection === 'pull-requests' ? ' sidebar-tool--active' : ''}`}
+          type="button"
+          aria-current={activeSection === 'pull-requests' ? 'page' : undefined}
+          onClick={() => onNavigate('pull-requests')}
+        >
+          <Icon name="copy" size={15} />
+          <span>Pull Request</span>
+        </button>
+        <button
+          className={`sidebar-tool${activeSection === 'memory' ? ' sidebar-tool--active' : ''}`}
+          type="button"
+          aria-current={activeSection === 'memory' ? 'page' : undefined}
+          onClick={() => onNavigate('memory')}
+        >
           <Icon name="database" size={15} />
           <span>记忆</span>
         </button>
-        <button className="sidebar-tool" type="button" onClick={() => onNavigate('files')}>
+        <button
+          className={`sidebar-tool${activeSection === 'files' ? ' sidebar-tool--active' : ''}`}
+          type="button"
+          aria-current={activeSection === 'files' ? 'page' : undefined}
+          onClick={() => onNavigate('files')}
+        >
           <Icon name="file-tree" size={15} />
           <span>文件</span>
+        </button>
+        <button
+          className={`sidebar-tool${activeSection === 'scheduled' ? ' sidebar-tool--active' : ''}`}
+          type="button"
+          aria-current={activeSection === 'scheduled' ? 'page' : undefined}
+          onClick={() => onNavigate('scheduled')}
+        >
+          <Icon name="calendar" size={15} />
+          <span>自动化</span>
         </button>
         <button className="sidebar-tool" type="button" onClick={onOpenSettings}>
           <Icon name="settings" size={15} />

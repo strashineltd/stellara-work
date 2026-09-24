@@ -54,7 +54,8 @@ describe('HomeView', () => {
 
   it('shows greeting, four capability cards and composer without account UI', () => {
     const { container, unmount } = render(<HomeView {...BASE_PROPS} />);
-    expect(container.textContent).toContain('你想让我们在 Stellara Work 中构建什么?');
+    expect(container.textContent).toContain('开始一个新任务');
+    expect(container.textContent).toContain('最近使用');
     expect(container.textContent).toContain('探索并理解代码');
     expect(container.textContent).toContain('构建新功能、应用或工具');
     expect(container.textContent).toContain('审查代码并提出修改建议');

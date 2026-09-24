@@ -311,101 +311,105 @@ export function MemoryCenter() {
         </div>
       </header>
 
-      <div className="memory-center__toolbar">
-        <div className="memory-center__search">
-          <Icon name="search" size={14} />
-          <input
-            ref={searchInputRef}
-            className="memory-center__search-input"
-            type="text"
-            placeholder="搜索记忆内容、标签…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <select
-          className="memory-center__select"
-          aria-label="按类型筛选"
-          value={filterKind}
-          onChange={(e) => setFilterKind(e.target.value as Memory['kind'] | '')}
-        >
-          <option value="">全部类型</option>
-          {KIND_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="memory-center__select"
-          aria-label="按作用域筛选"
-          value={filterScope}
-          onChange={(e) => setFilterScope(e.target.value as Memory['scope'] | '')}
-        >
-          <option value="">全部作用域</option>
-          {SCOPE_CHIPS.slice(1).map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="memory-chips">
-        {SCOPE_CHIPS.map((chip) => (
-          <button
-            key={chip.value}
-            type="button"
-            className={`memory-chip${filterScope === chip.value ? ' memory-chip--active' : ''}`}
-            onClick={() => setFilterScope(chip.value)}
-          >
-            {chip.label}
-            <span className="memory-chip__count">{chipCount(chip.value)}</span>
-          </button>
-        ))}
-      </div>
-
-      {loading && <p>加载中...</p>}
-
-      {!loading && memories.length > 0 && (
-        <>
-          {pinned.length > 0 && (
-            <section className="memory-section">
-              <h2 className="memory-section__label">
-                <span className="memory-section__star">★</span>重要记忆
-                <span className="memory-section__count">{pinned.length}</span>
-              </h2>
-              {pinned.map(renderCard)}
-            </section>
-          )}
-          {recent.length > 0 && (
-            <section className="memory-section">
-              <h2 className="memory-section__label">
-                最近记忆
-                <span className="memory-section__count">{recent.length}</span>
-              </h2>
-              {recent.map(renderCard)}
-            </section>
-          )}
-        </>
-      )}
-
-      {!loading && memories.length === 0 && (
-        <div className="memory-empty">
-          <div className="memory-empty__art">
-            <Icon name="database" size={30} />
+      <div className="memory-center__content">
+        <div className="memory-center__toolbar">
+          <div className="memory-center__search">
+            <Icon name="search" size={14} />
+            <input
+              ref={searchInputRef}
+              className="memory-center__search-input"
+              type="search"
+              aria-label="搜索记忆"
+              placeholder="搜索记忆内容、标签…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
-          <h3>还没有记忆</h3>
-          <p>Agent 会在任务中自动沉淀要点，你也可以手动记录</p>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={(event) => openEditor(null, event.currentTarget)}
+          <select
+            className="memory-center__select"
+            aria-label="按类型筛选"
+            value={filterKind}
+            onChange={(e) => setFilterKind(e.target.value as Memory['kind'] | '')}
           >
-            新建记忆
-          </button>
+            <option value="">全部类型</option>
+            {KIND_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className="memory-center__select"
+            aria-label="按作用域筛选"
+            value={filterScope}
+            onChange={(e) => setFilterScope(e.target.value as Memory['scope'] | '')}
+          >
+            <option value="">全部作用域</option>
+            {SCOPE_CHIPS.slice(1).map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
-      )}
+
+        <div className="memory-chips" aria-label="按作用域快速筛选">
+          {SCOPE_CHIPS.map((chip) => (
+            <button
+              key={chip.value}
+              type="button"
+              className={`memory-chip${filterScope === chip.value ? ' memory-chip--active' : ''}`}
+              aria-pressed={filterScope === chip.value}
+              onClick={() => setFilterScope(chip.value)}
+            >
+              {chip.label}
+              <span className="memory-chip__count">{chipCount(chip.value)}</span>
+            </button>
+          ))}
+        </div>
+
+        {loading && <p className="memory-center__status" role="status">加载中…</p>}
+
+        {!loading && memories.length > 0 && (
+          <div className="memory-center__list">
+            {pinned.length > 0 && (
+              <section className="memory-section">
+                <h2 className="memory-section__label">
+                  <span className="memory-section__star" aria-hidden="true">★</span>重要记忆
+                  <span className="memory-section__count">{pinned.length}</span>
+                </h2>
+                {pinned.map(renderCard)}
+              </section>
+            )}
+            {recent.length > 0 && (
+              <section className="memory-section">
+                <h2 className="memory-section__label">
+                  最近记忆
+                  <span className="memory-section__count">{recent.length}</span>
+                </h2>
+                {recent.map(renderCard)}
+              </section>
+            )}
+          </div>
+        )}
+
+        {!loading && memories.length === 0 && (
+          <div className="memory-empty">
+            <div className="memory-empty__art">
+              <Icon name="database" size={30} />
+            </div>
+            <h3>还没有记忆</h3>
+            <p>Agent 会在任务中自动沉淀要点，你也可以手动记录</p>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={(event) => openEditor(null, event.currentTarget)}
+            >
+              新建记忆
+            </button>
+          </div>
+        )}
+      </div>
 
       {deletePresence.mounted && deletion.memory && (
         <MemoryDeleteDialog

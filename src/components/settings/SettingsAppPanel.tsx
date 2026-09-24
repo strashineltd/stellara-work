@@ -128,7 +128,7 @@ export function SettingsAppPanel({ onChanged, refreshKey = 0 }: SettingsAppPanel
   }
 
   const theme = settings.theme ?? 'dark';
-  const workspaceMode = settings.workspaceMode ?? 'sidebar';
+  const workspaceMode = settings.workspaceMode ?? 'tabs';
   const compactionSummaryEnabled = settings.contextCompactionSummaryEnabled !== false;
   const backgroundScheduling = settings.backgroundScheduling !== false;
 

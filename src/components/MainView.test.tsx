@@ -863,7 +863,8 @@ describe('MainView shell navigation', () => {
     expect(querySelector('.app-topbar')).not.toBeNull();
     expect(querySelector('.home-view')).not.toBeNull();
     expect(querySelector('.home-composer')).not.toBeNull();
-    expect(container.textContent).toContain('你想让我们在 Stellara Work 中构建什么?');
+    expect(container.textContent).toContain('开始一个新任务');
+    expect(container.textContent).toContain('最近使用');
   });
 
   it('prefills the composer when a capability card is clicked', async () => {
@@ -1680,7 +1681,7 @@ describe('MainView command and task modal presence', () => {
     expect(paletteBackdrop.dataset.motionState).toBe('closing');
   });
 
-  it('falls back to the sidebar create-project button when New Session removes its TabBar trigger', async () => {
+  it('restores focus to the persistent TabBar trigger after cancelling New Session', async () => {
     view = await renderMainView({ projects: [] });
     const trigger = view.querySelector('[aria-label="新建会话标签页"]') as HTMLButtonElement;
     trigger.focus();
@@ -1689,12 +1690,12 @@ describe('MainView command and task modal presence', () => {
 
     const dialog = document.body.querySelector('.project-dialog') as HTMLElement;
     const cancel = Array.from(dialog.querySelectorAll('button')).find((button) => button.textContent?.includes('取消'))!;
-    expect(trigger.isConnected).toBe(false);
+    expect(trigger.isConnected).toBe(true);
     expect(document.activeElement).toBe(dialog.querySelector('#project-dialog-name'));
 
     fireClick(cancel);
 
-    expect(document.activeElement).toBe(view.querySelector('[aria-label="新建项目"]'));
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('falls back to the sidebar create-project button for native-menu New Session', async () => {
@@ -1939,7 +1940,7 @@ describe('MainView page entrance markers', () => {
     expect(homeRoot).toBeTruthy();
 
     act(() => {
-      const prNav = Array.from(querySelectorAll('.sidebar-primary-item')).find(
+      const prNav = Array.from(querySelectorAll('.sidebar-tool')).find(
         (el) => el.textContent?.includes('Pull Request'),
       );
       prNav?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

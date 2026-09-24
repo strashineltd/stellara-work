@@ -16,8 +16,8 @@ interface AppTopBarProps {
 
 export function AppTopBar(props: AppTopBarProps) {
   return (
-    <header className="app-topbar">
-      <div className="app-topbar__nav">
+    <header className="app-topbar" aria-label="应用工具栏">
+      <div className="app-topbar__nav" role="group" aria-label="历史导航">
         <button className="btn-icon app-topbar__nav-button" type="button" aria-label="后退" disabled={!props.canGoBack} onClick={props.onBack}>
           <Icon name="chevron-left" size={15} />
         </button>
@@ -25,8 +25,8 @@ export function AppTopBar(props: AppTopBarProps) {
           <Icon name="chevron-right" size={15} />
         </button>
       </div>
-      <div className="app-topbar__center" />
-      <div className="app-topbar__actions">
+      <div className="app-topbar__center" aria-hidden="true" />
+      <div className="app-topbar__actions" role="group" aria-label="工作区控制">
         {props.executionTarget ?? (
           <span className="execution-target-chip">
             <Icon name="server" size={13} />

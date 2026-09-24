@@ -31,6 +31,7 @@ import { PlaceholderPage } from './shell/PlaceholderPage';
 import { ScheduledTasks } from './ScheduledTasks';
 import { CommandPalette } from './CommandPalette';
 import { BrowserTab, isBrowserStreamEvent } from './BrowserTab';
+import { Icon } from './Icon';
 import { type OpenSettings } from './SettingsPanel';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useServers } from '../hooks/useServers';
@@ -91,12 +92,16 @@ export function MainView(props: MainViewProps) {
   void _info;
 
   const tabBarTabs = useMemo<TabBarTab[]>(() =>
-    sessions.map((s) => ({
-      id: s.id,
-      title: s.title,
-      status: s.id === activeSessionId ? 'active' : 'idle',
-    })),
-    [sessions, activeSessionId],
+    sessions.map((session) => {
+      const project = projects.find((candidate) => candidate.id === session.projectId);
+      return {
+        id: session.id,
+        title: project?.name ?? session.title,
+        status: session.id === activeSessionId ? 'active' : 'idle',
+        icon: session.runtime === 'server' ? 'server' : 'monitor',
+      };
+    }),
+    [sessions, projects, activeSessionId],
   );
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const activeProject = projects.find((project) => project.id === activeSession?.projectId);
@@ -1120,30 +1125,50 @@ export function MainView(props: MainViewProps) {
           />
         )}
         <div className="main-content">
+          {workspaceMode === 'tabs' && (
+            <TabBar
+              tabs={tabBarTabs}
+              activeId={activeSessionId ?? ''}
+              onSelect={handleSelectSession}
+              onClose={(id) => void handleDeleteSession(id)}
+              onNewTab={(returnFocus) => void handleNewSession(undefined, returnFocus)}
+              onRename={(id) => {
+                const tab = sessions.find((session) => session.id === id);
+                if (tab) {
+                  const newTitle = prompt('重命名会话', tab.title);
+                  if (newTitle) void handleRenameSession(id, newTitle);
+                }
+              }}
+              onCloseOthers={(keepId) => {
+                const others = sessions.filter((session) => session.id !== keepId);
+                if (others.length === 0) return;
+                if (!window.confirm(`关闭并删除其他 ${others.length} 个会话？该操作不可撤销。`)) return;
+                for (const session of others) void handleDeleteSession(session.id, true);
+              }}
+            />
+          )}
           {activeSection === 'tasks' ? (
             <>
-              {workspaceMode === 'tabs' && (
-                <TabBar
-                  tabs={tabBarTabs}
-                  activeId={activeSessionId ?? ''}
-                  onSelect={handleSelectSession}
-                  onClose={(id) => void handleDeleteSession(id)}
-                  onNewTab={(returnFocus) => void handleNewSession(undefined, returnFocus)}
-                  onRename={(id) => {
-                    const tab = sessions.find((s) => s.id === id);
-                    if (tab) {
-                      const newTitle = prompt('重命名会话', tab.title);
-                      if (newTitle) void handleRenameSession(id, newTitle);
-                    }
-                  }}
-                  onCloseOthers={(keepId) => {
-                    const others = sessions.filter((s) => s.id !== keepId);
-                    if (others.length === 0) return;
-                    if (!window.confirm(`关闭并删除其他 ${others.length} 个会话？该操作不可撤销。`)) return;
-                    for (const s of others) void handleDeleteSession(s.id, true);
-                  }}
-                />
-              )}
+              <header className="task-page-header">
+                <h1>{activeSession?.title ?? '新任务'}</h1>
+                <div className="task-page-header__actions">
+                  {branch && (
+                    <span className="task-page-header__branch">
+                      <Icon name="file-tree" size={15} />
+                      {branch}
+                    </span>
+                  )}
+                  <button
+                    className="btn btn-secondary btn-small"
+                    type="button"
+                    aria-pressed={props.workspaceOpen}
+                    onClick={props.onToggleWorkspace}
+                  >
+                    <Icon name="file" size={15} />
+                    查看更改
+                  </button>
+                </div>
+              </header>
               {browserPanelOpen && activeSessionId && (
                 <BrowserTab
                   sessionId={activeSessionId}

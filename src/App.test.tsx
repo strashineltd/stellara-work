@@ -337,7 +337,7 @@ describe('App identity change', () => {
 
     const container = await renderApp();
     expect(container.textContent).toContain('Session A');
-    expect(container.querySelector('.session-row--active')?.getAttribute('data-session-id')).toBe('session-a');
+    expect(container.querySelector('[data-tab-id="session-a"]')?.getAttribute('aria-selected')).toBe('true');
 
     switched = true;
     await act(async () => {
@@ -351,6 +351,7 @@ describe('App identity change', () => {
     expect(container.textContent).toContain('Session B');
     expect(container.textContent).not.toContain('Session A');
     expect(container.textContent).toContain('项目 B');
-    expect(container.querySelector('.session-row--active')).toBeNull();
+    expect(container.querySelector('[data-tab-id="session-b"]')?.getAttribute('aria-selected')).toBe('false');
+    expect(container.querySelector('.tab-chip[aria-selected="true"]')).toBeNull();
   });
 });
