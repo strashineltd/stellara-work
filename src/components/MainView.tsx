@@ -108,6 +108,8 @@ export function MainView(props: MainViewProps) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
   const [clearTask, setClearTask] = useState<{ present: boolean; entryCount: number }>({
     present: false,
     entryCount: 0,
@@ -420,18 +422,36 @@ export function MainView(props: MainViewProps) {
     return () => { cancelled = true; };
   }, [activeSessionId, serverOffline]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save: debounce 300ms
+  // Auto-save：空闲 300ms；流式中 2s（P1b，避免每 token 全量 DELETE+INSERT）；
+  // busy 结束后立刻补一次短延迟保存并刷新列表。
   useEffect(() => {
     if (!activeSessionId) return;
     if (entriesSessionRef.current !== activeSessionId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
+    const delay = busy ? 2000 : 300;
     saveTimer.current = setTimeout(() => {
       void window.electronAPI.sessions.saveMessages(activeSessionId, entriesToMessages(entries, activeSessionId))
-        .then(() => window.electronAPI.sessions.list())
-        .then(onSessionsChanged)
+        .then(() => {
+          // 流式中不刷全量 session 列表，避免侧栏/Tab 因 updated_at 跳动
+          if (busyRef.current) return;
+          return window.electronAPI.sessions.list().then(onSessionsChanged);
+        })
         .catch((e) => console.error('Auto-save failed:', e));
-    }, 300);
-  }, [entries, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, delay);
+  }, [entries, activeSessionId, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 流结束（busy→false）立即落盘一次，不必等 2s 窗
+  useEffect(() => {
+    if (busy) return;
+    if (!activeSessionId) return;
+    if (entriesSessionRef.current !== activeSessionId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void window.electronAPI.sessions.saveMessages(activeSessionId, entriesToMessages(entriesRef.current, activeSessionId))
+        .then(() => window.electronAPI.sessions.list().then(onSessionsChanged))
+        .catch((e) => console.error('Auto-save failed:', e));
+    }, 50);
+  }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 身份切换前由调用方 await runAutosaveFlush()：在主进程切换活动身份之前先落盘，
   // 否则旧身份会话的写入会被 assertSessionOwned 拒绝，最后一条消息丢失。
@@ -476,6 +496,7 @@ export function MainView(props: MainViewProps) {
   }, [reducedMotion]);
 
   // 原生菜单（macOS）动作：命令面板 / 新建会话 / 打开路径（App 已处理 open-settings）
+  // P13：依赖空数组，避免每个流式 token 重挂全局监听
   useEffect(() => {
     const onMenuAction = (e: Event) => {
       const action = (e as CustomEvent<string>).detail;
@@ -489,7 +510,8 @@ export function MainView(props: MainViewProps) {
     };
     window.addEventListener('menu-action', onMenuAction);
     return () => window.removeEventListener('menu-action', onMenuAction);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // M2.4: Finder/ Dock 拖入的文件 → 打开所在项目（或跳到首页）
   function handleOpenPath(filePath: string) {

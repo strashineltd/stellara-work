@@ -43,10 +43,10 @@ const ALLOWED_COMMANDS_POSIX = new Set([
   'cut', 'sort', 'uniq', 'wc', 'diff',
   // macOS / Linux 构建链
   'make', 'cmake', 'ninja', 'clang', 'clang++', 'cc', 'gcc', 'g++',
-  // macOS 专属开发命令
-  'swift', 'swiftc', 'swiftformat', 'swiftlint', 'xcrun', 'xcodebuild', 'brew',
-  'plutil', 'mdls',
-  // macOS 系统信息（只读）
+  // macOS 专属开发命令（brew/plutil 已移除：可装软件/改写系统文件）
+  'swift', 'swiftc', 'swiftformat', 'swiftlint', 'xcrun', 'xcodebuild',
+  'mdls',
+  // macOS 系统信息（只读子命令见 SUBCOMMAND_ALLOWLIST）
   'sw_vers', 'sysctl', 'defaults', 'diskutil',
   // 只读系统信息（POSIX / macOS）
   'stat', 'du', 'df', 'file',
@@ -67,7 +67,8 @@ const SUBCOMMAND_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     'status', 'diff', 'log', 'show', 'branch', 'add', 'commit', 'checkout', 'switch',
     'restore', 'stash', 'pull', 'push', 'fetch', 'merge', 'rebase', 'cherry-pick',
     'tag', 'remote', 'rev-parse', 'ls-files', 'rev-list', 'describe', 'config',
-    'blame', 'grep', 'clean', 'init', 'clone',
+    'blame', 'grep', 'init', 'clone',
+    // clean 已移除：git clean -fdx 可批量删除未跟踪文件（S7）
   ]),
   npm: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
   pnpm: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
@@ -81,6 +82,9 @@ const SUBCOMMAND_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   gradle: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
   mvn: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
   swift: new Set(['build', 'test', 'clean', 'run', 'package', 'install', 'verify', 'check']),
+  // S7：系统工具只保留只读动词（write/unmount/erase/install 一律拒绝）
+  defaults: new Set(['read', 'read-type', 'find', 'help']),
+  diskutil: new Set(['list', 'info', 'activity']),
 };
 
 /** 通用 safe form：版本/帮助查询。仅当它是唯一参数时免子命令检查；不包含 -v（与 pip/cargo 的 -v 语义冲突）。 */
@@ -981,7 +985,7 @@ export const shellTools: OpenAITool[] = [
     function: {
       name: 'run_command',
       description:
-        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。有子命令白名单的命令（npm/git/cargo/go/pip/swift/xcodebuild 等），第一个参数必须是子命令（仅可单独使用 --version/-V/-h/--help 查询版本/帮助）。解释器（node/python/sh/bash/sed 等）与网络工具（curl/wget/ssh/scp 等）已整体移除：联网获取资源请用 web_fetch 或浏览器工具。find 禁止 -delete/-exec/-fprint* 等写或执行形式。npm install/npm run/cargo build 等会执行项目内代码（安装脚本、构建脚本、Makefile 等），属于需用户审批的敏感操作。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
+        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令；无 clean）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。有子命令白名单的命令（npm/git/cargo/go/pip/swift/xcodebuild 等），第一个参数必须是子命令（仅可单独使用 --version/-V/-h/--help 查询版本/帮助）。defaults/diskutil 仅只读子命令；解释器（node/python/sh/bash/sed 等）、网络工具（curl/wget/ssh/scp 等）与 brew/plutil 已移除：联网获取资源请用 web_fetch 或浏览器工具。find 禁止 -delete/-exec/-fprint* 等写或执行形式。npm install/npm run/cargo build 等会执行项目内代码（安装脚本、构建脚本、Makefile 等），属于需用户审批的敏感操作。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
       parameters: {
         type: 'object',
         properties: {

@@ -22,6 +22,7 @@ import { SubagentCoordinator, type SubagentContextPacket } from './subagent-coor
 import { setSubagentRunner } from './tools/dispatch-subagents';
 import { clampApprovalTimeout } from '../chat/approval-timing';
 import { requiresNativeConfirm } from '../chat/tool-confirm';
+import { createStreamCoalescer } from './stream-coalescer';
 import { runResponsesLoop } from './responses-loop';
 import { runAnthropicAgentLoop } from './anthropic-loop';
 
@@ -60,12 +61,15 @@ export async function runAgentSession(
   model: ModelConfig,
   streamId: string,
 ): Promise<void> {
-  const send = (event: ChatStreamEvent) => {
+  const rawSend = (event: ChatStreamEvent) => {
     const win = deps.getWindow();
     if (win && !win.isDestroyed()) {
       win.webContents.send('chat-stream', { streamId, event });
     }
   };
+  // P1a：合并 content/reasoning 碎片，降低 IPC 与渲染层重绘频率
+  const coalescer = createStreamCoalescer(rawSend);
+  const send = coalescer.send;
 
   // 记忆注入按项目 + 归属身份检索：解析会话所属项目与身份
   let memoryProjectId: string | undefined;
@@ -168,11 +172,16 @@ export async function runAgentSession(
     let skills: SkillDef[] = [];
     let activeSkill: SkillDef | undefined;
     try {
-      const { loadSkillsWithErrors, findSkill } = await import('./skills');
+      const { loadSkillsWithErrors, findSkill, wrapUntrustedSkillPrompt } = await import('./skills');
       const { items } = await loadSkillsWithErrors(cwd);
-      skills = items.filter((s) => s.enabled !== false);
+      // S15：仅注入显式启用的技能；正文在使用时再包不可信标记
+      const enabledItems = items.filter((s) => s.enabled === true);
+      skills = enabledItems;
       if (request.activeSkillName) {
-        activeSkill = findSkill(items.filter((s) => s.enabled !== false), request.activeSkillName) ?? undefined;
+        activeSkill = findSkill(enabledItems, request.activeSkillName) ?? undefined;
+        if (activeSkill) {
+          activeSkill = { ...activeSkill, prompt: wrapUntrustedSkillPrompt(activeSkill.prompt) };
+        }
       }
     } catch {
       // skills 加载失败不影响 agent 运行
@@ -269,12 +278,14 @@ export async function runAgentSession(
       send({ type: 'error', error: err instanceof Error ? err.message : String(err) });
     }
   } finally {
+    coalescer.flush();
     setSubagentRunner(request.sessionId, null);
     coordinator.dispose();
     contextHub.dispose();
     deps.chatStreams.cleanup(streamId);
     deps.unregisterBrowserStream(request.sessionId, streamId);
     if (!terminalEventSent) send({ type: 'done' });
+    coalescer.dispose();
 
     // macOS：恢复系统休眠
     if (powerSaveId != null && powerSaveBlocker.isStarted(powerSaveId)) {

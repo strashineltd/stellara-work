@@ -567,13 +567,23 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
   const prevCount = (db.prepare('SELECT COUNT(*) AS n FROM messages WHERE session_id = ?')
     .get(sessionId) as { n: number } | undefined)?.n ?? 0;
   const tx = db.transaction((ms: MessageRow[]) => {
-    db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-    const insert = db.prepare(
+    // P1b：按 (session_id, position) upsert，避免流式期间 DELETE 全表再重插
+    const upsert = db.prepare(
       `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, attachments, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, position) DO UPDATE SET
+         role = excluded.role,
+         content = excluded.content,
+         tool_calls = excluded.tool_calls,
+         tool_call_id = excluded.tool_call_id,
+         tool_name = excluded.tool_name,
+         meta = excluded.meta,
+         plan_mode = excluded.plan_mode,
+         attachments = excluded.attachments,
+         created_at = excluded.created_at`,
     );
     for (const m of ms) {
-      insert.run(
+      upsert.run(
         m.sessionId,
         m.position,
         m.role,
@@ -587,6 +597,8 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
         m.createdAt,
       );
     }
+    // 历史变短（压缩/清空）时删掉多余 position
+    db.prepare('DELETE FROM messages WHERE session_id = ? AND position >= ?').run(sessionId, ms.length);
   });
   tx(msgs);
   if (msgs.length !== prevCount) {

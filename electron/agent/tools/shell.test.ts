@@ -120,8 +120,6 @@ describe('runCommand', () => {
       'xcrun --version',
       'xcodebuild --help',
       'swiftc --version',
-      'brew --version',
-      'plutil -lint Info.plist',
       'make --version',
       'clang --version',
       'mdls -name kMDItemFSName .',
@@ -133,6 +131,20 @@ describe('runCommand', () => {
         // 命令在环境中不存在时也是可接受的（exit code 非 0），但不该报"不在白名单"
         expect(result.error ?? '').not.toContain('白名单');
       }
+    }
+  });
+
+  (process.platform !== 'win32' ? it : it.skip)('S7 rejects system-mutation tools (brew/plutil/git clean/defaults write)', async () => {
+    for (const cmd of [
+      'brew install evil',
+      'plutil -convert xml1 /etc/hosts',
+      'git clean -fdx',
+      'defaults write com.apple.loginwindow LoginHook /bin/sh',
+      'diskutil eraseVolume FAT32 X /dev/disk9',
+    ]) {
+      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toMatch(/白名单|未允许的子命令|不允许/);
     }
   });
 

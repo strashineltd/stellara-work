@@ -23,6 +23,17 @@ function resolveHref(href: string | undefined): string | null {
   }
 }
 
+/** react-markdown 默认 urlTransform 会丢掉 data:；附件内联图需要放行（S21 仍由 img 组件把关） */
+function safeUrlTransform(url: string): string {
+  if (url.startsWith('data:')) return url;
+  try {
+    const u = new URL(url, window.location.href);
+    return SAFE_LINK_PROTOCOLS.includes(u.protocol) ? u.href : '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * 渲染 assistant 的 markdown 回复
  * - 支持 GFM（表格、任务列表、删除线、链接）
@@ -35,6 +46,7 @@ export const MarkdownView = memo(function MarkdownView({ content, workDir, onAnc
     <div className="md-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={safeUrlTransform}
         components={{
           // 行内代码（react-markdown v10: inline prop 已移除，用 className 判断）
           code({ className, children, ...props }: {
@@ -72,6 +84,19 @@ export const MarkdownView = memo(function MarkdownView({ content, workDir, onAnc
                 {children}
               </a>
             );
+          },
+          // 图片（S21）：仅允许 data:（附件/截图内联），阻断远程 http(s) 图防 IP 泄漏/追踪信标
+          img(props: React.ImgHTMLAttributes<HTMLImageElement>) {
+            const raw = typeof props.src === 'string' ? props.src : '';
+            const alt = typeof props.alt === 'string' ? props.alt : '';
+            if (!raw.startsWith('data:')) {
+              return (
+                <span className="md-blocked-image" title="已阻止远程图片加载">
+                  [图片已阻止: {alt || raw.slice(0, 80)}]
+                </span>
+              );
+            }
+            return <img {...props} src={raw} alt={alt} />;
           },
           // 段落：按相对路径拆分，包成可 hover 预览的 span
           p({ children, ...props }: { children?: React.ReactNode } & React.HTMLAttributes<HTMLParagraphElement>) {

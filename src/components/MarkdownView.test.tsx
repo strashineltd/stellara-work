@@ -69,6 +69,18 @@ describe('MarkdownView', () => {
     unmount();
   });
 
+  it('S21 blocks remote images but allows data: URIs', () => {
+    const { container, unmount } = render(
+      <MarkdownView content={'![x](https://tracker.example/p.gif)\n\n![ok](<data:image/png;base64,AAAA>)'} />,
+    );
+    const imgs = container.querySelectorAll('img');
+    expect(imgs.length).toBe(1);
+    expect(imgs[0]!.getAttribute('src') ?? '').toContain('data:');
+    expect(container.querySelector('.md-blocked-image')).toBeTruthy();
+    expect(container.innerHTML).not.toContain('tracker.example');
+    unmount();
+  });
+
   it('calls onAnchorClick when a link is clicked', () => {
     const onClick = vi.fn();
     const { container, unmount } = render(
