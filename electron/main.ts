@@ -973,13 +973,31 @@ function registerIpcHandlers(): void {
   handle('sessions:saveMessages', async (_e, id: string, messages: MessageRow[]) => {
     const { assertSessionOwned, saveMessages } = await import('./store/db');
     assertSessionOwned(id, getActiveUserId());
-    saveMessages(id, messages);
-  });
-
-  handle('sessions:appendMessage', async (_e, id: string, message: MessageRow) => {
-    const { assertSessionOwned, appendMessage } = await import('./store/db');
-    assertSessionOwned(id, getActiveUserId());
-    appendMessage({ ...message, sessionId: id });
+    // S27：强制归属与连续 position，限制规模，避免渲染层伪造历史结构
+    if (!Array.isArray(messages)) throw new Error('消息列表无效');
+    if (messages.length > 5000) throw new Error('消息列表过长');
+    const roles = new Set(['user', 'assistant', 'tool']);
+    const sanitized: MessageRow[] = messages.map((m, index) => {
+      if (!m || typeof m !== 'object') throw new Error('消息项无效');
+      const role = (m as MessageRow).role;
+      if (!roles.has(role)) throw new Error('消息角色无效');
+      const content = typeof (m as MessageRow).content === 'string' ? (m as MessageRow).content : '';
+      if (content.length > 2_000_000) throw new Error('单条消息过长');
+      return {
+        sessionId: id,
+        position: index,
+        role,
+        content,
+        toolCalls: typeof (m as MessageRow).toolCalls === 'string' ? (m as MessageRow).toolCalls : undefined,
+        toolCallId: typeof (m as MessageRow).toolCallId === 'string' ? (m as MessageRow).toolCallId : undefined,
+        toolName: typeof (m as MessageRow).toolName === 'string' ? (m as MessageRow).toolName : undefined,
+        meta: typeof (m as MessageRow).meta === 'string' ? (m as MessageRow).meta : undefined,
+        planMode: (m as MessageRow).planMode ? 1 : 0,
+        attachments: typeof (m as MessageRow).attachments === 'string' ? (m as MessageRow).attachments : undefined,
+        createdAt: typeof (m as MessageRow).createdAt === 'number' ? (m as MessageRow).createdAt : Date.now(),
+      };
+    });
+    saveMessages(id, sanitized);
   });
 
   handle('sessions:move', async (_e, sessionId: string, projectId: string | null) => {

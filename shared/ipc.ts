@@ -1294,7 +1294,7 @@ export interface ElectronAPI {
     delete: (id: string) => Promise<void>;
     rename: (id: string, title: string) => Promise<void>;
     saveMessages: (id: string, messages: MessageRow[]) => Promise<void>;
-    appendMessage: (id: string, message: MessageRow) => Promise<void>;
+    /** S27：渲染层不再提供 appendMessage（历史写入仅主进程 agent/调度路径） */
     move: (sessionId: string, projectId: string | null) => Promise<void>;
   };
   servers: {

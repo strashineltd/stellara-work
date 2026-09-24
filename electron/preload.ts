@@ -202,8 +202,6 @@ const api: ElectronAPI = {
     rename: (id: string, title: string) => ipcRenderer.invoke('sessions:rename', id, title),
     saveMessages: (id: string, messages: MessageRow[]) =>
       ipcRenderer.invoke('sessions:saveMessages', id, messages),
-    appendMessage: (id: string, message: MessageRow) =>
-      ipcRenderer.invoke('sessions:appendMessage', id, message),
     move: (sessionId: string, projectId: string | null) =>
       ipcRenderer.invoke('sessions:move', sessionId, projectId),
   },

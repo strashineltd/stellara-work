@@ -297,7 +297,7 @@ export function installDevPreviewApi(): void {
       },
       delete: async (id) => { sessions = sessions.filter((session) => session.id !== id); },
       rename: async (id, title) => { sessions = sessions.map((session) => session.id === id ? { ...session, title } : session); },
-      saveMessages: async () => {}, appendMessage: async () => {},
+      saveMessages: async () => {},
       move: async (sessionId, projectId) => { sessions = sessions.map((session) => session.id === sessionId ? { ...session, projectId: projectId ?? undefined } : session); },
     },
     servers: {
