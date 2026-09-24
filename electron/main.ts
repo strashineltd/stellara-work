@@ -2004,17 +2004,26 @@ async function runOneSubagent(
 
 /**
  * 会话结束后异步提取记忆。失败静默忽略。
+ * P11：只取最近窗口消息；同一会话 60s 内不重复抽取。
  */
+const memoryExtractLastAt = new Map<string, number>();
+const MEMORY_EXTRACT_COOLDOWN_MS = 60_000;
+
 async function extractMemoriesFromSession(
   request: ChatRequest,
   model: ModelConfig,
 ): Promise<void> {
   try {
-    const { getMessages, getSession } = await import('./store/db');
-    const { extractMemories, buildBrowserMaterial } = await import('./memory/memory-extractor');
+    const last = memoryExtractLastAt.get(request.sessionId) ?? 0;
+    const now = Date.now();
+    if (now - last < MEMORY_EXTRACT_COOLDOWN_MS) return;
+    memoryExtractLastAt.set(request.sessionId, now);
+
+    const { getRecentMessages, getSession } = await import('./store/db');
+    const { extractMemories, buildBrowserMaterial, EXTRACTION_WINDOW_MESSAGES } = await import('./memory/memory-extractor');
     const { summarizeWithModel } = await import('./llm/client-factory');
 
-    const messages = getMessages(request.sessionId);
+    const messages = getRecentMessages(request.sessionId, EXTRACTION_WINDOW_MESSAGES);
     if (messages.length < 2) return;
 
     const session = getSession(request.sessionId);
@@ -2036,7 +2045,7 @@ async function extractMemoriesFromSession(
       content: m.content,
     }));
 
-    const browserMaterial = buildBrowserMaterial(messages);
+    const browserMaterial = buildBrowserMaterial(messages) || undefined;
 
     const saved = await extractMemories(chatMessages, scope, scopeId, `session:${request.sessionId}`, llmCall, browserMaterial, session?.userId);
     if (saved.length > 0 && mainWindow && !mainWindow.isDestroyed()) {

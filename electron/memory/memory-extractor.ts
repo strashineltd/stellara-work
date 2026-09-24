@@ -69,10 +69,13 @@ const EXTRACTION_PROMPT = `分析以下对话，提取值得长期记忆的信�
 
 如果对话中没有值得记忆的信息，返回空数组 []。`;
 
+/** P11：只分析最近 N 轮，避免长会话整表进 LLM */
+export const EXTRACTION_WINDOW_MESSAGES = 24;
+
 /**
  * 从对话历史中提取记忆
  *
- * @param messages 会话消息历史
+ * @param messages 会话消息历史（调用方可先截取窗口）
  * @param scope 记忆作用域
  * @param scopeId 作用域 ID（如项目 ID）
  * @param source 来源标记
@@ -89,8 +92,9 @@ export async function extractMemories(
   browserMaterial?: string,
   userId: string = 'default',
 ): Promise<Memory[]> {
-  // 只分析用户和 assistant 的消息
-  const transcript = messages
+  // P11：只分析用户和 assistant 的最近窗口消息
+  const windowed = messages.slice(-EXTRACTION_WINDOW_MESSAGES);
+  const transcript = windowed
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content}`)
     .join('\n');

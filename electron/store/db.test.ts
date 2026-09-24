@@ -5,7 +5,7 @@ import os from 'node:os';
 import Database from 'better-sqlite3';
 import {
   initDb, listSessions, getSession, createSession, deleteSession, renameSession,
-  getMessages, appendMessage, saveMessages, bumpSession, searchSessions, _setDbPath,
+  getMessages, getRecentMessages, appendMessage, saveMessages, bumpSession, searchSessions, _setDbPath,
   createProject, getProject, listProjects, renameProject, deleteProject, moveSession, updateProjectFile,
   countAllMessages,
 } from './db';
@@ -116,6 +116,15 @@ describe('db', () => {
     expect(msgs[0]?.role).toBe('user');
     expect(msgs[1]?.content).toBe('hello');
     expect(msgs[1]?.role).toBe('assistant');
+  });
+
+  it('P11：getRecentMessages 只返回最近 N 条且保持正序', () => {
+    createSession({ id: 's1', title: 'T', modelId: 'm1' });
+    for (let i = 0; i < 5; i++) {
+      appendMessage({ sessionId: 's1', position: i, role: 'user', content: `m${i}`, createdAt: Date.now() });
+    }
+    expect(getRecentMessages('s1', 2).map((m) => m.content)).toEqual(['m3', 'm4']);
+    expect(getRecentMessages('s1', 0)).toEqual([]);
   });
 
   it('appendMessage updates session messageCount', () => {

@@ -603,6 +603,15 @@ export function getMessages(sessionId: string): MessageRow[] {
   return rows.map(rowToMessage);
 }
 
+/** P11：只取最近 N 条（倒序查询再反转），供会话后记忆抽取等窗口化路径 */
+export function getRecentMessages(sessionId: string, limit: number): MessageRow[] {
+  if (limit <= 0) return [];
+  const rows = getDb()
+    .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY position DESC LIMIT ?')
+    .all(sessionId, limit) as Record<string, unknown>[];
+  return rows.map(rowToMessage).reverse();
+}
+
 export function appendMessage(msg: MessageRow): void {
   const db = getDb();
   db.prepare(

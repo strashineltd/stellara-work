@@ -5,7 +5,7 @@
  */
 
 import type { Memory } from '../../shared/ipc';
-import { searchMemoriesSafe, listMemories, bumpAccess } from './memory-store';
+import { searchMemoriesSafe, listMemories, bumpAccessBatch } from './memory-store';
 
 /** 记忆注入配置 */
 export interface MemoryInjectionConfig {
@@ -87,10 +87,8 @@ export async function retrieveMemoriesForInjection(
 
     if (sorted.length === 0) return { memories: [], promptBlock: null };
 
-    // 更新访问计数
-    for (const m of sorted) {
-      bumpAccess(m.id);
-    }
+    // P11：一次事务批量更新访问计数
+    bumpAccessBatch(sorted.map((m) => m.id));
 
     // 格式化
     const lines = sorted.map((m) => {

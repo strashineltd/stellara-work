@@ -3,15 +3,15 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockSearchSafe, mockListMemories, mockBumpAccess } = vi.hoisted(() => ({
+const { mockSearchSafe, mockListMemories, mockBumpAccessBatch } = vi.hoisted(() => ({
   mockSearchSafe: vi.fn().mockReturnValue([]),
   mockListMemories: vi.fn().mockReturnValue([]),
-  mockBumpAccess: vi.fn(),
+  mockBumpAccessBatch: vi.fn(),
 }));
 vi.mock('./memory-store', () => ({
   searchMemoriesSafe: mockSearchSafe,
   listMemories: mockListMemories,
-  bumpAccess: mockBumpAccess,
+  bumpAccessBatch: mockBumpAccessBatch,
 }));
 
 import { retrieveMemoriesForInjection } from './memory-injector';
@@ -22,7 +22,7 @@ describe('retrieveMemoriesForInjection identity scoping', () => {
   beforeEach(() => {
     mockSearchSafe.mockReset().mockReturnValue([]);
     mockListMemories.mockReset().mockReturnValue([]);
-    mockBumpAccess.mockReset();
+    mockBumpAccessBatch.mockReset();
   });
 
   it('显式 userId → 所有检索按该身份转发', async () => {

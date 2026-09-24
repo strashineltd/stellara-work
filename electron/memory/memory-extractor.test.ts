@@ -79,6 +79,20 @@ describe('extractMemories', () => {
     expect(result).toHaveLength(0);
   });
 
+  it('P11：超长历史只取最近窗口进入 LLM', async () => {
+    const llmCall = vi.fn().mockResolvedValue('[]');
+    const pairs: Array<[string, string]> = [];
+    for (let i = 0; i < 80; i++) {
+      pairs.push(['user', `历史消息 ${i} 这是很长的一段用户发言内容`], ['assistant', `历史回复 ${i}`]);
+    }
+    const messages = makeMessages(pairs);
+    await extractMemories(messages, 'personal', undefined, 'test', llmCall);
+    expect(llmCall).toHaveBeenCalledOnce();
+    const prompt = llmCall.mock.calls[0]![1] as string;
+    expect(prompt).not.toContain('历史消息 0 ');
+    expect(prompt).toContain('历史消息 79');
+  });
+
   it('LLM 返回非法 JSON → 静默跳过', async () => {
     const llmCall = vi.fn().mockResolvedValue('这不是JSON');
     const messages = makeMessages([

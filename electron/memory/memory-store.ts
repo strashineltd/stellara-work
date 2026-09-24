@@ -236,6 +236,20 @@ export function bumpAccess(id: string): void {
     .run(Date.now(), id);
 }
 
+/** P11：批量累加访问计数（单语句，避免注入路径上 N 次 UPDATE） */
+export function bumpAccessBatch(ids: readonly string[]): void {
+  if (ids.length === 0) return;
+  const db = getDb();
+  const now = Date.now();
+  const tx = db.transaction((list: readonly string[]) => {
+    const stmt = db.prepare(
+      'UPDATE memories SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?',
+    );
+    for (const id of list) stmt.run(now, id);
+  });
+  tx(ids);
+}
+
 export function getMemoryStats(userId: string = 'default'): MemoryStats {
   const db = getDb();
   const total = (db.prepare('SELECT COUNT(*) as c FROM memories WHERE user_id = ?').get(userId) as { c: number }).c;
