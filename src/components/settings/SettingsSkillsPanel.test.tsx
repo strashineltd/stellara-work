@@ -7,7 +7,7 @@ import { SettingsSkillsPanel } from './SettingsSkillsPanel';
 const WORKDIR = '/Users/lhy/Stellara Work';
 
 const SKILLS: SkillDetailedItem[] = [
-  { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md', file: 'code-review.md' },
+  { name: 'code-review', description: '对当前变更做全面代码审查，输出发现清单', prompt: '请先读取当前 diff，然后逐文件审查…', format: 'md', enabled: true, file: 'code-review.md' },
   { name: 'macos-pack', description: '构建 arm64 dmg/zip 并验证产物', prompt: '运行 package:mac 并检查 release 目录…', format: 'md', enabled: false, file: 'macos-pack.md' },
   { name: 'legacy-notes', description: '旧格式技能，仅可删除', prompt: 'JSON 格式内容', format: 'json', file: 'legacy-notes.json' },
   { name: 'subdir-review', description: '子目录代码审查', prompt: '子目录审查指令…', format: 'md', file: 'review/subdir-review.md' },

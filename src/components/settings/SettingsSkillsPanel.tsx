@@ -14,10 +14,13 @@ interface SettingsSkillsPanelProps {
   onClose?: () => void;
 }
 
-/** 「复制模板」按钮写入剪贴板的新技能文件模板（markdown frontmatter） */
+/** 「复制模板」按钮写入剪贴板的新技能文件模板（markdown frontmatter）
+ * S15：显式 enabled: true，否则技能不会注入对话（工作区 skill 默认 opt-in）
+ */
 export const SKILL_TEMPLATE = `---
 name: my-skill
 description: 描述
+enabled: true
 ---
 
 技能内容`;
@@ -101,7 +104,8 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab, on
   }
 
   function toggleEnabled(s: SkillDetailedItem) {
-    const next = !(s.enabled !== false);
+    // S15：默认未启用，须显式开启后才注入
+    const next = s.enabled !== true;
     void window.electronAPI.skills
       .update(workDir!, s.file, { enabled: next })
       .then(() => {
@@ -440,7 +444,8 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab, on
               )}
               {filtered.map((s) => {
                 const isOpen = expanded.has(s.file);
-                const enabled = s.enabled !== false;
+                // S15：仅显式 enabled: true 才注入对话
+                const enabled = s.enabled === true;
                 const isJson = s.format === 'json';
                 return (
                   <div
@@ -462,6 +467,9 @@ export function SettingsSkillsPanel({ onChanged, refreshKey = 0, onSwitchTab, on
                         )}
                       </div>
                       <div className="settings-item__hint settings-skill-desc">{s.description}</div>
+                      {!enabled && (
+                        <div className="settings-item__hint settings-skill-desc">未启用 — 不会注入对话，请打开右侧开关</div>
+                      )}
                       {isOpen && (
                         <>
                           <div className="settings-skill-path">

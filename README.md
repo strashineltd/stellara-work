@@ -23,7 +23,7 @@
 
 **Stellara Work** is a **local-first** desktop agent that runs on your machine like a personal Codex. Bring your own API key and collaborate with the agent on coding tasks — reading files, editing code, running commands — with full review and approval over every action.
 
-Your API key, sessions, files, and configuration **never leave your machine**. Stellara Work does not upload any data to external servers.
+By default, your API key, sessions, files, and configuration stay on your machine. Requests go only to the model endpoint you configure. Optional cloud account sign-in (Settings → Account) sends identity and auth material to Tencent CloudBase; leave it unused if you need a fully offline workflow. Connected opencode servers and MCP HTTP servers also receive the traffic you point them at.
 
 ---
 
@@ -33,7 +33,7 @@ The **0.9.3 shell is redesigned**: a top bar with back/forward navigation and si
 
 | | Feature | Description |
 |---|---|---|
-| 🔒 | **Local-first privacy** | API keys encrypted via OS keychain (macOS) / DPAPI (Windows); all data stored locally |
+| 🔒 | **Local-first privacy** | API keys encrypted via OS keychain (macOS) / DPAPI (Windows); data stays on your machine unless you opt into cloud account or connect remote servers |
 | 🧠 | **Responses API** | Native support for OpenAI Responses API; built-in presets for DeepSeek, Qwen; unlimited custom models |
 | ✅ | **Plan mode with approval gates** | Every file write and shell command waits for your explicit approval |
 | 💬 | **Streaming chat** | Real-time markdown rendering, diff views, and shell output cards |

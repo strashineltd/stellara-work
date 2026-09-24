@@ -1259,7 +1259,7 @@ function registerIpcHandlers(): void {
     await fs.mkdir(path.dirname(resolved), { recursive: true });
     try {
       // wx 标志：独占创建，已存在时抛 EEXIST（避免先查后写的竞态）
-      await fs.writeFile(resolved, buildSkillMarkdown({ name, description: input.description, prompt: input.prompt }), { encoding: 'utf-8', flag: 'wx' });
+      await fs.writeFile(resolved, buildSkillMarkdown({ name, description: input.description, prompt: input.prompt, enabled: true }), { encoding: 'utf-8', flag: 'wx' });
     } catch (e) {
       if ((e as NodeJS.ErrnoException)?.code === 'EEXIST') {
         throw new Error('同名技能已存在');
