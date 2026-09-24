@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { ApprovalRequest, AttachmentMeta, PlanApprovalRequest } from '../../../shared/ipc';
 import { MarkdownView } from '../MarkdownView';
 import { PlanCard } from '../PlanCard';
@@ -37,6 +37,112 @@ interface ChatStreamProps {
   onPlanApprovalExpired?: () => void;
 }
 
+interface ChatEntryRowProps {
+  entry: DisplayEntry;
+  entryKey: string;
+  className: string;
+  /** 仅活跃尾部需要 busy（thinking 占位）；历史行传 false 以稳定 memo */
+  isTail: boolean;
+  busy: boolean;
+  canRetry: boolean;
+  workDir?: string;
+  sessionId?: string;
+  onRetry: () => void;
+  onOpenSettings: () => void;
+  onApprovePlan?: () => void;
+  onRejectPlan?: () => void;
+  onPlanApprovalExpired?: () => void;
+  planApprovalExpiresAt?: number;
+  planAwaitingApproval: boolean;
+}
+
+/**
+ * 单条消息行（P7）：历史 entry 对象在 copy-on-write 下保持引用稳定，
+ * memo 后流式更新只重渲尾部变化的行，而不是整表。
+ */
+const ChatEntryRow = memo(function ChatEntryRow(props: ChatEntryRowProps) {
+  const e = props.entry;
+  return (
+    <div className={props.className} data-entry-key={props.entryKey}>
+      {e.kind === 'user' && (
+        <UserEntry
+          content={e.content}
+          attachments={e.attachments}
+          sessionId={props.sessionId}
+          workDir={props.workDir}
+        />
+      )}
+      {e.kind === 'assistant' && (
+        <AssistantEntry
+          content={e.content}
+          busy={props.isTail && props.busy}
+          canRetry={props.canRetry && props.isTail}
+          onRetry={props.onRetry}
+          workDir={props.workDir}
+        />
+      )}
+      {e.kind === 'reasoning' && (
+        <details className="reasoning-block" open>
+          <summary>思考中…</summary>
+          <pre className="reasoning-block__content">{e.content}</pre>
+        </details>
+      )}
+      {e.kind === 'tool_call' && <ToolCallCard name={e.name} args={e.args} />}
+      {e.kind === 'tool_result' && e.meta?.kind === 'edit' && (
+        <DiffCard path={e.meta.path} workDir={props.workDir} before={e.meta.before} after={e.meta.after} />
+      )}
+      {e.kind === 'tool_result' && e.meta?.kind === 'command' && (
+        <ShellCard
+          command={e.meta.command}
+          stdout={e.meta.stdout}
+          stderr={e.meta.stderr}
+          exitCode={e.meta.exitCode}
+          durationMs={e.meta.durationMs}
+          ok={e.ok}
+        />
+      )}
+      {e.kind === 'tool_result' && !e.meta && (
+        <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} workDir={props.workDir} />
+      )}
+      {e.kind === 'summary' && (
+        <div className="summary-banner" title="上下文已被压缩，老消息被摘要替换">
+          <div className="summary-banner-title">
+            已压缩 {e.compressedCount} 条消息（{e.tokensBefore} → {e.tokensAfter} tokens）
+          </div>
+          {e.summary && <pre className="summary-banner-preview">{e.summary}</pre>}
+        </div>
+      )}
+      {e.kind === 'plan' && (
+        <PlanCard
+          steps={e.steps}
+          running={props.isTail && props.busy}
+          awaitingApproval={props.planAwaitingApproval}
+          approvalExpiresAt={props.planApprovalExpiresAt}
+          onApprovalExpired={props.onPlanApprovalExpired}
+          onApprove={props.onApprovePlan}
+          onReject={props.onRejectPlan}
+        />
+      )}
+      {e.kind === 'verify' && (
+        <div className="verify-chip" role="status">
+          验证中{e.target ? ` · ${e.target}` : ''}
+        </div>
+      )}
+      {e.kind === 'error' && (
+        <ErrorBanner
+          message={e.message}
+          meta={e.meta}
+          onOpenSettings={props.onOpenSettings}
+          onSwitchModel={props.onOpenSettings}
+          onRetry={props.onRetry}
+        />
+      )}
+      {e.kind === 'report' && <ReportEntry entry={e} workDir={props.workDir} />}
+      {e.kind === 'subagent_summary' && <SubagentSummaryReport results={e.results} workDir={props.workDir} />}
+    </div>
+  );
+});
+
 export function ChatStream(props: ChatStreamProps) {
   function entryRenderMeta(entry: DisplayEntry, index: number) {
     const sessionId = props.sessionId ?? null;
@@ -53,6 +159,19 @@ export function ChatStream(props: ChatStreamProps) {
     return { key, className };
   }
 
+  const onRetry = props.onRetry;
+  const onOpenSettings = props.onOpenSettings;
+  const onApprovePlan = props.onApprovePlan;
+  const onRejectPlan = props.onRejectPlan;
+  const onPlanApprovalExpired = props.onPlanApprovalExpired;
+  const planApprovalExpiresAt = props.pendingPlanApproval?.expiresAt;
+  const planAwaitingApproval = !!props.pendingPlanApproval;
+  const lastUserForRetry = props.lastUserForRetry;
+  const busy = props.busy;
+  const workDir = props.workDir;
+  const sessionId = props.sessionId;
+  const len = props.entries.length;
+
   return (
     <main className="main-chat" id="task-stream" ref={props.chatRef} tabIndex={-1}>
       {props.pendingApproval && (
@@ -67,95 +186,41 @@ export function ChatStream(props: ChatStreamProps) {
       {props.modelMissing && (
         <div className="model-missing-banner motion-feedback-enter" role="alert">
           <span>此会话引用的模型已被删除。</span>
-          <button className="btn btn-secondary btn-small" onClick={props.onOpenSettings} type="button">
+          <button className="btn btn-secondary btn-small" onClick={onOpenSettings} type="button">
             去设置重新配置
           </button>
         </div>
       )}
-      {props.entries.length === 0 ? (
+      {len === 0 ? (
         <EmptyChat />
       ) : (
         <div className="messages">
           {props.entries.map((e, i) => {
             const meta = entryRenderMeta(e, i);
+            // 尾部 2 条视为 live tail（thinking / retry 只挂在真正会变的行上）
+            const isTail = i >= len - 2;
+            const canRetry = !!lastUserForRetry
+              && e.kind === 'assistant'
+              && e.content.includes('[连接错误]');
             return (
-            <div key={meta.key} className={meta.className} data-entry-key={meta.key}>
-              {e.kind === 'user' && (
-                <UserEntry
-                  content={e.content}
-                  attachments={e.attachments}
-                  sessionId={props.sessionId}
-                  workDir={props.workDir}
-                />
-              )}
-              {e.kind === 'assistant' && (
-                <AssistantEntry
-                  content={e.content}
-                  busy={props.busy}
-                  canRetry={!!props.lastUserForRetry && e.content.includes('[连接错误]')}
-                  onRetry={() => props.onRetry()}
-                  workDir={props.workDir}
-                />
-              )}
-              {e.kind === 'reasoning' && (
-                <details className="reasoning-block" open>
-                  <summary>思考中…</summary>
-                  <pre className="reasoning-block__content">{e.content}</pre>
-                </details>
-              )}
-              {e.kind === 'tool_call' && <ToolCallCard name={e.name} args={e.args} />}
-              {e.kind === 'tool_result' && e.meta?.kind === 'edit' && (
-                <DiffCard path={e.meta.path} workDir={props.workDir} before={e.meta.before} after={e.meta.after} />
-              )}
-              {e.kind === 'tool_result' && e.meta?.kind === 'command' && (
-                <ShellCard
-                  command={e.meta.command}
-                  stdout={e.meta.stdout}
-                  stderr={e.meta.stderr}
-                  exitCode={e.meta.exitCode}
-                  durationMs={e.meta.durationMs}
-                  ok={e.ok}
-                />
-              )}
-              {e.kind === 'tool_result' && !e.meta && (
-                <ToolResultCard name={e.name} ok={e.ok} output={e.output} error={e.error} workDir={props.workDir} />
-              )}
-              {e.kind === 'summary' && (
-                <div className="summary-banner" title="上下文已被压缩，老消息被摘要替换">
-                  <div className="summary-banner-title">
-                    已压缩 {e.compressedCount} 条消息（{e.tokensBefore} → {e.tokensAfter} tokens）
-                  </div>
-                  {e.summary && <pre className="summary-banner-preview">{e.summary}</pre>}
-                </div>
-              )}
-              {e.kind === 'plan' && (
-                <PlanCard
-                  steps={e.steps}
-                  running={props.busy}
-                  awaitingApproval={!!props.pendingPlanApproval}
-                  approvalExpiresAt={props.pendingPlanApproval?.expiresAt}
-                  onApprovalExpired={props.onPlanApprovalExpired}
-                  onApprove={() => props.onApprovePlan?.()}
-                  onReject={() => props.onRejectPlan?.()}
-                />
-              )}
-              {e.kind === 'verify' && (
-                <div className="verify-chip" role="status">
-                  验证中{e.target ? ` · ${e.target}` : ''}
-                </div>
-              )}
-              {e.kind === 'error' && (
-                <ErrorBanner
-                  message={e.message}
-                  meta={e.meta}
-                  onOpenSettings={() => props.onOpenSettings()}
-                  onSwitchModel={() => props.onOpenSettings()}
-                  onRetry={() => props.onRetry()}
-                />
-              )}
-              {e.kind === 'report' && <ReportEntry entry={e} workDir={props.workDir} />}
-              {e.kind === 'subagent_summary' && <SubagentSummaryReport results={e.results} workDir={props.workDir} />}
-            </div>
+              <ChatEntryRow
+                key={meta.key}
+                entry={e}
+                entryKey={meta.key}
+                className={meta.className}
+                isTail={isTail}
+                busy={busy}
+                canRetry={canRetry}
+                workDir={workDir}
+                sessionId={sessionId}
+                onRetry={onRetry}
+                onOpenSettings={onOpenSettings}
+                onApprovePlan={onApprovePlan}
+                onRejectPlan={onRejectPlan}
+                onPlanApprovalExpired={onPlanApprovalExpired}
+                planApprovalExpiresAt={planApprovalExpiresAt}
+                planAwaitingApproval={planAwaitingApproval}
+              />
             );
           })}
           {props.busy && (
@@ -197,7 +262,7 @@ function EmptyChat() {
   );
 }
 
-function UserEntry({
+const UserEntry = memo(function UserEntry({
   content,
   attachments,
   sessionId,
@@ -250,7 +315,7 @@ function UserEntry({
       </div>
     </div>
   );
-}
+});
 
 function AttachmentThumb({ att, sessionId, workDir }: {
   att: AttachmentMeta;
@@ -280,7 +345,7 @@ function AttachmentThumb({ att, sessionId, workDir }: {
   return <img className="attach-thumb-img" src={dataUrl} alt={att.name} />;
 }
 
-function AssistantEntry({
+const AssistantEntry = memo(function AssistantEntry({
   content,
   busy,
   canRetry,
@@ -311,9 +376,9 @@ function AssistantEntry({
       </div>
     </div>
   );
-}
+});
 
-function ReportEntry({ entry, workDir }: {
+const ReportEntry = memo(function ReportEntry({ entry, workDir }: {
   entry: Extract<DisplayEntry, { kind: 'report' }>;
   workDir?: string;
 }) {
@@ -365,9 +430,9 @@ function ReportEntry({ entry, workDir }: {
       )}
     </div>
   );
-}
+});
 
-function SubagentSummaryReport({ results, workDir }: {
+const SubagentSummaryReport = memo(function SubagentSummaryReport({ results, workDir }: {
   results: Array<{ id: string; summary: string; ok: boolean; elapsedMs: number }>;
   workDir?: string;
 }) {
@@ -381,7 +446,7 @@ function SubagentSummaryReport({ results, workDir }: {
       <MarkdownView content={markdown} workDir={workDir} />
     </div>
   );
-}
+});
 
 // 让旧代码用到的 utility 还能找到（如果有别的 import）
 export { prettyApprovalArgs };

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AppInfo, ApprovalRequest, AttachmentMeta, ChatRequest, ConfiguredModel, ModelListItem,
@@ -483,11 +483,22 @@ export function MainView(props: MainViewProps) {
     };
   }, []);
 
-  // Auto-scroll
+  // Auto-scroll（P7：rAF 合并，避免每个流式 token 强制 layout）
   const chatRef = useRef<HTMLElement | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
-    const el = chatRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (scrollRafRef.current != null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const el = chatRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    return () => {
+      if (scrollRafRef.current != null) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
   }, [entries, busy]);
 
   // 运行时启用 reduced motion → 清除一次性入场标记，避免重新启用后重放旧动画
@@ -581,6 +592,42 @@ export function MainView(props: MainViewProps) {
   const toolResultCount = useMemo(() => entries.filter((e) => e.kind === 'tool_result').length, [entries]);
 
   // ---- Chat handlers ----
+  // P7：稳定回调引用，配合 ChatEntryRow.memo 避免流式时历史行重渲
+  const handleRetryStable = useCallback(() => {
+    handleRetry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastUserForRetry]);
+  const handleAbortStable = useCallback(() => {
+    handleAbort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamId]);
+  const handleOpenSettingsStable = useCallback(() => {
+    onOpenSettings();
+  }, [onOpenSettings]);
+  const handleApprove = useCallback((approved: boolean) => {
+    setPendingApproval((current) => {
+      if (!current) return current;
+      window.electronAPI.chat.approve(current.id, approved);
+      return null;
+    });
+  }, []);
+  const handleApprovalExpired = useCallback(() => setPendingApproval(null), []);
+  const handleApprovePlan = useCallback(() => {
+    setPendingPlanApproval((current) => {
+      if (!current) return current;
+      window.electronAPI.chat.approve(current.id, true);
+      return null;
+    });
+  }, []);
+  const handleRejectPlan = useCallback(() => {
+    setPendingPlanApproval((current) => {
+      if (!current) return current;
+      window.electronAPI.chat.approve(current.id, false);
+      return null;
+    });
+  }, []);
+  const handlePlanApprovalExpired = useCallback(() => setPendingPlanApproval(null), []);
+
   function handleNewTask(returnFocus?: HTMLElement | null): boolean {
     if (clearTask.present) {
       clearTaskCancelRef.current?.focus({ preventScroll: true });
@@ -1186,28 +1233,16 @@ export function MainView(props: MainViewProps) {
                 modelMissing={sessionModelMissing}
                 workDir={activeWorkDir}
                 sessionId={activeSessionId ?? undefined}
-                onOpenSettings={() => onOpenSettings()}
-                onRetry={handleRetry}
-                onAbort={handleAbort}
-                onApprove={(approved) => {
-                  if (!pendingApproval) return;
-                  window.electronAPI.chat.approve(pendingApproval.id, approved);
-                  setPendingApproval(null);
-                }}
-                onApprovalExpired={() => setPendingApproval(null)}
+                onOpenSettings={handleOpenSettingsStable}
+                onRetry={handleRetryStable}
+                onAbort={handleAbortStable}
+                onApprove={handleApprove}
+                onApprovalExpired={handleApprovalExpired}
                 pendingApproval={pendingApproval}
                 pendingPlanApproval={pendingPlanApproval}
-                onApprovePlan={() => {
-                  if (!pendingPlanApproval) return;
-                  window.electronAPI.chat.approve(pendingPlanApproval.id, true);
-                  setPendingPlanApproval(null);
-                }}
-                onRejectPlan={() => {
-                  if (!pendingPlanApproval) return;
-                  window.electronAPI.chat.approve(pendingPlanApproval.id, false);
-                  setPendingPlanApproval(null);
-                }}
-                onPlanApprovalExpired={() => setPendingPlanApproval(null)}
+                onApprovePlan={handleApprovePlan}
+                onRejectPlan={handleRejectPlan}
+                onPlanApprovalExpired={handlePlanApprovalExpired}
               />
               {extractedNotice && activeSessionId === extractedNotice.sessionId && (
                 <div className="memory-extracted-hint motion-feedback-enter" role="status">
