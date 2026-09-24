@@ -52,7 +52,7 @@ let sessions: SessionSummary[] = [
   { id: 'landing', title: '整理官网内容层级', modelId: previewModel.id, projectId: 'website', messageCount: 6, updatedAt: now - 900_000 },
 ];
 let previewSettings: AppSettings = { theme: 'light', workspaceMode: 'sidebar' };
-const settingsListeners = new Set<() => void>();
+const settingsListeners = new Set<(ev: { reason?: 'settings' | 'sessions' | 'servers' }) => void>();
 
 // UI 预览用本地身份（Phase 1）：侧边栏 AccountBadge 与设置「账号」面板可交互
 const previewLocalUsers: LocalUser[] = [
@@ -361,7 +361,7 @@ export function installDevPreviewApi(): void {
       get: async () => previewSettings,
       update: async (partial) => {
         previewSettings = { ...previewSettings, ...partial };
-        settingsListeners.forEach((listener) => listener());
+        settingsListeners.forEach((listener) => listener({ reason: 'settings' }));
       },
       clearAllData: async () => {}, resetSelective: async () => {},
       openDataDir: async () => {}, openLogFile: async () => {}, collectDiagnostics: async () => emptyDiagnostics(),

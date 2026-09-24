@@ -101,8 +101,9 @@ const api: ElectronAPI = {
   app: {
     getInfo: (): Promise<AppInfo> => ipcRenderer.invoke('app:getInfo'),
     getGitBranch: (workDir: string): Promise<string | null> => ipcRenderer.invoke('app:getGitBranch', workDir),
-    onSettingsChanged: (callback: () => void) => {
-      const handler = () => callback();
+    onSettingsChanged: (callback: (ev: { reason?: 'settings' | 'sessions' | 'servers' }) => void) => {
+      const handler = (_e: unknown, payload?: { reason?: 'settings' | 'sessions' | 'servers' }) =>
+        callback(payload ?? { reason: 'settings' });
       ipcRenderer.on('settings-changed', handler);
       return () => {
         ipcRenderer.removeListener('settings-changed', handler);

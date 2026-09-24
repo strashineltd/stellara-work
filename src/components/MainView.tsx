@@ -1036,7 +1036,9 @@ export function MainView(props: MainViewProps) {
 
   // 技能/MCP 等设置被其他窗口（设置窗口）修改 → 广播 settings-changed → 重载 slash 技能列表与服务器
   useEffect(() => {
-    return window.electronAPI.app.onSettingsChanged(() => {
+    return window.electronAPI.app.onSettingsChanged((ev) => {
+      // P14：会话/服务器状态变更不触发技能与服务器列表重载
+      if (ev?.reason === 'sessions' || ev?.reason === 'servers') return;
       setSlash((s) => ({ ...s, skillsLoaded: false }));
       void handleLoadSkills();
       refreshServers();

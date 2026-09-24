@@ -57,9 +57,20 @@ export default function App() {
     return () => off?.();
   }, []);
 
-  // 设置窗口变更 → 主窗口实时同步
+  // 设置窗口变更 → 主窗口实时同步（P14：按 reason 只拉需要的列表）
   useEffect(() => {
-    return window.electronAPI.app.onSettingsChanged(() => {
+    return window.electronAPI.app.onSettingsChanged((ev) => {
+      const reason = ev?.reason ?? 'settings';
+      if (reason === 'sessions') {
+        void window.electronAPI.sessions.list().then((sessions) => {
+          setState((s) => s.kind === 'ready' ? { ...s, sessions } : s);
+        });
+        return;
+      }
+      if (reason === 'servers') {
+        // 服务器状态点由 servers:status-changed 驱动，无需整页/会话列表重载
+        return;
+      }
       void window.electronAPI.models.list().then((modelList) => {
         const configured = modelList.configured;
         if (configured) {
@@ -70,9 +81,6 @@ export default function App() {
         if (st.theme) setTheme(st.theme);
         if (st.shortcuts) setShortcuts({ ...DEFAULT_SHORTCUTS, ...st.shortcuts });
         if (st.workspaceMode) setWorkspaceMode(st.workspaceMode);
-      });
-      void window.electronAPI.sessions.list().then((sessions) => {
-        setState((s) => s.kind === 'ready' ? { ...s, sessions } : s);
       });
     });
   }, []);

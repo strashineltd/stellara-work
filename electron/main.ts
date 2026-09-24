@@ -164,10 +164,15 @@ async function* disposeContextAfter<T>(
   }
 }
 
-/** 向所有窗口广播设置已变更（渲染层据此刷新本地状态） */
-function broadcastSettingsChanged(): void {
+/**
+ * 向所有窗口广播数据已变更（渲染层按 reason 按需刷新）。
+ * P14：settings = 配置/模型；sessions = 会话列表；servers = 服务器状态（无需重载列表）。
+ */
+type BroadcastReason = 'settings' | 'sessions' | 'servers';
+
+function broadcastSettingsChanged(reason: BroadcastReason = 'settings'): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now() });
+    if (!win.isDestroyed()) win.webContents.send('settings-changed', { at: Date.now(), reason });
   }
 }
 
@@ -2264,13 +2269,14 @@ app.whenReady().then(async () => {
         const remoteId = readRemoteDeletedId(properties);
         if (remoteId) sessions.removeByRemote(serverId, remoteId);
       }
-      broadcastSettingsChanged();
+      broadcastSettingsChanged('sessions');
     });
     manager.onStatusChanged((statuses) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send('servers:status-changed', statuses);
       }
-      broadcastSettingsChanged();
+      // P14：状态点由 servers:status-changed 驱动，不再全量 settings-changed
+      broadcastSettingsChanged('servers');
     });
     serverRuntime = { manager, sessions, chat };
   } catch (err) {
