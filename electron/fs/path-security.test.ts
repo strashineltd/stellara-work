@@ -7,6 +7,7 @@ import {
   isWithinDir,
   verifyExistingPath,
   verifyWritePath,
+  revalidateWriteParent,
 } from './path-security';
 
 let tmpDir: string;
@@ -171,6 +172,27 @@ describe('verifyWritePath', () => {
       expect(result.ok).toBe(false);
     } finally {
       await fs.rm(target, { force: true });
+    }
+  });
+});
+
+describe('revalidateWriteParent (S16)', () => {
+  it('accepts a normal parent dir inside cwd', async () => {
+    await fs.mkdir(path.join(tmpDir, 'src'), { recursive: true });
+    await expect(revalidateWriteParent(path.join(tmpDir, 'src', 'a.ts'), tmpDir)).resolves.toEqual({ ok: true });
+  });
+
+  it('rejects when parent became a symlink after initial check', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-out-'));
+    try {
+      const parent = path.join(tmpDir, 'swap');
+      await fs.mkdir(parent, { recursive: true });
+      await fs.rmdir(parent);
+      await fs.symlink(outside, parent);
+      const r = await revalidateWriteParent(path.join(parent, 'x.txt'), tmpDir);
+      expect(r.ok).toBe(false);
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
     }
   });
 });

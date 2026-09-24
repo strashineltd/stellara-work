@@ -150,6 +150,35 @@ export async function verifyWritePath(absPath: string, cwd: string): Promise<{ o
 }
 
 /**
+ * S16：写入前再验一次父目录 realpath（缩小 TOCTOU 窗口）。
+ * verifyWritePath 之后、fs.write 之前调用；父目录被换成 symlink 时拒绝。
+ */
+export async function revalidateWriteParent(absPath: string, cwd: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const normalizedCwd = path.normalize(cwd);
+  const realCwd = await canonicalCwd(normalizedCwd);
+  const parent = path.dirname(absPath);
+  let parentLstat;
+  try {
+    parentLstat = await fs.lstat(parent);
+  } catch {
+    return { ok: false, error: `父目录不存在：${parent}` };
+  }
+  if (parentLstat.isSymbolicLink()) {
+    return { ok: false, error: `父目录是符号链接，拒绝写入：${absPath}` };
+  }
+  let realParent: string;
+  try {
+    realParent = await fs.realpath(parent);
+  } catch {
+    return { ok: false, error: `无法解析父目录：${parent}` };
+  }
+  if (!isWithinDir(realParent, realCwd)) {
+    return { ok: false, error: `父目录超出工作目录：${absPath}` };
+  }
+  return { ok: true };
+}
+
+/**
  * 验证工作目录本身是否合法（用于 IPC 入口）。
  * 不能被 renderer 用任意路径调用。
  */

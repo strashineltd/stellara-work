@@ -42,4 +42,12 @@ describe('token-estimator', () => {
     expect(charFallbackTokens('abcde')).toBe(2);
     expect(charFallbackTokens('')).toBe(0);
   });
+
+  it('P12：相同 instructions/tools 走缓存结果稳定', () => {
+    const tools = [{ type: 'function', name: 'read_file', description: '读取文件', parameters: { type: 'object' } }];
+    const instructions = '你是助手，保持简洁。';
+    const a = estimateRequestTokens({ items: [], instructions, tools });
+    const b = estimateRequestTokens({ items: [], instructions, tools });
+    expect(a).toBe(b);
+  });
 });

@@ -1,9 +1,10 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import {
   resolvePath,
   verifyExistingPath,
   verifyWritePath,
+  revalidateWriteParent,
 } from '../../fs/path-security';
 import type {
   ReadFileArgs,
@@ -16,6 +17,38 @@ import type {
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 const GIT_DIR_WRITE_ERROR = '不允许修改 .git 目录内容';
+
+/**
+ * S16：安全写文件。
+ * - 写前重验父目录 realpath（防校验后被换成 symlink）
+ * - 目标存在时优先 O_NOFOLLOW（拒绝跟随 symlink 覆写）
+ */
+async function writeFileSyncSafe(target: string, content: string, cwd: string): Promise<void> {
+  const recheck = await revalidateWriteParent(target, cwd);
+  if (!recheck.ok) throw new Error(recheck.error);
+  const flags =
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW;
+  try {
+    const handle = await fs.open(target, flags);
+    try {
+      await handle.writeFile(content, 'utf-8');
+    } finally {
+      await handle.close();
+    }
+  } catch (err) {
+    // Windows / 某些 FS 不支持 O_NOFOLLOW → 回退普通写（父目录已重验）
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EINVAL' || code === 'ENOTSUP' || code === 'EPERM') {
+      await fs.writeFile(target, content, 'utf-8');
+      return;
+    }
+    // O_NOFOLLOW 命中 symlink
+    if (code === 'ELOOP') {
+      throw new Error(`拒绝写入符号链接目标：${target}`);
+    }
+    throw err;
+  }
+}
 
 /**
  * 判断路径是否位于任意 .git 目录之下（大小写不敏感，适配 macOS/Windows 的大小写不敏感文件系统）。
@@ -88,7 +121,7 @@ export async function writeFile(args: WriteFileArgs, cwd: string): Promise<ToolR
     } catch {
       // 文件不存在 → 新建
     }
-    await fs.writeFile(absPath, args.content, 'utf-8');
+    await writeFileSyncSafe(absPath, args.content, cwd);
     return {
       ok: true,
       output: `已写入 ${args.path} (${args.content.length} 字符)`,
@@ -130,7 +163,7 @@ export async function editFile(args: EditFileArgs, cwd: string): Promise<ToolRes
       if (updated === original) {
         return { ok: false, output: '', error: '替换后内容未变化' };
       }
-      await fs.writeFile(absPath, updated, 'utf-8');
+      await writeFileSyncSafe(absPath, updated, cwd);
       return {
         ok: true,
         output: `已编辑 ${args.path}（替换了 ${occurrences} 处，净变化 ${updated.length - original.length} 字符）`,
@@ -152,7 +185,7 @@ export async function editFile(args: EditFileArgs, cwd: string): Promise<ToolRes
       return { ok: false, output: '', error: '替换后内容未变化' };
     }
 
-    await fs.writeFile(absPath, updated, 'utf-8');
+    await writeFileSyncSafe(absPath, updated, cwd);
     return {
       ok: true,
       output: `已编辑 ${args.path}（净变化 ${updated.length - original.length} 字符）`,
