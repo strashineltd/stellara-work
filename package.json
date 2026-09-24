@@ -100,6 +100,8 @@
       "!dist/**/*.map",
       "assets/**/*"
     ],
+    "asar": true,
+    "afterPack": "./scripts/after-pack-fuses.cjs",
     "mac": {
       "target": [
         {
