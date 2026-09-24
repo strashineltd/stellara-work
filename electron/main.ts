@@ -2077,6 +2077,8 @@ async function resolveSessionExecutionContext(sessionId: string): Promise<ModelC
 // App lifecycle
 // ============================================
 
+let startupAppConfig: Awaited<ReturnType<typeof import('./config/config-v2').loadConfig>> | null = null;
+
 app.whenReady().then(async () => {
   // H1: 应用默认 session 拒绝一切系统权限请求（Electron 默认自动放行）。
   // 浏览器分区的权限+SSRF 加固由 BrowserService.getOrCreateWindow 调 hardenSession 完成。
@@ -2266,7 +2268,24 @@ app.whenReady().then(async () => {
     log.error('服务器模块初始化失败', err);
   }
 
+  // P3：db/secrets/server 就绪后立刻出窗（调度器/托盘见下方后台块）
+  {
+    const { mcpManager } = await import('./mcp/mcp-manager');
+    const { confirmStdioMcpCommand, confirmMcpServerChange } = await import('./mcp/mcp-confirm');
+    mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(mainWindow, cfg));
+    mcpManager.setServerConfirmer((cfg) => confirmMcpServerChange(mainWindow, cfg));
+    registerIpcHandlers();
+    const { loadConfig } = await import('./config/config-v2');
+    const cfg0 = await loadConfig();
+    backgroundSchedulingEnabled = cfg0.app?.backgroundScheduling !== false;
+    createWindow();
+    installAppMenu(() => mainWindow);
+    startupAppConfig = cfg0;
+  }
+
   // v0.9.3: 调度器运行时（db + serverRuntime 就绪后构造；T4/T5 经此接线）
+  // P3：整体后台化，不阻塞首窗
+  void (async () => {
   try {
     const [db, { v4: uuid }] = await Promise.all([import('./store/db'), import('uuid')]);
     const now = (): Date => new Date();
@@ -2448,25 +2467,17 @@ app.whenReady().then(async () => {
       isRunning: (taskId) => isRunning(taskId),
       abort: (taskId) => abortRun(taskId),
     };
+    // v0.9.3: 调度器启动（错过补偿先于引擎启动，避免引擎二次触发过期任务）
+    await schedulerRuntime.reload();
   } catch (err) {
     log.error('调度器初始化失败', err);
   }
+  })();
 
-  // C3: stdio MCP 服务器会 spawn 本地进程，add/test/update(command|args)
-  // 前必须在主窗口原生确认；mcp-manager 未接线时 fail-closed 拒绝。
-  // S9: HTTP MCP 增改同样原生确认（含鉴权头 / 审批策略变更）。
-  const { mcpManager } = await import('./mcp/mcp-manager');
-  const { confirmStdioMcpCommand, confirmMcpServerChange } = await import('./mcp/mcp-confirm');
-  mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(mainWindow, cfg));
-  mcpManager.setServerConfirmer((cfg) => confirmMcpServerChange(mainWindow, cfg));
-
-  registerIpcHandlers();
-  // v0.9.3: 托盘驻留 —— close 事件同步读取配置，先加载并缓存（未设置视为开启）
-  const { loadConfig } = await import('./config/config-v2');
-  const cfg0 = await loadConfig();
+  // C3: stdio MCP 确认器已在出窗块接线
+  const { loadConfig: loadConfigAgain } = await import('./config/config-v2');
+  const cfg0 = startupAppConfig ?? await loadConfigAgain();
   backgroundSchedulingEnabled = cfg0.app?.backgroundScheduling !== false;
-  createWindow();
-  installAppMenu(() => mainWindow);
 
   // 浏览器：启动时注入 execJsEnabled（Agent 执行 browser_exec_js 的开关）
   const { browserService } = await import('./browser/service');
@@ -2510,10 +2521,8 @@ app.whenReady().then(async () => {
   // 启动即连接已配置服务器（不阻塞窗口显示）
   void serverRuntime?.manager.connectAll();
 
-  // v0.9.3: 调度器启动（错过补偿先于引擎启动，避免引擎二次触发过期任务）
-  void schedulerRuntime?.reload();
-
   // v0.9.3: 系统托盘驻留（P11/P12/P13）—— 左键开窗，右键菜单（暂停/恢复调度仅内存态）
+  // P3：托盘创建也在窗口之后（schedulerRuntime 由后台块稍后就绪）
   try {
     appTray = createAppTray({
       onOpen: () => {

@@ -1,15 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { EditorView, keymap } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
-import { MergeView } from '@codemirror/merge';
-import { defaultKeymap } from '@codemirror/commands';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { javascript } from '@codemirror/lang-javascript';
-import { json } from '@codemirror/lang-json';
-import { html } from '@codemirror/lang-html';
-import { css } from '@codemirror/lang-css';
-import { python } from '@codemirror/lang-python';
-import { markdown } from '@codemirror/lang-markdown';
+import type { Extension } from '@codemirror/state';
 import { Icon } from './Icon';
 import { HoverablePath } from './hover/HoverablePath';
 
@@ -20,23 +10,38 @@ interface DiffCardProps {
   workDir?: string;
 }
 
-function getLangExtension(filePath: string) {
+/** 语言包懒加载：仅在展开且命中扩展名时 import（P4，避免进主 chunk） */
+async function loadLangExtension(filePath: string): Promise<Extension> {
   const ext = filePath.split('.').pop()?.toLowerCase();
   switch (ext) {
-    case 'ts': case 'tsx': case 'mts': case 'cts':
+    case 'ts': case 'tsx': case 'mts': case 'cts': {
+      const { javascript } = await import('@codemirror/lang-javascript');
       return javascript({ typescript: true });
-    case 'js': case 'jsx': case 'mjs': case 'cjs':
+    }
+    case 'js': case 'jsx': case 'mjs': case 'cjs': {
+      const { javascript } = await import('@codemirror/lang-javascript');
       return javascript();
-    case 'json': case 'jsonc':
+    }
+    case 'json': case 'jsonc': {
+      const { json } = await import('@codemirror/lang-json');
       return json();
-    case 'html': case 'htm':
+    }
+    case 'html': case 'htm': {
+      const { html } = await import('@codemirror/lang-html');
       return html();
-    case 'css': case 'scss': case 'less':
+    }
+    case 'css': case 'scss': case 'less': {
+      const { css } = await import('@codemirror/lang-css');
       return css();
-    case 'py':
+    }
+    case 'py': {
+      const { python } = await import('@codemirror/lang-python');
       return python();
-    case 'md': case 'markdown':
+    }
+    case 'md': case 'markdown': {
+      const { markdown } = await import('@codemirror/lang-markdown');
       return markdown();
+    }
     default:
       return [];
   }
@@ -46,10 +51,14 @@ function isDarkTheme(): boolean {
   return document.documentElement.dataset.theme === 'dark';
 }
 
+/**
+ * Diff 卡片
+ * - P4：默认折叠（只渲染路径 + ± 行数），展开时再动态加载 CodeMirror
+ * - 连续编辑 N 个文件时不会立刻挂载 N 个 MergeView
+ */
 export function DiffCard({ path, before, after, workDir }: DiffCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<MergeView | EditorView | null>(null);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   const isNew = before === null;
 
@@ -73,53 +82,62 @@ export function DiffCard({ path, before, after, workDir }: DiffCardProps) {
 
   useEffect(() => {
     if (!containerRef.current || !open) return;
+    let cancelled = false;
+    let view: { destroy(): void } | null = null;
+    const parent = containerRef.current;
+    parent.innerHTML = '';
 
-    // Destroy previous view
-    if (viewRef.current) {
-      viewRef.current.destroy();
-      viewRef.current = null;
-    }
-    containerRef.current.innerHTML = '';
+    void (async () => {
+      const [
+        { EditorView, keymap },
+        { EditorState },
+        { MergeView },
+        { defaultKeymap },
+        oneDarkMod,
+        langExt,
+      ] = await Promise.all([
+        import('@codemirror/view'),
+        import('@codemirror/state'),
+        import('@codemirror/merge'),
+        import('@codemirror/commands'),
+        import('@codemirror/theme-one-dark'),
+        loadLangExtension(path),
+      ]);
+      if (cancelled) return;
 
-    const dark = isDarkTheme();
-    const langExt = getLangExtension(path);
-    const themeExtensions = dark ? [oneDark] : [];
-    const baseExtensions = [
-      EditorState.readOnly.of(true),
-      EditorView.editable.of(false),
-      keymap.of(defaultKeymap),
-      langExt,
-      ...themeExtensions,
-    ];
+      const dark = isDarkTheme();
+      const themeExtensions = dark ? [oneDarkMod.oneDark] : [];
+      const baseExtensions: Extension[] = [
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        keymap.of(defaultKeymap),
+        langExt,
+        ...themeExtensions,
+      ];
 
-    if (isNew || !before) {
-      // New file: show read-only editor with after content
-      const state = EditorState.create({
-        doc: after,
-        extensions: [...baseExtensions, EditorView.lineWrapping],
-      });
-      const view = new EditorView({
-        state,
-        parent: containerRef.current,
-      });
-      viewRef.current = view;
-    } else {
-      // Modified file: show merge view
-      const mergeView = new MergeView({
-        a: { doc: before, extensions: baseExtensions },
-        b: { doc: after, extensions: baseExtensions },
-        parent: containerRef.current,
-        orientation: 'a-b',
-        highlightChanges: true,
-        gutter: true,
-      });
-      viewRef.current = mergeView;
-    }
+      if (isNew || !before) {
+        const state = EditorState.create({
+          doc: after,
+          extensions: [...baseExtensions, EditorView.lineWrapping],
+        });
+        view = new EditorView({ state, parent });
+      } else {
+        view = new MergeView({
+          a: { doc: before, extensions: baseExtensions },
+          b: { doc: after, extensions: baseExtensions },
+          parent,
+          orientation: 'a-b',
+          highlightChanges: true,
+          gutter: true,
+        });
+      }
+    })();
 
     return () => {
-      if (viewRef.current) {
-        viewRef.current.destroy();
-        viewRef.current = null;
+      cancelled = true;
+      if (view) {
+        view.destroy();
+        view = null;
       }
     };
   }, [path, before, after, open, isNew]);
