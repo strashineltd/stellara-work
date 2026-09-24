@@ -236,6 +236,34 @@ export function getDb(): Database.Database {
     }
   }
 
+  // P8：messages 全文索引（session_id 关联），避免 searchSessions 全表 LIKE
+  try {
+    _db.exec(
+      "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(session_id UNINDEXED, position UNINDEXED, content, tokenize='unicode61')",
+    );
+  } catch {
+    try {
+      _db.exec('DROP TABLE IF EXISTS messages_fts');
+      _db.exec(
+        "CREATE VIRTUAL TABLE messages_fts USING fts5(session_id UNINDEXED, position UNINDEXED, content, tokenize='unicode61')",
+      );
+    } catch {
+      // 忽略
+    }
+  }
+  // 一次性回填：FTS 为空且 messages 有数据时建索引（幂等，空表跳过）
+  try {
+    const ftsCount = (_db.prepare('SELECT COUNT(*) AS c FROM messages_fts').get() as { c: number }).c;
+    if (ftsCount === 0) {
+      _db.exec(
+        `INSERT INTO messages_fts (session_id, position, content)
+         SELECT session_id, position, content FROM messages`,
+      );
+    }
+  } catch {
+    // 忽略回填失败（search 会走 LIKE 兜底）
+  }
+
   // M4：schema/首次写入后 WAL/SHM 已创建，统一收紧权限（best-effort；Windows 上无效但不报错）
   bestEffortChmodSync(dbPath, 0o600);
   bestEffortChmodSync(`${dbPath}-wal`, 0o600);
@@ -341,25 +369,50 @@ export function listSessions(userId: string = 'default'): Session[] {
 }
 
 /**
- * 内容搜索会话：在 messages 表里 LIKE 匹配（标题、消息内容），
- * 返回匹配的 session id（按 updated_at 倒序）。query 空返回 []。
+ * 内容/标题搜索会话（P8）：
+ * - 标题 LIKE + 消息 FTS5 MATCH，单条 SQL 按 updated_at 排序并 LIMIT
+ * - 含 LIKE 通配符等字面量时消息侧退回 LIKE（保证 `100%` 精确子串语义）
+ * - 不再 listSessions 全量再过滤
  */
-export function searchSessions(query: string, userId: string = 'default'): string[] {
+export function searchSessions(query: string, userId: string = 'default', limit = 50): string[] {
   const q = query.trim();
   if (!q) return [];
   const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
   const pattern = `%${escaped}%`;
-  const rows = getDb()
-    .prepare(
-      `SELECT DISTINCT m.session_id FROM messages m
-       WHERE m.content LIKE ? ESCAPE '\\'
-       UNION
-       SELECT id FROM sessions WHERE title LIKE ? ESCAPE '\\'`,
-    )
-    .all(pattern, pattern) as Array<{ session_id: string }>;
-  const ids = new Set(rows.map((r) => r.session_id));
-  // 按更新时间倒序（listSessions 已排序）；同时过滤掉其他身份的命中
-  return listSessions(userId).filter((s) => ids.has(s.id)).map((s) => s.id);
+  const db = getDb();
+  // unicode61 对 CJK 短词与 `%`/`_` 字面量不可靠 → 这些走 LIKE 兜底
+  const needsLiteralContent =
+    /[%_\\]/.test(q) ||
+    q.length < 3 ||
+    /[㐀-䶿一-鿿豈-﫿]/.test(q);
+  const ftsQuery = `"${q.replace(/"/g, '""')}"`;
+
+  const run = (contentSql: string, contentParam: string): string[] => {
+    const rows = db.prepare(
+      `SELECT s.id AS id FROM sessions s
+       WHERE s.user_id = ?
+         AND (
+           s.title LIKE ? ESCAPE '\\'
+           OR s.id IN (SELECT session_id FROM messages m WHERE ${contentSql})
+         )
+       ORDER BY s.updated_at DESC
+       LIMIT ?`,
+    ).all(userId, pattern, contentParam, limit) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  };
+
+  if (needsLiteralContent) {
+    return run(`m.content LIKE ? ESCAPE '\\'`, pattern);
+  }
+  try {
+    return run(
+      `session_id IN (SELECT session_id FROM messages_fts WHERE messages_fts MATCH ?)`,
+      ftsQuery,
+    );
+  } catch {
+    // FTS 语法错误 / 表不可用 → LIKE 兜底
+    return run(`m.content LIKE ? ESCAPE '\\'`, pattern);
+  }
 }
 
 export function getSession(id: string): Session | null {
@@ -495,10 +548,22 @@ export function listServerSessions(serverId: string, userId?: string): Session[]
   return rows.map(rowToSession);
 }
 
+function clearMessagesFts(sessionId?: string): void {
+  try {
+    const db = getDb();
+    if (sessionId) db.prepare('DELETE FROM messages_fts WHERE session_id = ?').run(sessionId);
+    else db.prepare('DELETE FROM messages_fts').run();
+  } catch { /* fts 可能未建 */ }
+}
+
 export function deleteSessionByRemote(serverId: string, remoteSessionId: string): void {
-  getDb()
-    .prepare('DELETE FROM sessions WHERE server_id = ? AND remote_session_id = ?')
+  const db = getDb();
+  const doomed = db
+    .prepare('SELECT id FROM sessions WHERE server_id = ? AND remote_session_id = ?')
+    .all(serverId, remoteSessionId) as Array<{ id: string }>;
+  db.prepare('DELETE FROM sessions WHERE server_id = ? AND remote_session_id = ?')
     .run(serverId, remoteSessionId);
+  for (const row of doomed) clearMessagesFts(row.id);
 }
 
 export function updateSessionMeta(id: string, patch: { title?: string; updatedAt?: number; modelId?: string }): void {
@@ -522,7 +587,9 @@ export function updateSessionMeta(id: string, patch: { title?: string; updatedAt
 }
 
 export function deleteSession(id: string): void {
-  getDb().prepare('DELETE FROM sessions WHERE id = ?').run(id);
+  const db = getDb();
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+  clearMessagesFts(id);
 }
 
 export function renameSession(id: string, title: string): void {
@@ -537,24 +604,27 @@ export function getMessages(sessionId: string): MessageRow[] {
 }
 
 export function appendMessage(msg: MessageRow): void {
-  getDb()
-    .prepare(
-      `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, attachments, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      msg.sessionId,
-      msg.position,
-      msg.role,
-      msg.content,
-      msg.toolCalls ?? null,
-      msg.toolCallId ?? null,
-      msg.toolName ?? null,
-      msg.meta ?? null,
-      msg.planMode ?? 0,
-      msg.attachments ?? null,
-      msg.createdAt,
-    );
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO messages (session_id, position, role, content, tool_calls, tool_call_id, tool_name, meta, plan_mode, attachments, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    msg.sessionId,
+    msg.position,
+    msg.role,
+    msg.content,
+    msg.toolCalls ?? null,
+    msg.toolCallId ?? null,
+    msg.toolName ?? null,
+    msg.meta ?? null,
+    msg.planMode ?? 0,
+    msg.attachments ?? null,
+    msg.createdAt,
+  );
+  try {
+    db.prepare('INSERT INTO messages_fts (session_id, position, content) VALUES (?, ?, ?)')
+      .run(msg.sessionId, msg.position, msg.content);
+  } catch { /* fts 可能未建 */ }
   bumpSession(msg.sessionId, msg.position + 1);
 }
 
@@ -599,6 +669,14 @@ export function saveMessages(sessionId: string, msgs: MessageRow[]): void {
     }
     // 历史变短（压缩/清空）时删掉多余 position
     db.prepare('DELETE FROM messages WHERE session_id = ? AND position >= ?').run(sessionId, ms.length);
+    // P8：同步重建该会话的 FTS 索引
+    try {
+      db.prepare('DELETE FROM messages_fts WHERE session_id = ?').run(sessionId);
+      const ftsInsert = db.prepare(
+        'INSERT INTO messages_fts (session_id, position, content) VALUES (?, ?, ?)',
+      );
+      for (const m of ms) ftsInsert.run(m.sessionId, m.position, m.content);
+    } catch { /* fts 可能未建 */ }
   });
   tx(msgs);
   if (msgs.length !== prevCount) {
@@ -676,12 +754,17 @@ export function deleteProject(id: string): void {
 /** 删除所有会话及其消息（CASCADE） */
 export function deleteAllSessions(): number {
   const result = getDb().prepare('DELETE FROM sessions').run();
+  clearMessagesFts();
   return result.changes;
 }
 
 /** 删除某身份的全部会话及其消息（CASCADE），返回删除的会话数。 */
 export function deleteSessionsByUser(userId: string): number {
-  return getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId).changes;
+  const db = getDb();
+  const doomed = db.prepare('SELECT id FROM sessions WHERE user_id = ?').all(userId) as Array<{ id: string }>;
+  const changes = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId).changes;
+  for (const row of doomed) clearMessagesFts(row.id);
+  return changes;
 }
 
 /** 删除所有项目（会话的 project_id 置 NULL） */

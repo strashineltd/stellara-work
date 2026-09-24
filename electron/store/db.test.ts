@@ -168,6 +168,16 @@ describe('db', () => {
     expect(searchSessions('100x')).toEqual(['s2']);
   });
 
+  it('P8：searchSessions 按 user_id 过滤并限制条数', () => {
+    createSession({ id: 's1', title: 'A', modelId: 'm1', userId: 'u1' });
+    createSession({ id: 's2', title: 'B', modelId: 'm1', userId: 'u2' });
+    appendMessage({ sessionId: 's1', position: 0, role: 'user', content: 'alpha query', createdAt: Date.now() });
+    appendMessage({ sessionId: 's2', position: 0, role: 'user', content: 'alpha query', createdAt: Date.now() });
+    expect(searchSessions('alpha', 'u1')).toEqual(['s1']);
+    expect(searchSessions('alpha', 'u2')).toEqual(['s2']);
+    expect(searchSessions('alpha', 'u1', 0)).toEqual([]);
+  });
+
   it('renameSession updates title and bumps updatedAt', async () => {
     createSession({ id: 's1', title: 'Old', modelId: 'm1' });
     const before = getSession('s1')?.updatedAt ?? 0;
