@@ -4,6 +4,11 @@ import type { McpServerConfig, McpTestResult, McpToolInfo, OpenAITool, ToolResul
 import { connectMcpServer, callMcpTool } from './mcp-client';
 import { mcpToolToOpenAITool, parseMcpToolName } from './mcp-tools';
 import { checkMcpHttpUrl } from '../security/net-policy';
+import {
+  deleteMcpAuthHeaders,
+  getMcpAuthHeaders,
+  setMcpAuthHeaders,
+} from '../config/secrets';
 
 interface CachedConnection {
   client: Client;
@@ -15,6 +20,9 @@ export const MCP_COMMAND_CANCELED = '已取消：未确认 MCP 命令';
 
 /** C3：stdio 命令确认回调（由 main.ts 接入原生 dialog，测试注入 mock） */
 export type StdioCommandConfirmer = (cfg: McpServerConfig) => Promise<boolean>;
+
+/** S9：任意 MCP（含 HTTP）增改确认；缺省 fail-closed */
+export type McpServerConfirmer = (cfg: McpServerConfig) => Promise<boolean>;
 
 function hasOwn(obj: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -30,6 +38,24 @@ function withoutSpawnFields(cfg: McpServerConfig): McpServerConfig {
   delete sanitized.command;
   delete sanitized.args;
   return sanitized;
+}
+
+/** S8：config.json / IPC 列表只保留 header 名，明文值进密钥库 */
+function stripHeaderSecrets(cfg: McpServerConfig, stored: Record<string, string> | null): McpServerConfig {
+  const { headers: _headers, hasAuth: _hasAuth, headerNames: _headerNames, ...rest } = cfg;
+  const names = stored ? Object.keys(stored).filter((k) => k.trim()) : [];
+  const out: McpServerConfig = { ...rest };
+  if (names.length > 0) {
+    out.hasAuth = true;
+    out.headerNames = names;
+  }
+  return out;
+}
+
+function headerNamesOf(headers: Record<string, string> | undefined): string[] | undefined {
+  if (!headers) return undefined;
+  const names = Object.keys(headers).filter((k) => k.trim());
+  return names.length > 0 ? names : undefined;
 }
 
 function validationError(cfg: McpServerConfig): string | null {
@@ -66,9 +92,15 @@ export class McpManager {
 
   // fail-closed：未接入确认器（如主进程漏接线）时一律拒绝 stdio 命令
   private confirmStdioCommand: StdioCommandConfirmer = async () => false;
+  // S9：HTTP / 通用增改确认（fail-closed）
+  private confirmServerChange: McpServerConfirmer = async () => false;
 
   setStdioCommandConfirmer(confirmer: StdioCommandConfirmer): void {
     this.confirmStdioCommand = confirmer;
+  }
+
+  setServerConfirmer(confirmer: McpServerConfirmer): void {
+    this.confirmServerChange = confirmer;
   }
 
   private async assertStdioCommandConfirmed(cfg: McpServerConfig): Promise<void> {
@@ -76,9 +108,33 @@ export class McpManager {
     if (!(await this.confirmStdioCommand(cfg))) throw new Error(MCP_COMMAND_CANCELED);
   }
 
+  /** S9：任意服务器增改（含 HTTP）都要原生确认 */
+  private async assertServerChangeConfirmed(cfg: McpServerConfig): Promise<void> {
+    if (!(await this.confirmServerChange(cfg))) throw new Error(MCP_COMMAND_CANCELED);
+  }
+
   async listServers(): Promise<McpServerConfig[]> {
+    await this.migratePlaintextHeaders();
     const cfg = await loadConfig();
-    return cfg.mcpServers;
+    return cfg.mcpServers.map((s) => stripHeaderSecrets(s, getMcpAuthHeaders(s.id)));
+  }
+
+  /** 启动期：把历史 config.json 里的明文 headers 迁入密钥库并从配置剥离（S8） */
+  private async migratePlaintextHeaders(): Promise<void> {
+    const cfg = await loadConfig();
+    let dirty = false;
+    for (const s of cfg.mcpServers) {
+      if (s.headers && Object.keys(s.headers).length > 0) {
+        await setMcpAuthHeaders(s.id, s.headers);
+        const cleaned = { ...s };
+        delete cleaned.headers;
+        cleaned.hasAuth = true;
+        cleaned.headerNames = headerNamesOf(s.headers);
+        cfg.mcpServers[cfg.mcpServers.indexOf(s)] = cleaned;
+        dirty = true;
+      }
+    }
+    if (dirty) await saveConfig(cfg);
   }
 
   async addServer(cfg: McpServerConfig): Promise<void> {
@@ -94,7 +150,17 @@ export class McpManager {
       throw new Error(`MCP 服务器 id 已存在: ${sanitized.id}`);
     }
     await this.assertStdioCommandConfirmed(sanitized);
-    current.mcpServers.push(sanitized);
+    // S9：HTTP 也走原生确认（可携带 Authorization；stdio 已在上方确认则跳过重复弹窗）
+    if (sanitized.transport !== 'stdio') {
+      await this.assertServerChangeConfirmed(sanitized);
+    }
+    const headers = sanitized.headers;
+    const stored = stripHeaderSecrets(sanitized, headers ?? null);
+    // 先写密钥再落配置，避免「有配置无密钥」的半截状态
+    if (headers && Object.keys(headers).length > 0) {
+      await setMcpAuthHeaders(sanitized.id, headers);
+    }
+    current.mcpServers.push(stored);
     await saveConfig(current);
     this.invalidateCache();
   }
@@ -103,6 +169,7 @@ export class McpManager {
     const current = await loadConfig();
     current.mcpServers = current.mcpServers.filter((s) => s.id !== id);
     await saveConfig(current);
+    await deleteMcpAuthHeaders(id);
     this.invalidateCache();
   }
 
@@ -110,7 +177,8 @@ export class McpManager {
     const current = await loadConfig();
     const idx = current.mcpServers.findIndex((s) => s.id === id);
     if (idx < 0) throw new Error(`MCP 服务器不存在: ${id}`);
-    const merged = { ...current.mcpServers[idx]!, ...patch };
+    const existing = current.mcpServers[idx]!;
+    const merged = { ...existing, ...patch };
     const err = validationError(merged);
     if (err) throw new Error(err);
     if (merged.transport === 'http' && merged.url) {
@@ -124,8 +192,28 @@ export class McpManager {
       hasOwn(patch, 'transport') || hasOwn(patch, 'command') || hasOwn(patch, 'args');
     if (touchesSpawnConfig && merged.transport === 'stdio' && merged.command) {
       await this.assertStdioCommandConfirmed(merged);
+    } else if (
+      hasOwn(patch, 'url') ||
+      hasOwn(patch, 'headers') ||
+      hasOwn(patch, 'approval') ||
+      hasOwn(patch, 'enabled') ||
+      hasOwn(patch, 'tools') ||
+      hasOwn(patch, 'dangerousTools')
+    ) {
+      // S9：鉴权 / 审批策略 / 工具白名单变更同样需要原生确认
+      await this.assertServerChangeConfirmed(merged);
     }
-    current.mcpServers[idx] = withoutSpawnFields(merged);
+    // S8：headers 变更写入密钥库；显式 headers:{} 表示清除
+    if (hasOwn(patch, 'headers')) {
+      const next = patch.headers;
+      if (next && Object.keys(next).length > 0) {
+        await setMcpAuthHeaders(id, next);
+      } else {
+        await deleteMcpAuthHeaders(id);
+      }
+    }
+    const storedHeaders = getMcpAuthHeaders(id);
+    current.mcpServers[idx] = stripHeaderSecrets(withoutSpawnFields(merged), storedHeaders);
     await saveConfig(current);
     this.invalidateCache();
   }
@@ -137,7 +225,15 @@ export class McpManager {
         if (!netCheck.ok) return { ok: false, error: netCheck.error ?? '不允许访问受限地址' };
       }
       await this.assertStdioCommandConfirmed(cfg);
-      const { client, tools } = await connectMcpServer(cfg);
+      // S9：test 也会建立连接并拉取工具列表，HTTP 同样确认
+      if (cfg.transport !== 'stdio') {
+        await this.assertServerChangeConfirmed(cfg);
+      }
+      // 测试时优先用调用方提供的 headers，否则读密钥库（编辑已有服务器且未改头）
+      const headers = cfg.headers && Object.keys(cfg.headers).length > 0
+        ? cfg.headers
+        : (getMcpAuthHeaders(cfg.id) ?? undefined);
+      const { client, tools } = await connectMcpServer({ ...cfg, headers });
       await client.close();
       return { ok: true, toolCount: tools.length, tools };
     } catch (e) {
@@ -150,7 +246,9 @@ export class McpManager {
     if (hit) return hit;
     const server = (await this.listServers()).find((s) => s.id === serverId);
     if (!server) throw new Error(`MCP 服务器不存在: ${serverId}`);
-    const entry = await connectMcpServer(server);
+    // S8：明文 headers 只在主进程建连时注入
+    const headers = getMcpAuthHeaders(serverId) ?? undefined;
+    const entry = await connectMcpServer({ ...server, headers });
     this.cache.set(serverId, entry);
     return entry;
   }

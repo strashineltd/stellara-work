@@ -2,11 +2,45 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   checkUrlDestination,
   checkMcpHttpUrl,
+  checkLlmBaseUrl,
   isBlockedDestinationUrl,
   isPrivateOrReservedIp,
   isRestrictedHostname,
   normalizeHostname,
 } from './net-policy';
+
+describe('checkLlmBaseUrl (S10)', () => {
+  it('accepts https public and http loopback (Ollama)', () => {
+    expect(checkLlmBaseUrl('https://api.deepseek.com/v1').ok).toBe(true);
+    expect(checkLlmBaseUrl('http://127.0.0.1:11434').ok).toBe(true);
+    expect(checkLlmBaseUrl('http://localhost:11434/v1').ok).toBe(true);
+  });
+
+  it('rejects non-loopback cleartext http', () => {
+    const r = checkLlmBaseUrl('http://192.168.1.10:8080/v1');
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('https');
+  });
+
+  it('rejects cloud metadata and bad schemes', () => {
+    expect(checkLlmBaseUrl('http://169.254.169.254/').ok).toBe(false);
+    expect(checkLlmBaseUrl('https://metadata.google.internal/').ok).toBe(false);
+    expect(checkLlmBaseUrl('file:///etc/passwd').ok).toBe(false);
+    expect(checkLlmBaseUrl('not a url').ok).toBe(false);
+  });
+});
+
+describe('checkMcpHttpUrl (S9 https rule)', () => {
+  it('allows loopback http and public https', () => {
+    expect(checkMcpHttpUrl('http://127.0.0.1:3000/mcp').ok).toBe(true);
+    expect(checkMcpHttpUrl('https://mcp.example.com').ok).toBe(true);
+  });
+  it('rejects non-loopback cleartext http', () => {
+    const r = checkMcpHttpUrl('http://192.168.1.20:8080/mcp');
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('https');
+  });
+});
 
 describe('isPrivateOrReservedIp (IPv4)', () => {
   it('blocks loopback / private / link-local / unspecified', () => {
@@ -270,10 +304,14 @@ describe('checkMcpHttpUrl', () => {
     }
   });
 
-  it('still allows mapped/compatible IPv6 literals for local dev and public hosts', () => {
-    for (const url of ['http://[::ffff:127.0.0.1]/', 'http://[::7f00:1]/', 'http://[::ffff:8.8.8.8]/']) {
+  it('still allows mapped/compatible IPv6 loopback; public mapped needs https (S9)', () => {
+    // 回环映射允许 http（本地 MCP）
+    for (const url of ['http://[::ffff:127.0.0.1]/', 'http://[::7f00:1]/']) {
       expect(checkMcpHttpUrl(url).ok, url).toBe(true);
     }
+    // 公网映射地址上的明文 http 拒绝
+    expect(checkMcpHttpUrl('http://[::ffff:8.8.8.8]/').ok).toBe(false);
+    expect(checkMcpHttpUrl('https://[::ffff:8.8.8.8]/').ok).toBe(true);
   });
 
   it('rejects non-http/https protocols', () => {

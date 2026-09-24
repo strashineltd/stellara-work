@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { BrowserWindow } from 'electron';
 import type { McpServerConfig } from '../../shared/ipc';
-import { confirmStdioMcpCommand, formatMcpCommand } from './mcp-confirm';
+import { confirmStdioMcpCommand, confirmMcpServerChange, formatMcpCommand, formatMcpHttpTarget } from './mcp-confirm';
 
 const { mockShowMessageBox } = vi.hoisted(() => ({ mockShowMessageBox: vi.fn() }));
 
@@ -60,5 +60,34 @@ describe('formatMcpCommand', () => {
 
   it('handles a missing args list', () => {
     expect(formatMcpCommand({ ...stdioCfg, args: undefined })).toBe('npx');
+  });
+});
+
+describe('confirmMcpServerChange / formatMcpHttpTarget (S9)', () => {
+  const httpCfg: McpServerConfig = {
+    id: 'h1',
+    name: 'Remote',
+    transport: 'http',
+    url: 'https://mcp.example.com',
+    headers: { Authorization: 'Bearer secret-token' },
+    hasAuth: true,
+    headerNames: ['Authorization'],
+    enabled: true,
+  };
+
+  it('formats HTTP target without leaking header values', () => {
+    expect(formatMcpHttpTarget(httpCfg)).toBe('https://mcp.example.com（含鉴权请求头）');
+    expect(formatMcpHttpTarget(httpCfg)).not.toContain('secret-token');
+  });
+
+  it('confirms HTTP servers via dialog without printing secrets', async () => {
+    await expect(confirmMcpServerChange(fakeWindow, httpCfg)).resolves.toBe(true);
+    const [, options] = mockShowMessageBox.mock.calls.at(-1)! as [unknown, { detail?: string }];
+    expect(options.detail).not.toContain('secret-token');
+  });
+
+  it('fails closed without a window', async () => {
+    await expect(confirmMcpServerChange(null, httpCfg)).resolves.toBe(false);
+    expect(mockShowMessageBox).not.toHaveBeenCalled();
   });
 });

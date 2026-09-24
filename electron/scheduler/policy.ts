@@ -42,7 +42,13 @@ export function validateTaskPolicy(policy: ScheduledTaskPolicy | undefined): str
   return null;
 }
 
-/** 命令是否命中白名单（token 边界前缀） */
+/**
+ * 命令是否命中白名单。
+ *
+ * S5：entry 必须是 command 的 token 前缀，且前缀之后只允许旗标
+ * （以 `-` 开头）或 `--` 之后的参数。避免 `npm run` 前缀匹配
+ * `npm run evil`、`make` 匹配任意 target 等过宽放行。
+ */
 export function matchesCommandAllowlist(command: string, allowlist: readonly string[]): boolean {
   const commandTokens = tokenizeCommand(command);
   if (commandTokens.length === 0) return false;
@@ -56,9 +62,25 @@ export function matchesCommandAllowlist(command: string, allowlist: readonly str
         break;
       }
     }
-    if (match) return true;
+    if (!match) continue;
+    if (remainingArgsAreFlagsOnly(commandTokens, entryTokens.length)) return true;
   }
   return false;
+}
+
+/** entry 前缀之后的 token 是否仅为旗标（或位于 `--` 之后） */
+function remainingArgsAreFlagsOnly(commandTokens: readonly string[], fromIndex: number): boolean {
+  let afterDoubleDash = false;
+  for (let i = fromIndex; i < commandTokens.length; i++) {
+    const tok = commandTokens[i]!;
+    if (afterDoubleDash) continue;
+    if (tok === '--') {
+      afterDoubleDash = true;
+      continue;
+    }
+    if (!tok.startsWith('-')) return false;
+  }
+  return true;
 }
 
 export interface ScheduledPolicyRuntime {
@@ -159,27 +181,36 @@ export async function checkScheduledFilePath(
 }
 
 /**
- * 校验显式提供的 run_command cwd 是否落于声明范围（未提供时在工作目录根执行）。
+ * 校验 run_command 的 cwd 是否落于声明范围。
+ * S6：未提供 cwd 时按工作目录根 `.` 处理——若声明了 fileScopes，
+ * 根目录通常不在范围内，必须拒绝，避免脚本在根上写穿范围。
  */
 export async function checkScheduledCommandCwd(
   rawCwd: string | undefined,
   cwd: string,
   fileScopes: readonly string[],
 ): Promise<string | null> {
-  if (rawCwd === undefined || rawCwd === '') return null;
   if (fileScopes.length === 0) return null;
-  const resolved = path.resolve(cwd, rawCwd);
+  const effective = rawCwd === undefined || rawCwd === '' ? '.' : rawCwd;
+  const resolved = path.resolve(cwd, effective);
   const realTarget = await resolveRealTarget(resolved);
-  if (!realTarget) return `无法解析命令 cwd（已拒绝）：${rawCwd}`;
+  if (!realTarget) return `无法解析命令 cwd（已拒绝）：${effective}`;
   const realCwd = await canonicalCwd(cwd);
-  if (!isWithinDir(realTarget, realCwd)) return `命令 cwd ${rawCwd} 超出工作目录（已拒绝）`;
+  if (!isWithinDir(realTarget, realCwd) && realTarget !== realCwd) {
+    return `命令 cwd ${effective} 超出工作目录（已拒绝）`;
+  }
   const relative = path.relative(realCwd, realTarget);
   const allowed = fileScopes.some((scope) => {
     const dir = scopeDirectory(scope);
+    // 无静态前缀的 glob（如 `**`）覆盖整个工作区
     if (!dir) return true;
-    return relative === dir || relative.startsWith(`${dir}/`);
+    return relative === dir || relative.startsWith(`${dir}/`) || (relative === '' && (dir === '' || dir === '.'));
   });
-  if (!allowed) return `命令 cwd ${rawCwd} 超出任务声明的可写范围（已拒绝）`;
+  if (!allowed) {
+    return rawCwd === undefined || rawCwd === ''
+      ? '命令未指定 cwd 且默认工作目录根不在任务可写范围内（已拒绝）'
+      : `命令 cwd ${effective} 超出任务声明的可写范围（已拒绝）`;
+  }
   return null;
 }
 

@@ -39,8 +39,8 @@ const ALLOWED_COMMANDS_POSIX = new Set([
   'pwd', 'whoami', 'uname', 'which', 'true', 'false', 'test',
   // 开发 / 构建工具
   'pip', 'pip3', 'cargo', 'rustc', 'go', 'java', 'javac', 'gradle', 'mvn',
-  // 文本处理（只读）
-  'sed', 'cut', 'sort', 'uniq', 'wc', 'diff',
+  // 文本处理（只读；sed 已移除：GNU sed e / s///e 可执行任意 shell）
+  'cut', 'sort', 'uniq', 'wc', 'diff',
   // macOS / Linux 构建链
   'make', 'cmake', 'ninja', 'clang', 'clang++', 'cc', 'gcc', 'g++',
   // macOS 专属开发命令
@@ -72,6 +72,7 @@ const SUBCOMMAND_ALLOWLIST: Record<string, ReadonlySet<string>> = {
   npm: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
   pnpm: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
   yarn: new Set(PACKAGE_MANAGER_SUBCOMMANDS),
+  // 注意：validateAllowedCommandEntry 另拒「裸 run/install」过宽项（S5）
   pip: new Set(['install', 'list', 'show', 'freeze']),
   pip3: new Set(['install', 'list', 'show', 'freeze']),
   cargo: new Set(['build', 'test', 'check', 'clippy', 'fmt', 'run', 'bench', 'doc']),
@@ -92,17 +93,6 @@ const GIT_CONFIG_READ_FLAGS = new Set(['-l', '--list']);
 const GIT_CONFIG_WRITE_FLAGS = new Set([
   '--add', '--replace-all', '--unset', '--unset-all', '--rename-section', '--remove-section', '--edit', '-e',
 ]);
-
-/** sed 短选项簇中出现 i（-i / -i.bak / -ni）即为就地写；遇到取值型选项（e/f/l）后停止扫描，避免把脚本内容误判为旗标 */
-const SED_VALUE_FLAGS = new Set(['e', 'f', 'l']);
-
-function sedHasInPlaceShortFlag(arg: string): boolean {
-  for (const ch of arg.slice(1)) {
-    if (ch === 'i') return true;
-    if (SED_VALUE_FLAGS.has(ch)) return false;
-  }
-  return false;
-}
 
 function allowedCommands(): Set<string> {
   return process.platform === 'win32' ? ALLOWED_COMMANDS_WIN : ALLOWED_COMMANDS_POSIX;
@@ -474,9 +464,8 @@ function findDisallowedUrlScheme(args: string[]): string | null {
  * 工具级显式拒绝（fail-closed）：无法安全解析其内容、且会读取任意文件或注入可执行配置的旗标。
  * - git -c/--config/--config-env：注入 core.fsmonitor / credential.helper / diff.external 等可执行配置
  * - git --upload-pack/-u/--receive-pack：指定远端执行的程序（等价任意命令执行）
- * - find -exec/-execdir/-ok/-okdir：find 自行 execvp，绕过 executable 白名单
+ * - find -exec/-execdir/-ok/-okdir/-delete/-fprint*：执行外部程序或写文件，绕过 executable 白名单与 write 审批
  * - cmake -D：取值可能指向工具链/预加载脚本（绝对路径或 .. 一律拒绝）
- * - sed -i/--in-place：就地覆写文件，突破只读文本处理定位
  * 返回错误文案，null 表示通过。
  */
 function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
@@ -507,23 +496,21 @@ function findForbiddenToolArg(exeBase: string, args: string[]): string | null {
       }
     }
   }
-  if (exeBase === 'sed') {
-    for (const arg of args) {
-      // GNU getopt_long 接受无歧义长选项缩写：sed 中以 i 开头的长选项只有 --in-place，
-      // 故 --i / --in / --in-p / --i=.bak 等都会被解析为 --in-place，必须一并拒绝。
-      const longName = arg.split('=')[0]!;
-      if (longName.startsWith('--') && longName.length > 2 && '--in-place'.startsWith(longName)) {
-        return '不允许：sed --in-place 会就地覆写文件（sed 仅用于 stdin/stdout 只读处理）。';
-      }
-      if (arg.startsWith('-') && !arg.startsWith('--') && sedHasInPlaceShortFlag(arg)) {
-        return '不允许：sed -i 会就地覆写文件（sed 仅用于 stdin/stdout 只读处理）。';
-      }
-    }
-  }
   if (exeBase === 'find') {
     for (const arg of args) {
       if (arg === '-exec' || arg === '-execdir' || arg === '-ok' || arg === '-okdir') {
         return '不允许：find -exec/-execdir/-ok/-okdir 会执行外部命令。';
+      }
+      // -delete / -fprint* / -fprintf / -fls 会写文件或删除，突破只读与 write 审批
+      if (
+        arg === '-delete' ||
+        arg === '-fprint' || arg === '-fprint0' ||
+        arg === '-fprintf' || arg === '-fls' ||
+        arg.startsWith('-fprint') ||
+        arg.startsWith('-fprintf') ||
+        arg.startsWith('-fls')
+      ) {
+        return '不允许：find -delete/-fprint*/-fprintf/-fls 会写入或删除文件（find 仅用于只读查找）。';
       }
     }
   }
@@ -954,6 +941,33 @@ export function validateAllowedCommandEntry(entry: string): string | null {
   if (forbidden !== null) return forbidden;
   const subErr = subcommandError(exeBase, parsed.args);
   if (subErr !== null) return subErr;
+  // 调度白名单不得写成「裸 run/install」——会匹配任意脚本名（S5）
+  const broad = broadAllowlistEntryError(exeBase, parsed.args);
+  if (broad !== null) return broad;
+  return null;
+}
+
+/**
+ * 拒绝过宽的白名单项：`npm run` / `npm install`（无完整脚本）等
+ * 会经前缀匹配放行任意后续脚本，在无人值守调度中等于任意代码执行。
+ */
+function broadAllowlistEntryError(exeBase: string, args: string[]): string | null {
+  const pkgManagers = new Set(['npm', 'pnpm', 'yarn']);
+  if (!pkgManagers.has(exeBase)) return null;
+  const sub = args[0];
+  if (sub === 'run' || sub === 'exec' || sub === 'dlx' || sub === 'create') {
+    const script = args[1];
+    if (typeof script !== 'string' || !script.trim() || script.startsWith('-')) {
+      return `命令白名单项「${exeBase} ${sub}」过宽：必须写明具体脚本名（如 ${exeBase} ${sub} build）`;
+    }
+  }
+  if ((sub === 'install' || sub === 'i' || sub === 'ci') && exeBase !== 'yarn') {
+    // install 会执行依赖生命周期脚本；必须允许时由用户显式写下完整项（含后续旗标才有意义）
+    // 此处仅拦截「裸 install」作为白名单前缀（匹配任意附加参数）
+    if (args.length === 1) {
+      return `命令白名单项「${exeBase} ${sub}」会执行依赖生命周期脚本且过宽，请写明完整参数或改用更窄的命令`;
+    }
+  }
   return null;
 }
 
@@ -967,7 +981,7 @@ export const shellTools: OpenAITool[] = [
     function: {
       name: 'run_command',
       description:
-        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。有子命令白名单的命令（npm/git/cargo/go/pip/swift/xcodebuild 等），第一个参数必须是子命令（仅可单独使用 --version/-V/-h/--help 查询版本/帮助）。解释器（node/python/sh/bash 等）与网络工具（curl/wget/ssh/scp 等）已整体移除：联网获取资源请用 web_fetch 或浏览器工具。npm install/npm run/cargo build 等会执行项目内代码（安装脚本、构建脚本、Makefile 等），属于需用户审批的敏感操作。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
+        '执行一条白名单命令（无 shell），用于包管理/构建/测试/版本控制：npm/pnpm/yarn（install/run/test/build 等子命令）、git（status/diff/log/commit/add 等子命令）、cargo/go/make/cmake/gradle/mvn/swift/clang 等构建工具，以及 ls/cat/grep/find/file 等只读文件命令。有子命令白名单的命令（npm/git/cargo/go/pip/swift/xcodebuild 等），第一个参数必须是子命令（仅可单独使用 --version/-V/-h/--help 查询版本/帮助）。解释器（node/python/sh/bash/sed 等）与网络工具（curl/wget/ssh/scp 等）已整体移除：联网获取资源请用 web_fetch 或浏览器工具。find 禁止 -delete/-exec/-fprint* 等写或执行形式。npm install/npm run/cargo build 等会执行项目内代码（安装脚本、构建脚本、Makefile 等），属于需用户审批的敏感操作。不支持管道/重定向/变量展开；路径参数必须在工作目录内。',
       parameters: {
         type: 'object',
         properties: {

@@ -796,8 +796,16 @@ export interface McpServerConfig {
   args?: string[];
   /** http */
   url?: string;
-  /** http 可选 */
+  /**
+   * http 可选自定义请求头（常含 Authorization）。
+   * 写入（add/update）时可带；列表/IPC 响应 **绝不回传明文值**，
+   * 只给 hasAuth / headerNames（S8，密钥存 secrets.ts）。
+   */
   headers?: Record<string, string>;
+  /** 是否已配置鉴权请求头（只读，IPC 用） */
+  hasAuth?: boolean;
+  /** 已配置的请求头名称列表（只读，不含值） */
+  headerNames?: string[];
   enabled: boolean;
   /** 空 = 全部 */
   tools?: string[];

@@ -47,13 +47,16 @@ export function checkFileScopeViolation(
   }
 
   if (toolName === 'run_command') {
+    // S6：省略 cwd 时按工作目录根处理，不得跳过 fileScopes
     const target = typeof args.cwd === 'string' ? args.cwd.trim() : '';
-    if (!target) return null;
-    const absCwd = path.resolve(cwd, target);
+    const effective = target === '' ? '.' : target;
+    const absCwd = path.resolve(cwd, effective);
+    // 仅允许 cwd 落在某个 scope 目录内（或等于 scope）；
+    // 不用 isWithinDir(scope, absCwd)——那会在 scope ⊆ cwd 时放大权限
     const allowed = normalizedScopes.some(
-      (scope) => isWithinDir(absCwd, scope) || isWithinDir(scope, absCwd),
+      (scope) => absCwd === scope || isWithinDir(absCwd, scope),
     );
-    return allowed ? null : `命令工作目录 ${target} 超出子代理声明的 fileScopes（已拒绝）`;
+    return allowed ? null : `命令工作目录 ${effective} 超出子代理声明的 fileScopes（已拒绝）`;
   }
 
   return null;

@@ -47,9 +47,17 @@ export async function configureModel(config: ModelConfig): Promise<ConfigureResu
   const { findPreset } = await import('../llm/presets');
   const { loadConfig, upsertModel } = await import('./config-v2');
   const { getKey, setKey } = await import('./secrets');
+  const { checkLlmBaseUrl } = await import('../security/net-policy');
 
   const preset = findPreset(config.id);
   const nextBaseUrl = config.baseUrl || preset?.baseUrl || '';
+  // S10：配置期拒绝元数据 / 非回环明文 http，避免 API Key 被引到内网或元数据
+  if (nextBaseUrl) {
+    const netCheck = checkLlmBaseUrl(nextBaseUrl);
+    if (!netCheck.ok) {
+      return { ok: false, error: netCheck.error ?? 'baseUrl 不合法', errorKind: 'invalid_base_url' };
+    }
+  }
 
   // H8：已有存储 key 且 baseUrl 发生变化 → 拒绝省略 apiKey 的更新，
   // 防止旧 key 被重定向到攻击者控制的新主机。

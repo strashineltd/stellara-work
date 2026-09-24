@@ -307,9 +307,16 @@ function createWindow(): void {
     log.error(msg);
   });
   mainWindow.webContents.on('console-message', (_e, _level, message, line, source) => {
-    const msg = `[renderer] ${message} (${source}:${line})`;
-    console.log(msg);
-    log.info(msg);
+    // S19：renderer console 可能带出 token / apiKey，写入 electron-log 前脱敏
+    void import('./security/redact').then(({ redactSensitiveText }) => {
+      const msg = redactSensitiveText(`[renderer] ${message} (${source}:${line})`);
+      console.log(msg);
+      log.info(msg);
+    }).catch(() => {
+      const msg = `[renderer] ${message} (${source}:${line})`;
+      console.log(msg);
+      log.info(msg);
+    });
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -530,6 +537,10 @@ function registerIpcHandlers(): void {
         attachContextEvents,
         notifyTaskEnd,
         unregisterBrowserStream,
+        confirmDangerousTool: async (toolName, args) => {
+          const { confirmDangerousTool } = await import('./chat/tool-confirm');
+          return confirmDangerousTool(mainWindow, toolName, args);
+        },
         runSubagent: runOneSubagent,
         extractMemories: extractMemoriesFromSession,
       },
@@ -1366,17 +1377,32 @@ function registerIpcHandlers(): void {
   });
 
   handle('scheduled:create', async (_e, input: ScheduledTaskInput): Promise<ScheduledTask> => {
-    const [db, { v4: uuid }] = await Promise.all([import('./store/db'), import('uuid')]);
+    const [db, { v4: uuid }, { assertScheduledWorkDir }, { loadConfig }] = await Promise.all([
+      import('./store/db'),
+      import('uuid'),
+      import('./scheduler/workdir'),
+      import('./config/config-v2'),
+    ]);
     // P19：排期非法 / once 时间已过一律拒绝；id / userId / nextRunAt 由主进程注入
     const nextRunAt = computeNextRun(input.scheduleKind, input.scheduleExpr, new Date());
     if (!nextRunAt) throw new Error('调度表达式无效或时间已过，请检查后重试');
     const policyError = validateTaskPolicy(input.policy);
     if (policyError) throw new Error(policyError);
+    // S1：workDir 不得由渲染层任意指定（防止种子化白名单 / 逃出工作区）
+    const cfg = await loadConfig();
+    const activeUserId = getActiveUserId();
+    await assertScheduledWorkDir(input.workDir, {
+      projectWorkDirs: db.listProjects(activeUserId).map((p) => p.workDir),
+      modelWorkDirs: cfg.models.map((m) => m.workDir),
+    });
+    if (input.projectId) {
+      db.assertProjectOwned(input.projectId, activeUserId);
+    }
     const task = db.createScheduledTask({
       ...input,
       policy: normalizeScheduledPolicy(input.policy),
       id: uuid(),
-      userId: getActiveUserId(),
+      userId: activeUserId,
       nextRunAt: nextRunAt.getTime(),
     });
     broadcastScheduledChanged();
@@ -1384,12 +1410,28 @@ function registerIpcHandlers(): void {
   });
 
   handle('scheduled:update', async (_e, id: string, patch: ScheduledTaskPatch): Promise<ScheduledTask> => {
-    const db = await import('./store/db');
-    const current = db.assertScheduledTaskOwned(id, getActiveUserId());
+    const [db, { assertScheduledWorkDir }, { loadConfig }] = await Promise.all([
+      import('./store/db'),
+      import('./scheduler/workdir'),
+      import('./config/config-v2'),
+    ]);
+    const activeUserId = getActiveUserId();
+    const current = db.assertScheduledTaskOwned(id, activeUserId);
     if (patch.policy !== undefined) {
       const policyError = validateTaskPolicy(patch.policy ?? undefined);
       if (policyError) throw new Error(policyError);
       patch = { ...patch, policy: normalizeScheduledPolicy(patch.policy ?? undefined) ?? null };
+    }
+    // S1：变更 workDir 时同样要求授权来源
+    if (patch.workDir !== undefined) {
+      const cfg = await loadConfig();
+      await assertScheduledWorkDir(patch.workDir, {
+        projectWorkDirs: db.listProjects(activeUserId).map((p) => p.workDir),
+        modelWorkDirs: cfg.models.map((m) => m.workDir),
+      });
+    }
+    if (patch.projectId !== undefined && patch.projectId !== null) {
+      db.assertProjectOwned(patch.projectId, activeUserId);
     }
     // P19：排期 / 启停变化时无条件校验表达式（含停用操作），再按最终启用状态落 nextRunAt
     const recalc = nextRunPatchForUpdate(current, patch, new Date());
@@ -1671,11 +1713,14 @@ async function verifyProjectSelection(workDir: string, filePath: string): Promis
 }
 
 /**
- * 验证 renderer 传入的 workDir 是否来自现有项目、旧会话/模型配置，
+ * 验证 renderer 传入的 workDir 是否来自现有项目、模型配置，
  * 或本次原生文件选择明确授予的目录。防止 renderer 通过 IPC 读取任意目录。
+ *
+ * S1：不再把 session.workDir 当作信任来源——否则「调度种任意路径 → 跑出
+ * Session → 永久放行」可形成逃逸链。会话工作区应由项目 / 模型 / 选择器背书。
  */
 async function assertWorkDirAllowed(workDir: string): Promise<void> {
-  const [{ loadConfig }, { listProjects, listSessions }] = await Promise.all([
+  const [{ loadConfig }, { listProjects }] = await Promise.all([
     import('./config/config-v2'),
     import('./store/db'),
   ]);
@@ -1685,7 +1730,6 @@ async function assertWorkDirAllowed(workDir: string): Promise<void> {
     .map((m) => m.workDir)
     .filter((d): d is string => !!d);
   allowed.push(...listProjects(activeUserId).map((project) => project.workDir).filter((d): d is string => !!d));
-  allowed.push(...listSessions(activeUserId).map((session) => session.workDir).filter((d): d is string => !!d));
 
   const resolved = await normalizeWorkDir(workDir);
   if (await isWorkDirGranted(workDir)) return;
@@ -2045,7 +2089,7 @@ app.whenReady().then(async () => {
     const dockIcon = nativeImage.createFromPath(path.join(__dirname, '..', '..', '..', 'assets', 'icon-512.png'));
     if (!dockIcon.isEmpty()) app.dock?.setIcon(dockIcon);
   }
-  const { setAppDataDir, migrateLegacyAppData } = await import('./config/data-dir');
+  const { setAppDataDir, migrateLegacyAppData, scrubConfigBackupSecrets } = await import('./config/data-dir');
   const appDataDir = app.getPath('userData');
   setAppDataDir(appDataDir);
   try {
@@ -2105,6 +2149,13 @@ app.whenReady().then(async () => {
     }
   } catch (err) {
     log.error('config 迁移失败', err);
+  }
+  // S12：历史 config.json.bak 可能仍含明文 apiKey，启动时脱敏
+  try {
+    const scrubbed = await scrubConfigBackupSecrets();
+    if (scrubbed) log.info('已脱敏 config.json.bak 中的明文密钥');
+  } catch (err) {
+    log.warn('config.json.bak 脱敏失败', err);
   }
   try {
     const { initDb, initContextTables, getDb, migrateIdentityOwnership } = await import('./store/db');
@@ -2257,6 +2308,9 @@ app.whenReady().then(async () => {
           memoryUserId: request.memoryUserId,
           allowedToolNames: runtime.allowedToolNames,
           isToolDenied: isScheduledDeniedTool,
+          // S17：超限后进入的 force_approval 在调度里仍会被 policy 自动批准，
+          // 等于熔断失效。调度改为 fail-closed：超限直接结束。
+          requireApprovalAfterLimit: false,
           onApproval: async (toolCall: ToolCall) => runtime.shouldApprove(toolCall.function.name),
           toolGuard: (name: string, args: Record<string, unknown>) => runtime.toolGuard(name, args),
         };
@@ -2400,9 +2454,11 @@ app.whenReady().then(async () => {
 
   // C3: stdio MCP 服务器会 spawn 本地进程，add/test/update(command|args)
   // 前必须在主窗口原生确认；mcp-manager 未接线时 fail-closed 拒绝。
+  // S9: HTTP MCP 增改同样原生确认（含鉴权头 / 审批策略变更）。
   const { mcpManager } = await import('./mcp/mcp-manager');
-  const { confirmStdioMcpCommand } = await import('./mcp/mcp-confirm');
+  const { confirmStdioMcpCommand, confirmMcpServerChange } = await import('./mcp/mcp-confirm');
   mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(mainWindow, cfg));
+  mcpManager.setServerConfirmer((cfg) => confirmMcpServerChange(mainWindow, cfg));
 
   registerIpcHandlers();
   // v0.9.3: 托盘驻留 —— close 事件同步读取配置，先加载并缓存（未设置视为开启）

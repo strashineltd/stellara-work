@@ -553,7 +553,6 @@ describe('runCommand', () => {
   it('rejects @-form paths and mid-token @ paths (final re-review A1)', async () => {
     for (const cmd of [
       'grep -f @/etc/hosts pattern .',
-      'sed -f @/etc/hosts',
       'make @/etc/hosts',
       'clang @/etc/passwd',
       'clang name@/etc/passwd',
@@ -565,29 +564,33 @@ describe('runCommand', () => {
     }
   });
 
-  (process.platform !== 'win32' ? it : it.skip)('rejects sed in-place writes (-i / --in-place) (P2)', async () => {
+  (process.platform !== 'win32' ? it : it.skip)('rejects sed entirely (S2: GNU e / s///e is RCE)', async () => {
     for (const cmd of [
+      "sed -n '1p' sample.txt",
       "sed -i 's/a/b/' sample.txt",
-      "sed -i.bak 's/a/b/' sample.txt",
-      "sed --in-place 's/a/b/' sample.txt",
-      "sed --in-place=.bak 's/a/b/' sample.txt",
-      "sed --i 's/a/b/' sample.txt",
-      "sed --in-p=.bak 's/a/b/' sample.txt",
-      "sed -ni 's/a/b/p' sample.txt",
-      "sed -Ei 's/a/b/' sample.txt",
+      "sed '1e touch pwned'",
+      "sed 's/a/id/e' sample.txt",
+      'sed -f @/etc/hosts',
+    ]) {
+      const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
+      expect(r.ok, cmd).toBe(false);
+      expect(r.error ?? '', cmd).toMatch(/不在白名单|不允许/);
+    }
+  });
+
+  it('rejects find write/exec primaries (S3)', async () => {
+    await fs.writeFile(path.join(tmpDir, 'sample.txt'), 'x\n');
+    for (const cmd of [
+      'find . -name *.txt -delete',
+      'find . -delete',
+      'find . -name x -fprint out.txt',
+      'find . -name x -fprintf out.txt %p',
+      'find . -name x -fls out.txt',
     ]) {
       const r = await runCommand({ command: cmd, timeoutMs: 1000 }, tmpDir);
       expect(r.ok, cmd).toBe(false);
       expect(r.error ?? '', cmd).toContain('不允许');
-      expect(r.error ?? '', cmd).toContain('覆写');
     }
-  });
-
-  (process.platform !== 'win32' ? it : it.skip)('keeps read-only sed usage allowed (P2)', async () => {
-    await fs.writeFile(path.join(tmpDir, 'sample.txt'), 'hello\nworld\n');
-    const r = await runCommand({ command: "sed -n '1p' sample.txt" }, tmpDir);
-    expect(r.ok).toBe(true);
-    expect(r.output).toContain('hello');
   });
 
   it('rejects git -c/--config-env config injection (final re-review A4)', async () => {
@@ -1133,5 +1136,12 @@ describe('validateAllowedCommandEntry', () => {
 
   it('拒绝工具级禁止的旗标', () => {
     expect(validateAllowedCommandEntry('git --upload-pack=/bin/sh clone x')).toBeTruthy();
+  });
+
+  it('S5：拒绝过宽的 npm run / 裸 install 白名单项', () => {
+    expect(validateAllowedCommandEntry('npm run')).toContain('过宽');
+    expect(validateAllowedCommandEntry('npm install')).toContain('过宽');
+    expect(validateAllowedCommandEntry('npm run build')).toBeNull();
+    expect(validateAllowedCommandEntry('npm test')).toBeNull();
   });
 });

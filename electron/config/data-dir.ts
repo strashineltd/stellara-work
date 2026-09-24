@@ -26,8 +26,11 @@ export function getLegacyDataDir(): string {
 
 /**
  * Copy legacy ~/.stellara data into Electron's standard userData directory.
- * Existing destination files always win, and the legacy directory is kept as
- * a recovery copy instead of being moved or deleted.
+ * Existing destination files always win.
+ *
+ * S12：成功拷贝后清除遗留目录中的密钥文件（.env / config.json.bak），
+ * 避免「已迁移」之后仍在 ~/.stellara 留下明文/密文双份攻击面。
+ * 其余文件（config.json / db）保留作恢复副本，但收紧目录权限。
  */
 export async function migrateLegacyAppData(targetDir: string, legacyDir = LEGACY_DATA_DIR): Promise<string[]> {
   const target = path.resolve(targetDir);
@@ -61,5 +64,38 @@ export async function migrateLegacyAppData(targetDir: string, legacyDir = LEGACY
     }
   }
 
+  // S12：密钥型文件绝不留在遗留目录（即使目标侧因 EEXIST 未再拷贝）
+  for (const fileName of ['.env', 'config.json.bak']) {
+    try {
+      await fs.rm(path.join(legacy, fileName), { force: true });
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    await fs.chmod(legacy, 0o700);
+  } catch {
+    // ignore
+  }
+
   return copied;
+}
+
+/**
+ * 脱敏 config.json.bak 中的明文 apiKey（历史迁移产物）。
+ * 主进程启动时调用；幂等。
+ */
+export async function scrubConfigBackupSecrets(dataDir = getAppDataDir()): Promise<boolean> {
+  const bak = path.join(dataDir, 'config.json.bak');
+  try {
+    const text = await fs.readFile(bak, 'utf-8');
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    if (typeof parsed.apiKey !== 'string' && typeof parsed.password !== 'string') return false;
+    delete parsed.apiKey;
+    delete parsed.password;
+    await fs.writeFile(bak, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -13,6 +13,9 @@
 
 import log from 'electron-log/main';
 import { classifyThrownError } from './error-classifier';
+import { safeFetchLlm } from '../security/pinned-fetch';
+import { checkLlmBaseUrl } from '../security/net-policy';
+import { redactSensitiveText } from '../security/redact';
 import type { ErrorMeta } from '../../shared/ipc';
 
 // ─── 超时常量 ─────────────────────────────────────────
@@ -141,7 +144,12 @@ function anySignal(signals: Array<AbortSignal | undefined>): AbortSignal {
 export class AnthropicClient {
   private abortController: AbortController | null = null;
 
-  constructor(private config: AnthropicConfig) {}
+  constructor(private config: AnthropicConfig) {
+    const check = checkLlmBaseUrl(config.baseUrl);
+    if (!check.ok) {
+      throw new Error(check.error ?? 'baseUrl 不合法');
+    }
+  }
 
   /**
    * 取消当前请求
@@ -237,7 +245,7 @@ export class AnthropicClient {
       if (signal.aborted) throw new Error('请求已取消');
 
       try {
-        const response = await fetch(url, {
+        const response = await safeFetchLlm(url, {
           method: 'POST',
           headers: this.getHeaders(),
           body: JSON.stringify(body),
@@ -328,7 +336,7 @@ export class AnthropicClient {
     body: AnthropicRequest,
     signal: AbortSignal,
   ): AsyncGenerator<AnthropicStreamEvent> {
-    const response = await fetch(url, {
+    const response = await safeFetchLlm(url, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(body),
@@ -408,6 +416,9 @@ export class AnthropicClient {
 
     const kind = this.mapStatusToKind(status);
     let hint = errorBody?.error?.message || '';
+    if (hint) {
+      hint = redactSensitiveText(hint);
+    }
     if (!hint) {
       switch (status) {
         case 401: hint = 'API Key 无效或已过期'; break;

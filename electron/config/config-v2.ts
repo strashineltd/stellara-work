@@ -344,9 +344,10 @@ export async function migrateFromV1(): Promise<boolean> {
   }
   // 旧版特征：顶层有 apiKey 字符串
   if (typeof old.apiKey !== 'string') return false;
-  // 备份
+  // S12：备份前剥离 apiKey，避免迁移后在 config.json.bak 留下明文密钥副本
   try {
-    await fs.copyFile(configPath(), backupPath());
+    const { apiKey: _secret, ...redacted } = old;
+    await fs.writeFile(backupPath(), JSON.stringify(redacted, null, 2), { mode: 0o600 });
   } catch {
     // ignore
   }

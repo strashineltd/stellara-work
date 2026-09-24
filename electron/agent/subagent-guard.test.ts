@@ -51,9 +51,10 @@ describe('createSubagentToolGuard', () => {
     expect(guard('write_file', { path: 'docs/a.md', content: 'x' })).toContain('fileScopes');
   });
 
-  it('run_command 缺省 cwd 放行，scope 外 cwd 拒绝', () => {
+  it('run_command 的 cwd 必须落在 fileScopes 内（含省略 cwd，S6）', () => {
     const guard = createSubagentToolGuard({ readOnly: false, cwd: CWD, fileScopes: ['src/**'] });
-    expect(guard('run_command', { command: 'npm test' })).toBeNull();
+    // 省略 cwd = 工作目录根，不在 src/** 内 → 必须拒绝
+    expect(guard('run_command', { command: 'npm test' })).toContain('fileScopes');
     expect(guard('run_command', { command: 'npm test', cwd: 'src' })).toBeNull();
     expect(guard('run_command', { command: 'npm test', cwd: '../outside' })).toContain('fileScopes');
     expect(guard('run_command', { command: 'npm test', cwd: '/etc' })).toContain('fileScopes');

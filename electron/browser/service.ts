@@ -342,7 +342,8 @@ export class BrowserService {
   ): Promise<boolean> {
     if (!shouldApprove(toolName, isNewDomain)) return true;
     const fn = this.opts.requestApproval;
-    if (!fn) return true;
+    // S13：未接线审批回调时 fail-closed，禁止静默放行新域导航
+    if (!fn) return false;
     const summary = buildApprovalSummary(toolName, args);
     return fn({ toolName, args, summary, sessionId });
   }

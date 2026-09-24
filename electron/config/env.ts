@@ -15,7 +15,7 @@ const loadedKeys = new Set<string>();
  * （CLOUD 后是 B 而非下划线），它是官方定位可暴露的 Publishable Key，
  * 且 cloudbase-client 依赖从 process.env 读取，故不受影响。
  */
-const SECRET_ENV_PREFIXES = ['STELLARA_KEY_', 'STELLARA_SERVER_', 'STELLARA_CLOUD_'];
+const SECRET_ENV_PREFIXES = ['STELLARA_KEY_', 'STELLARA_SERVER_', 'STELLARA_CLOUD_', 'STELLARA_MCP_'];
 
 /** 明显的密钥型键名模式 */
 const SECRET_ENV_PATTERNS = [

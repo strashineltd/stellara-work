@@ -133,9 +133,10 @@ describe('config-v2', () => {
     expect((cfg.models[0] as unknown as Record<string, unknown>).apiKey).toBeUndefined();
     // .env 应该有 key
     expect(getKey('deepseek-v4-pro')).toBe('sk-old-key');
-    // 旧文件备份
+    // S12：备份必须脱敏，不得残留明文 apiKey
     const backup = await fs.readFile(path.join(tmpDir, 'config.json.bak'), 'utf-8');
-    expect(backup).toContain('sk-old-key');
+    expect(backup).not.toContain('sk-old-key');
+    expect(backup).toContain('deepseek-v4-pro');
   });
 
   it('migrateFromV1 marks GLM as incompatible', async () => {

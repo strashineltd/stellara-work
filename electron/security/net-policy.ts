@@ -277,13 +277,12 @@ function embeddedIpv4(host: string): string | null {
 
 /**
  * 针对 MCP HTTP 服务器 URL 的安全校验：
- * 允许访问公网及本地开发服务（localhost/127.0.0.1 等），
- * 但严格拦截云元数据服务（169.254.169.254 / metadata.google.internal 等）。
+ * - 拦截云元数据服务（169.254.169.254 / metadata.google.internal 等）
+ * - S9：非回环必须 https（自定义 Authorization 头不得明文外发）
+ * - 允许回环 http（本地开发 MCP）与局域网 https
  *
  * 注意：`[::ffff:169.254.169.254]` 会被 URL 规范化为 `::ffff:a9fe:a9fe`，
  * 纯字符串比较可被绕过，故对 IP 字面量再判定内嵌 IPv4 是否链路本地。
- * 按产品要求 MCP 允许 hostname 解析到私网/局域网（本地开发），因此
- * 域名 rebinding 到链路本地属于已接受的限制，此处不做 DNS 解析。
  */
 export function checkMcpHttpUrl(raw: string): { ok: boolean; error?: string } {
   let parsed: URL;
@@ -305,6 +304,44 @@ export function checkMcpHttpUrl(raw: string): { ok: boolean; error?: string } {
     host === 'instance-data'
   ) {
     return { ok: false, error: `不允许访问受限的云元数据地址: ${host}` };
+  }
+  // S9：非回环禁止明文 http（鉴权头 / 工具结果不得 LAN 明文传输）
+  if (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname)) {
+    return { ok: false, error: '非本机回环地址必须使用 https（避免鉴权头明文外发）' };
+  }
+  return { ok: true };
+}
+
+/** 本机回环主机（允许 http 的 LLM/MCP 端点，如 Ollama） */
+export function isLoopbackHostname(hostname: string): boolean {
+  const host = normalizeHostname(hostname);
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '::1') return true;
+  const v4 = embeddedIpv4(host) ?? (isIPv4(host) ? host : null);
+  if (v4 && v4.startsWith('127.')) return true;
+  return false;
+}
+
+/**
+ * LLM 自定义 baseUrl 校验（S10）：
+ * - 仅 http/https
+ * - 非回环必须 https（API Key 不得明文外发）
+ * - 拒绝云元数据 / 链路本地（含 IPv6 映射）
+ */
+export function checkLlmBaseUrl(raw: string): { ok: boolean; error?: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL((raw ?? '').trim());
+  } catch {
+    return { ok: false, error: `无效的 baseUrl: ${raw}` };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, error: `不支持的协议: ${parsed.protocol}（只允许 http/https）` };
+  }
+  const meta = checkMcpHttpUrl(parsed.href);
+  if (!meta.ok) return meta;
+  if (parsed.protocol === 'http:' && !isLoopbackHostname(parsed.hostname)) {
+    return { ok: false, error: '非本机回环地址必须使用 https（避免 API Key 明文外发）' };
   }
   return { ok: true };
 }

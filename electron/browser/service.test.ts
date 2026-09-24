@@ -171,7 +171,7 @@ describe('SSRF chain in browser path (validateUrl)', () => {
     expect(r.error).toContain('受限');
   });
 
-  it('will-navigate synchronously blocks clear-cut bad schemes and asynchronously stops SSRF targets', async () => {
+  it('will-navigate synchronously blocks bad schemes and private IP literals (S13)', async () => {
     const pool = new TabPool();
     const { wc, handlers } = makeWebContents();
     const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
@@ -184,14 +184,14 @@ describe('SSRF chain in browser path (validateUrl)', () => {
     handler(ev1, 'javascript:alert(1)');
     expect(ev1.preventDefault).toHaveBeenCalled();
 
+    // S13：私网字面量同步拦截，无需异步 DNS
     const ev2 = { preventDefault: vi.fn() };
     handler(ev2, 'http://10.0.0.1/');
-    await flush();
-    expect(ev2.preventDefault).not.toHaveBeenCalled();
-    expect(wc.stop).toHaveBeenCalled();
+    expect(ev2.preventDefault).toHaveBeenCalled();
+    expect(wc.stop).not.toHaveBeenCalled();
   });
 
-  it('will-redirect / did-redirect-navigation stop SSRF targets', async () => {
+  it('will-redirect / did-redirect-navigation stop or block SSRF targets', async () => {
     const pool = new TabPool();
     const { wc, handlers } = makeWebContents();
     const svc = new BrowserService(pool, { createWindow: () => makeWindow(wc) });
@@ -199,9 +199,11 @@ describe('SSRF chain in browser path (validateUrl)', () => {
     const tabId = await createTab(svc, 's', 'https://a.com/');
     await svc.get('s').snapshot({ tabId });
     const willRedirect = handlers.get('will-redirect')!;
-    willRedirect({ preventDefault: vi.fn() }, 'http://169.254.169.254/latest/meta-data');
+    const evMeta = { preventDefault: vi.fn() };
+    willRedirect(evMeta, 'http://169.254.169.254/latest/meta-data');
+    // S13：元数据字面量同步 preventDefault
+    expect(evMeta.preventDefault).toHaveBeenCalled();
     await flush();
-    expect(wc.stop).toHaveBeenCalled();
     const didRedirect = handlers.get('did-redirect-navigation')!;
     didRedirect({ preventDefault: vi.fn() }, 'http://127.0.0.1/');
     await flush();

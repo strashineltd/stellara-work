@@ -41,6 +41,24 @@ describe('redactSensitiveText (M5)', () => {
     expect(out).toContain('done');
   });
 
+  it('S19 redacts vendor tokens and JSON secret properties', () => {
+    const out = redactSensitiveText(
+      '{"apiKey":"tvly-abcdefgh123456","password":"hunter2"} ghp_ABCDEFGHIJKLMNOPQRST ghp_ and AIzaSyA-examplekey12345',
+    );
+    expect(out).not.toContain('tvly-abcdefgh123456');
+    expect(out).not.toContain('hunter2');
+    expect(out).not.toContain('ghp_ABCDEFGHIJKLMNOPQRST');
+    expect(out).not.toContain('AIzaSyA-examplekey12345');
+    expect(out).toContain('<redacted>');
+  });
+
+  it('S19 redacts STELLARA_MCP_ assignments and camelCase apiKey:', () => {
+    const out = redactSensitiveText('STELLARA_MCP_h1={"Authorization":"Bearer xyz"} apiKey: sk-live-99999999');
+    expect(out).not.toContain('Bearer xyz');
+    expect(out).not.toContain('sk-live-99999999');
+    expect(out).toContain('STELLARA_MCP_h1=<redacted>');
+  });
+
   it('keeps ordinary log lines intact and useful', () => {
     const line = '2026-09-13 10:00:00 [info] window ready in 123ms';
     expect(redactSensitiveText(line)).toBe(line);

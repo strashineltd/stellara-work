@@ -15,6 +15,9 @@
 import log from 'electron-log/main';
 import { buildResponsesUrl } from '../../shared/responses';
 import { classifyThrownError } from './error-classifier';
+import { safeFetchLlm } from '../security/pinned-fetch';
+import { checkLlmBaseUrl } from '../security/net-policy';
+import { redactSensitiveText } from '../security/redact';
 import type { ErrorMeta } from '../../shared/ipc';
 import type {
   CreateResponseRequest,
@@ -72,7 +75,13 @@ export interface ResponsesClientConfig {
 export class ResponsesClient {
   private abortController: AbortController | null = null;
 
-  constructor(private config: ResponsesClientConfig) {}
+  constructor(private config: ResponsesClientConfig) {
+    // S10：配置期拒绝元数据 / 非回环明文 http，防止 API Key 被引到内网或元数据服务
+    const check = checkLlmBaseUrl(config.baseUrl);
+    if (!check.ok) {
+      throw new Error(check.error ?? 'baseUrl 不合法');
+    }
+  }
 
   /**
    * 取消当前请求
@@ -153,7 +162,7 @@ export class ResponsesClient {
       }
 
       try {
-        const response = await fetch(url, {
+        const response = await safeFetchLlm(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -246,7 +255,7 @@ export class ResponsesClient {
     body: CreateResponseRequest,
     signal: AbortSignal,
   ): AsyncGenerator<ResponseStreamEvent> {
-    const response = await fetch(url, {
+    const response = await safeFetchLlm(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -332,8 +341,11 @@ export class ResponsesClient {
     // 映射 HTTP 状态码
     const kind = this.mapStatusToKind(status);
 
-    // 根据状态码和错误体生成 hint
+    // 根据状态码和错误体生成 hint（S19：供应商错误可能回显 key，先脱敏）
     let hint = errorBody?.error?.message || '';
+    if (hint) {
+      hint = redactSensitiveText(hint);
+    }
     if (!hint) {
       switch (status) {
         case 401: hint = 'API Key 无效或已过期'; break;

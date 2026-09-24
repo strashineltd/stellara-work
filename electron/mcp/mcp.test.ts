@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type { BrowserWindow } from 'electron';
 import { _setConfigDir, saveConfig } from '../config/config-v2';
+import { _setSecretsDir, getMcpAuthHeaders, setMcpAuthHeaders } from '../config/secrets';
 import type { McpServerConfig, McpToolInfo } from '../../shared/ipc';
 import { connectMcpServer, callMcpTool } from './mcp-client';
 import { McpManager, mcpManager } from './mcp-manager';
@@ -58,6 +59,17 @@ const httpCfg: McpServerConfig = {
   url: 'http://localhost:3000/mcp',
   headers: { Authorization: 'Bearer xyz' },
   enabled: true,
+};
+
+/** S8：listServers 永不回传 headers 明文，只给 hasAuth / headerNames */
+const httpCfgListed: McpServerConfig = {
+  id: 'h1',
+  name: 'Remote',
+  transport: 'http',
+  url: 'http://localhost:3000/mcp',
+  enabled: true,
+  hasAuth: true,
+  headerNames: ['Authorization'],
 };
 
 const fakeWindow = {} as BrowserWindow;
@@ -217,16 +229,20 @@ describe('McpManager', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stellara-mcp-'));
     _setConfigDir(tmpDir);
+    _setSecretsDir(tmpDir);
     mcpManager.invalidateCache();
     setupClientMocks();
     mockShowMessageBox.mockReset();
     mockShowMessageBox.mockResolvedValue({ response: 1 });
     mcpManager.setStdioCommandConfirmer((cfg) => confirmStdioMcpCommand(fakeWindow, cfg));
+    // S9：HTTP 增改也走原生确认；测试默认放行（部分用例单独 mock 拒绝）
+    mcpManager.setServerConfirmer(async () => true);
   });
 
   afterEach(async () => {
     mcpManager.invalidateCache();
     _setConfigDir(null);
+    _setSecretsDir(null);
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -234,9 +250,12 @@ describe('McpManager', () => {
     await saveConfig({ activeModelId: null, models: [], app: {}, mcpServers: servers, schemaVersion: 1 });
   }
 
-  it('listServers reads from config', async () => {
+  it('listServers strips header secrets and exposes only hasAuth/headerNames (S8)', async () => {
     await seed(stdioCfg, httpCfg);
-    expect(await mcpManager.listServers()).toEqual([stdioCfg, httpCfg]);
+    const listed = await mcpManager.listServers();
+    expect(listed).toEqual([stdioCfg, httpCfgListed]);
+    expect(JSON.stringify(listed)).not.toContain('Bearer xyz');
+    expect(getMcpAuthHeaders('h1')).toEqual({ Authorization: 'Bearer xyz' });
   });
 
   describe('addServer validation', () => {
@@ -248,6 +267,8 @@ describe('McpManager', () => {
     it('adds a valid http server', async () => {
       await mcpManager.addServer(httpCfg);
       expect((await mcpManager.listServers()).map((s) => s.transport)).toEqual(['http']);
+      // S8：headers 明文不进 list / config
+      expect((await mcpManager.listServers())[0]?.headers).toBeUndefined();
     });
 
     it('rejects duplicate id', async () => {
@@ -613,11 +634,17 @@ describe('McpManager', () => {
       expect(mockShowMessageBox).not.toHaveBeenCalled();
     });
 
-    it('addServer http is unaffected: no dialog, persists directly', async () => {
+    it('addServer http: no stdio dialog; S9 server confirmer still required', async () => {
       mockShowMessageBox.mockResolvedValue({ response: 0 });
       await mcpManager.addServer(httpCfg);
       expect(mockShowMessageBox).not.toHaveBeenCalled();
-      expect(await mcpManager.listServers()).toEqual([httpCfg]);
+      expect(await mcpManager.listServers()).toEqual([httpCfgListed]);
+    });
+
+    it('S9: HTTP add fails closed when server confirmer rejects', async () => {
+      mcpManager.setServerConfirmer(async () => false);
+      await expect(mcpManager.addServer(httpCfg)).rejects.toThrow('已取消');
+      expect(await mcpManager.listServers()).toEqual([]);
     });
 
     it('testConnection canceled: returns cancel error and spawns nothing', async () => {
@@ -687,7 +714,7 @@ describe('McpManager', () => {
       await seed({ ...httpCfg, command: 'evil' });
       mockShowMessageBox.mockResolvedValue({ response: 0 });
       await expect(mcpManager.updateServer('h1', { transport: 'stdio' })).rejects.toThrow('已取消：未确认 MCP 命令');
-      expect((await mcpManager.listServers())[0]).toEqual({ ...httpCfg, command: 'evil' });
+      expect((await mcpManager.listServers())[0]).toEqual({ ...httpCfgListed, command: 'evil' });
       expect(mockStdioTransport).not.toHaveBeenCalled();
       expect(mockClient).not.toHaveBeenCalled();
     });

@@ -5,6 +5,7 @@ import os from 'node:os';
 import {
   getKey, setKey, deleteKey, listKeys, migrateLegacyKeys,
   getServerPassword, setServerPassword, getCloudSecret, setCloudSecret,
+  setMcpAuthHeaders, getMcpAuthHeaders, deleteMcpAuthHeaders,
   _setSecretsDir, _setCipher, isEncryptionEnabled, type KeyCipher,
 } from './secrets';
 
@@ -92,6 +93,14 @@ describe('secrets', () => {
     await setCloudSecret('ACCESS_TOKEN', 'tok\nen');
     expect(getServerPassword('srv-1')).toBe('p"w\\d #1');
     expect(getCloudSecret('ACCESS_TOKEN')).toBe('tok\nen');
+  });
+
+  it('MCP auth headers round-trip and are not listed as model keys (S8)', async () => {
+    await setMcpAuthHeaders('h1', { Authorization: 'Bearer xyz' });
+    expect(getMcpAuthHeaders('h1')).toEqual({ Authorization: 'Bearer xyz' });
+    expect((await listKeys())['h1']).toBeUndefined();
+    await deleteMcpAuthHeaders('h1');
+    expect(getMcpAuthHeaders('h1')).toBeNull();
   });
 
   it('reads legacy quoted values with escaped quotes (M1)', async () => {

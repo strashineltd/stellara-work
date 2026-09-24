@@ -21,6 +21,7 @@ import { ContextHub, type PlanStep } from '../context/context-hub';
 import { SubagentCoordinator, type SubagentContextPacket } from './subagent-coordinator';
 import { setSubagentRunner } from './tools/dispatch-subagents';
 import { clampApprovalTimeout } from '../chat/approval-timing';
+import { requiresNativeConfirm } from '../chat/tool-confirm';
 import { runResponsesLoop } from './responses-loop';
 import { runAnthropicAgentLoop } from './anthropic-loop';
 
@@ -33,6 +34,12 @@ export interface SessionRunnerDeps {
     focus: () => void,
   ) => void;
   unregisterBrowserStream: (sessionId: string, streamId: string) => void;
+  /**
+   * S4：危险工具的主进程原生确认。缺省时回退渲染层审批（兼容测试）。
+   * 提供后 write_file/edit_file/run_command/browser_exec_js/dispatch_subagents
+   * 以原生手势为准，渲染层无法自批。
+   */
+  confirmDangerousTool?: (toolName: string, args: string) => Promise<boolean>;
   runSubagent: (
     definition: SubagentDef,
     packet: SubagentContextPacket,
@@ -130,6 +137,14 @@ export async function runAgentSession(
         expiresAt: Date.now() + timeoutMs,
       },
     });
+    // S4：高危工具先走原生确认（不可被 renderer 代点）。原生通过后再放行；
+    // 原生拒绝时同步 settle 渲染层待决审批，避免 UI 卡住。
+    const toolName = toolCall.function.name;
+    if (deps.confirmDangerousTool && requiresNativeConfirm(toolName)) {
+      const nativeOk = await deps.confirmDangerousTool(toolName, toolCall.function.arguments);
+      deps.chatStreams.respond(approvalId, nativeOk);
+      return nativeOk;
+    }
     return deps.chatStreams.requestApproval(streamId, approvalId, timeoutMs);
   };
   const onPlanApproval = async (plan: { objective: string; constraints: string[]; steps: PlanStep[] }): Promise<boolean> => {

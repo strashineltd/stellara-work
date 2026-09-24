@@ -51,6 +51,18 @@ describe('validateTaskPolicy', () => {
     ).toContain('不合法');
   });
 
+  it('S5：拒绝过宽的 npm run / 裸 install 白名单项', () => {
+    expect(
+      validateTaskPolicy({ allowedTools: ['run_command'], fileScopes: [], allowedCommands: ['npm run'] }),
+    ).toContain('过宽');
+    expect(
+      validateTaskPolicy({ allowedTools: ['run_command'], fileScopes: [], allowedCommands: ['npm install'] }),
+    ).toContain('过宽');
+    expect(
+      validateTaskPolicy({ allowedTools: ['run_command'], fileScopes: [], allowedCommands: ['npm run build'] }),
+    ).toBeNull();
+  });
+
   it('空策略合法', () => {
     expect(validateTaskPolicy(undefined)).toBeNull();
     expect(validateTaskPolicy({ allowedTools: [], fileScopes: [], allowedCommands: [] })).toBeNull();
@@ -60,16 +72,23 @@ describe('validateTaskPolicy', () => {
 describe('matchesCommandAllowlist', () => {
   const ALLOW = ['npm test', 'git status'];
 
-  it('token 边界前缀命中', () => {
+  it('前缀 + 仅旗标/`--` 后参数命中', () => {
     expect(matchesCommandAllowlist('npm test', ALLOW)).toBe(true);
     expect(matchesCommandAllowlist('npm test -- --runInBand', ALLOW)).toBe(true);
     expect(matchesCommandAllowlist('git status --short', ALLOW)).toBe(true);
+    expect(matchesCommandAllowlist('npm test --silent', ALLOW)).toBe(true);
   });
 
   it('同前缀不同 token 不命中', () => {
     expect(matchesCommandAllowlist('npm testing', ALLOW)).toBe(false);
     expect(matchesCommandAllowlist('echo npm test', ALLOW)).toBe(false);
     expect(matchesCommandAllowlist('gits status', ALLOW)).toBe(false);
+  });
+
+  it('S5：前缀后出现位置参数不命中（防 npm run 前缀放行任意脚本）', () => {
+    expect(matchesCommandAllowlist('npm test extra-positional', ALLOW)).toBe(false);
+    expect(matchesCommandAllowlist('npm run evil', ['npm run'])).toBe(false);
+    expect(matchesCommandAllowlist('npm run build --watch', ['npm run build'])).toBe(true);
   });
 
   it('空白名单/空命令不命中', () => {
@@ -153,15 +172,22 @@ describe('buildScheduledPolicyRuntime', () => {
   });
 
   it('guard：白名单外命令拒绝、白名单内放行', async () => {
-    expect(await runtimeFor().toolGuard('run_command', { command: 'npm test -- --runInBand' })).toBeNull();
-    expect(await runtimeFor().toolGuard('run_command', { command: 'npm install' })).toContain('命令不在任务白名单内');
+    expect(await runtimeFor().toolGuard('run_command', { command: 'npm test -- --runInBand', cwd: 'src' })).toBeNull();
+    expect(await runtimeFor().toolGuard('run_command', { command: 'npm install', cwd: 'src' })).toContain('命令不在任务白名单内');
+    expect(await runtimeFor().toolGuard('run_command', { command: 'npm test extra-positional', cwd: 'src' })).toContain('命令不在任务白名单内');
   });
 
-  it('guard：显式 cwd 必须落于声明范围；未提供时在工作目录根执行', async () => {
+  it('guard：显式 cwd 必须落于声明范围；S6 省略 cwd 不得跳过 fileScopes', async () => {
     expect(await runtimeFor().toolGuard('run_command', { command: 'npm test', cwd: 'src' })).toBeNull();
     expect(await runtimeFor().toolGuard('run_command', { command: 'npm test', cwd: '.' })).toContain('cwd');
     expect(await runtimeFor().toolGuard('run_command', { command: 'npm test', cwd: '../' })).toContain('cwd');
-    expect(await runtimeFor().toolGuard('run_command', { command: 'npm test' })).toBeNull();
+    // 省略 cwd = 工作目录根，不在 src/** 内 → 必须拒绝
+    expect(await runtimeFor().toolGuard('run_command', { command: 'npm test' })).toContain('可写范围');
+  });
+
+  it('guard：无 fileScopes 时省略 cwd 可放行', async () => {
+    const runtime = runtimeFor({ fileScopes: [], allowedTools: ['run_command'] });
+    expect(await runtime.toolGuard('run_command', { command: 'npm test' })).toBeNull();
   });
 
   it('guard：MCP / 浏览器 / 子代理工具在调度中显式拒绝', async () => {

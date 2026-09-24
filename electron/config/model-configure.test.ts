@@ -161,6 +161,19 @@ describe('configureModel', () => {
     expect(mockSetKey).not.toHaveBeenCalled();
   });
 
+  it('rejects unsafe baseUrl before testing or saving (S10)', async () => {
+    mockTestConnection.mockResolvedValue({ ok: true });
+    const meta = await configureModel(cfg({ baseUrl: 'http://169.254.169.254/', apiKey: 'sk-new' }));
+    expect(meta.ok).toBe(false);
+    expect(meta.error).toMatch(/元数据|https|协议/);
+    const cleartext = await configureModel(cfg({ baseUrl: 'http://192.168.1.10/v1', apiKey: 'sk-new' }));
+    expect(cleartext.ok).toBe(false);
+    expect(cleartext.error).toContain('https');
+    expect(mockTestConnection).not.toHaveBeenCalled();
+    expect(mockUpsertModel).not.toHaveBeenCalled();
+    expect(mockSetKey).not.toHaveBeenCalled();
+  });
+
   it('accepts a workDir granted by the native picker', async () => {
     await grantWorkDir(GRANTED_DIR);
     mockTestConnection.mockResolvedValue({ ok: true });

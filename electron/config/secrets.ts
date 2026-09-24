@@ -280,6 +280,55 @@ function serverKeyName(serverId: string): string {
   return SERVER_PREFIX + serverId;
 }
 
+const MCP_PREFIX = 'STELLARA_MCP_';
+
+function mcpAuthKeyName(serverId: string): string {
+  return MCP_PREFIX + serverId;
+}
+
+/**
+ * MCP HTTP 自定义请求头（通常含 Authorization）—— S8：
+ * 与模型 Key / 服务器密码同一密钥库，绝不进 config.json、绝不经 IPC 回传明文。
+ * 以 JSON 对象整体加密存储。
+ */
+export async function setMcpAuthHeaders(serverId: string, headers: Record<string, string>): Promise<void> {
+  assertValidSuffix('MCP 服务器 ID', serverId);
+  const map = await readEnv();
+  const cleaned: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers ?? {})) {
+    if (typeof k === 'string' && typeof v === 'string' && k.trim()) cleaned[k] = v;
+  }
+  if (Object.keys(cleaned).length === 0) {
+    map.delete(mcpAuthKeyName(serverId));
+  } else {
+    map.set(mcpAuthKeyName(serverId), encodeStored(JSON.stringify(cleaned)));
+  }
+  await writeEnv(map);
+}
+
+/** ⚠️ 返回 **裸请求头** —— 仅供主进程建连使用，绝不要通过 IPC 传给 renderer。 */
+export function getMcpAuthHeaders(serverId: string): Record<string, string> | null {
+  const raw = readStoredSync(mcpAuthKeyName(serverId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'string') out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteMcpAuthHeaders(serverId: string): Promise<void> {
+  const map = await readEnv();
+  map.delete(mcpAuthKeyName(serverId));
+  await writeEnv(map);
+}
+
 export async function setServerPassword(serverId: string, password: string): Promise<void> {
   assertValidSuffix('服务器 ID', serverId);
   const map = await readEnv();

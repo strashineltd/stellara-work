@@ -8,6 +8,14 @@ import type {
 } from '../../shared/responses';
 import type { ModelConfig } from '../../shared/ipc';
 
+// S10：客户端经 safeFetchLlm 发请求；测试仍 stub 全局 fetch，这里桥接过去
+vi.mock('../security/pinned-fetch', () => ({
+  safeFetchLlm: (input: string, init?: RequestInit) => fetch(input, init),
+  safeFetch: (input: string, init?: RequestInit) => fetch(input, init),
+  closePinnedAgent: async () => {},
+  describeFetchError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+}));
+
 const DEFAULT_CONFIG: ModelConfig = {
   id: 'test-model',
   label: 'Test Model',
